@@ -15,3 +15,17 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  frontend:
+    build:
+      context: ../demo-frontend
+      args:
+        # URL usato dal browser, non dalla rete interna di compose: il nome di
+        # servizio "master-agent" non e' risolvibile da fuori dai container.
+        # NEXT_PUBLIC_* si incorpora in build, per questo e' un arg e non un env.
+        NEXT_PUBLIC_AGUI_URL: http://localhost:8000/agui
+    ports:
+      - "3000:3000"
+    depends_on:
+      master-agent:
+        condition: service_healthy
