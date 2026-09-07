@@ -22,6 +22,8 @@
 - Dopo ogni `TOOL_CALL_RESULT` prodotto da `state_update`, l'endpoint emette uno `STATE_SNAPSHOT` deterministico. Senza chiamate a tool non arriva alcun evento di stato: con il fake client base il pannello stato resta legittimamente vuoto.
 - **Ogni tool call è avvolta da una coppia `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` senza `TEXT_MESSAGE_CONTENT` in mezzo.** Verificato sul filo. Il reducer deve scartare i messaggi rimasti vuoti alla chiusura, altrimenti la chat mostra una bolla vuota per ogni chiamata a tool.
 - Lo `state` passato a `state_update` è fuso con semantica `dict.update`: le chiavi di primo livello vengono **sostituite**, non fuse in profondità. Due tool che scrivono la stessa chiave si sovrascrivono a vicenda. Rilevante dalla tappa 2 in poi.
+- `add_agent_framework_fastapi_endpoint(..., allow_origins=[...])` **accetta il parametro e lo ignora**: in 1.2.2 la sua docstring dice *"allow_origins: CORS origins (not yet implemented)"*. Il CORS va aggiunto a mano con `CORSMiddleware`, altrimenti il browser blocca il frontend senza che nessun test lato server se ne accorga.
+- Il progetto ha un `[build-system]` hatchling con `packages = ["src/demo"]`: senza, `pythonpath` in pytest basta ai test ma `python -m demo` e l'immagine docker non trovano il pacchetto.
 - `Message` **non accetta** `text=` in 1.17: `Message(role=..., text="x")` solleva `TypeError: unexpected keyword argument 'text'`. Si costruisce con `Message(role=..., contents=[Content.from_text("x")])`. L'attributo `.text` esiste in lettura, non in scrittura.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
@@ -633,15 +635,46 @@ async def test_tool_call_emits_result_then_state_snapshot(tool_app):
 
 
 @pytest.mark.asyncio
-async def test_tool_call_produces_no_empty_message(tool_app):
-    """La coppia START/END che avvolge la tool call non deve diventare un messaggio."""
+async def test_tool_snapshot_preserves_calls_and_nonempty_text(tool_app):
+    """Lo snapshot conserva toolCalls senza testo e la risposta finale non vuota.
+
+    La voce assistant con sole toolCalls e' parte del protocollo AG-UI: non va
+    pretesa non vuota. Cio' che non deve esistere e' un messaggio di solo testo
+    vuoto, che il reducer renderizzerebbe come bolla fantasma.
+    """
     events = await collect_events(tool_app)
 
     snapshot = next(e for e in events if e["type"] == "MESSAGES_SNAPSHOT")
     assistant = [m for m in snapshot["messages"] if m.get("role") == "assistant"]
-    assert all(m.get("content") for m in assistant), (
-        "un messaggio assistant vuoto significa che la chat mostrerebbe una bolla vuota"
-    )
+    assert all(m.get("content") or m.get("toolCalls") for m in assistant)
+
+    text_messages = [m for m in assistant if not m.get("toolCalls")]
+    assert [m["content"] for m in text_messages] == ["Ecco il confronto."]
+
+    calls = [call for m in assistant for call in m.get("toolCalls", [])]
+    result = next(e for e in events if e["type"] == "TOOL_CALL_RESULT")
+    assert [(call["id"], call["function"]["name"]) for call in calls] == [
+        (result["toolCallId"], "ui_table")
+    ]
+    assert events[-1]["type"] == "RUN_FINISHED"
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight_allows_dev_frontend(app):
+    """Il preflight del dev server Next.js deve passare."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.options(
+            "/agui",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
 ```
 
 - [ ] **Step 3: Eseguire i test e verificare che falliscano**
@@ -706,6 +739,7 @@ from __future__ import annotations
 from agent_framework import Agent
 from agent_framework.ag_ui import add_agent_framework_fastapi_endpoint
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from ..agents.master import build_master_agent
 
@@ -719,6 +753,14 @@ DEFAULT_STATE = {"artifacts": []}
 def create_app(agent: Agent | None = None) -> FastAPI:
     """Costruisce l'app. `agent` va passato nei test per iniettare il fake client."""
     app = FastAPI(title="Laboratorio AG-UI")
+    # In agent-framework-ag-ui 1.2.2 allow_origins e' accettato ma ignorato:
+    # il CORS va montato a mano, altrimenti il browser blocca il frontend.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_methods=["POST"],
+        allow_headers=["Content-Type"],
+    )
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -732,6 +774,18 @@ def create_app(agent: Agent | None = None) -> FastAPI:
         default_state=DEFAULT_STATE,
     )
     return app
+```
+
+Aggiungere in coda a `demo-master-agent/pyproject.toml` — senza questo il
+pacchetto non e' installabile e `python -m demo` fallisce dentro il container:
+
+```toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/demo"]
 ```
 
 `demo-master-agent/src/demo/__main__.py`:
@@ -749,7 +803,7 @@ if __name__ == "__main__":
 - [ ] **Step 6: Eseguire i test e verificare che passino**
 
 Run: `uv run pytest tests/ -v`
-Expected: PASS (tutti — 6 nuovi in `test_agui_stream.py`)
+Expected: PASS (tutti — 7 nuovi in `test_agui_stream.py`, 15 in totale)
 
 - [ ] **Step 7: Verifica manuale contro il server reale**
 
