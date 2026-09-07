@@ -21,6 +21,7 @@ Alla fine incolla l'output reale dei comandi di test, non un riassunto.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
 - Struttura **multi-repo**: `demo-master-agent`, `demo-frontend`, `demo-infra` sono repo git distinti e fratelli dentro `C:\project\demo` (in WSL: `/mnt/c/project/demo`). Ogni task committa nel proprio repo. Non esiste un repo che li contiene tutti.
+- I container si costruiscono e si verificano su Windows con Docker Desktop; da WSL il daemon puo' non essere raggiungibile. Chi esegue un task docker deve riportare l'output reale di `docker compose ps` e del `curl`.
 - Ogni repo deployabile ha il suo `Dockerfile`; `demo-infra/compose.yaml` li costruisce da percorsi fratelli. In sviluppo si gira nativi, i container servono alla verifica d'insieme.
 
 ---
@@ -70,7 +71,9 @@ RUN uv sync --frozen --no-dev
 EXPOSE 8000
 
 # host 0.0.0.0: dentro un container 127.0.0.1 non e' raggiungibile da fuori.
-CMD ["uv", "run", "uvicorn", "demo.server.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# --no-sync usa l'ambiente costruito sopra: senza, uv run risincronizza all'avvio
+# e reinstallerebbe anche il gruppo dev, richiedendo rete a runtime.
+CMD ["uv", "run", "--no-sync", "uvicorn", "demo.server.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 - [ ] **Step 3: Costruire l'immagine e verificare che l'app risponda**
@@ -133,6 +136,11 @@ docker compose down
 ```
 
 Expected: `master-agent` in stato `running (healthy)`, e `{"status":"ok"}` dal curl.
+
+Nota: con `DEMO_FAKE_CLIENT=true` il container usa `FakeStreamingChatClient`, che
+**non** eredita da `FunctionInvocationLayer`: all'avvio compare *"The provided chat
+client does not support function invoking"* e `ui_table` non verra' mai chiamato.
+E' atteso. La catena dei tool si verifica con i test (`tool_app`) o con un LLM vero.
 
 - [ ] **Step 7: Commit nei due repo**
 
