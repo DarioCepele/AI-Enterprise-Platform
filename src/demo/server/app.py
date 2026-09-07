@@ -1,6 +1,9 @@
 """App FastAPI: espone il master agent via AG-UI su SSE, piu' i log operativi."""
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from agent_framework import Agent
 from agent_framework.ag_ui import add_agent_framework_fastapi_endpoint
 from fastapi import FastAPI
@@ -21,9 +24,21 @@ def create_app(
     collector: LogCollector | None = None,
 ) -> FastAPI:
     """Costruisce l'app. `agent` e `collector` vanno passati nei test."""
-    app = FastAPI(title="Laboratorio AG-UI")
     log_collector = collector if collector is not None else LogCollector()
     log_collector.attach()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # attach() e' gia' avvenuto sopra, a costruzione dell'app: qui serve
+        # solo il detach allo shutdown, altrimenti l'handler resta agganciato
+        # a logging.getLogger("demo") -- un singleton di processo -- per
+        # sempre, uno in piu' ad ogni create_app().
+        try:
+            yield
+        finally:
+            log_collector.detach()
+
+    app = FastAPI(title="Laboratorio AG-UI", lifespan=lifespan)
 
     # Le origini non sono hardcoded: il dev server di Next slitta di porta se la
     # 3000 e' occupata, e un'origine sbagliata fallisce solo nel browser.
