@@ -17,20 +17,21 @@ Alla fine incolla l'output reale dei comandi di test, non un riassunto.
 - Lo `state` passato a `state_update` è fuso con semantica `dict.update`: le chiavi di primo livello vengono **sostituite**, non fuse in profondità. Due tool che scrivono la stessa chiave si sovrascrivono a vicenda. Rilevante dalla tappa 2 in poi.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
-- Directory di lavoro: `C:\project\demo` (in WSL: `/mnt/c/project/demo`).
+- Struttura **multi-repo**: `demo-master-agent`, `demo-frontend`, `demo-infra` sono repo git distinti e fratelli dentro `C:\project\demo` (in WSL: `/mnt/c/project/demo`). Ogni task committa nel proprio repo. Non esiste un repo che li contiene tutti.
+- Ogni repo deployabile ha il suo `Dockerfile`; `demo-infra/compose.yaml` li costruisce da percorsi fratelli. In sviluppo si gira nativi, i container servono alla verifica d'insieme.
 
 ---
 
 ### Task 4: Master agent e app FastAPI
 
 **Files:**
-- Create: `backend/src/demo/agents/__init__.py`
-- Create: `backend/src/demo/agents/master.py`
-- Create: `backend/src/demo/server/__init__.py`
-- Create: `backend/src/demo/server/app.py`
-- Create: `backend/src/demo/__main__.py`
-- Test: `backend/tests/test_agui_stream.py`
-- Test: `backend/tests/conftest.py`
+- Create: `demo-master-agent/src/demo/agents/__init__.py`
+- Create: `demo-master-agent/src/demo/agents/master.py`
+- Create: `demo-master-agent/src/demo/server/__init__.py`
+- Create: `demo-master-agent/src/demo/server/app.py`
+- Create: `demo-master-agent/src/demo/__main__.py`
+- Test: `demo-master-agent/tests/test_agui_stream.py`
+- Test: `demo-master-agent/tests/conftest.py`
 
 **Interfaces:**
 - Consumes: `demo.config.get_settings`, `demo.chat_clients.fake.FakeStreamingChatClient` e `ToolCallingFakeClient`, `demo.tools.ui_tools.get_tools`
@@ -45,7 +46,7 @@ add_agent_framework_fastapi_endpoint(app, agent, path='/', state_schema=None,
     checkpoint_storage=None, keepalive_seconds=15, a2ui_config=None) -> None
 ```
 
-- [ ] **Step 1: Scrivere `backend/tests/conftest.py`**
+- [ ] **Step 1: Scrivere `demo-master-agent/tests/conftest.py`**
 
 ```python
 import pytest
@@ -83,7 +84,7 @@ def tool_app():
 
 - [ ] **Step 2: Scrivere il test di integrazione**
 
-`backend/tests/test_agui_stream.py`:
+`demo-master-agent/tests/test_agui_stream.py`:
 
 ```python
 """Verifica la sequenza di eventi AG-UI prodotta da una run."""
@@ -190,9 +191,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'demo.agents'`
 
 - [ ] **Step 4: Implementare il master agent**
 
-`backend/src/demo/agents/__init__.py` — file vuoto.
+`demo-master-agent/src/demo/agents/__init__.py` — file vuoto.
 
-`backend/src/demo/agents/master.py`:
+`demo-master-agent/src/demo/agents/master.py`:
 
 ```python
 """Costruzione del master agent."""
@@ -234,9 +235,9 @@ def build_master_agent(chat_client: BaseChatClient | None = None) -> Agent:
 
 - [ ] **Step 5: Implementare l'app**
 
-`backend/src/demo/server/__init__.py` — file vuoto.
+`demo-master-agent/src/demo/server/__init__.py` — file vuoto.
 
-`backend/src/demo/server/app.py`:
+`demo-master-agent/src/demo/server/app.py`:
 
 ```python
 """App FastAPI: espone il master agent via AG-UI su SSE."""
@@ -273,7 +274,7 @@ def create_app(agent: Agent | None = None) -> FastAPI:
     return app
 ```
 
-`backend/src/demo/__main__.py`:
+`demo-master-agent/src/demo/__main__.py`:
 
 ```python
 """Entrypoint: python -m demo"""
@@ -293,7 +294,7 @@ Expected: PASS (tutti — 6 nuovi in `test_agui_stream.py`)
 - [ ] **Step 7: Verifica manuale contro il server reale**
 
 ```bash
-cd /mnt/c/project/demo/backend
+cd /mnt/c/project/demo/demo-master-agent
 DEMO_FAKE_CLIENT=true uv run python -m demo &
 curl -sN -X POST http://127.0.0.1:8000/agui \
   -H 'Content-Type: application/json' -H 'Accept: text/event-stream' \
@@ -305,8 +306,11 @@ Expected: una sequenza che inizia con `data: {"type":"RUN_STARTED",...}` e termi
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/src/demo/agents backend/src/demo/server backend/src/demo/__main__.py backend/tests/
+cd /mnt/c/project/demo/demo-master-agent
+git add src/demo/agents src/demo/server src/demo/__main__.py tests/
 git commit -m "feat: endpoint AG-UI SSE con master agent"
 ```
+
+---
 
 ---

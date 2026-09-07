@@ -17,141 +17,74 @@ Alla fine incolla l'output reale dei comandi di test, non un riassunto.
 - Lo `state` passato a `state_update` è fuso con semantica `dict.update`: le chiavi di primo livello vengono **sostituite**, non fuse in profondità. Due tool che scrivono la stessa chiave si sovrascrivono a vicenda. Rilevante dalla tappa 2 in poi.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
-- Directory di lavoro: `C:\project\demo` (in WSL: `/mnt/c/project/demo`).
+- Struttura **multi-repo**: `demo-master-agent`, `demo-frontend`, `demo-infra` sono repo git distinti e fratelli dentro `C:\project\demo` (in WSL: `/mnt/c/project/demo`). Ogni task committa nel proprio repo. Non esiste un repo che li contiene tutti.
+- Ogni repo deployabile ha il suo `Dockerfile`; `demo-infra/compose.yaml` li costruisce da percorsi fratelli. In sviluppo si gira nativi, i container servono alla verifica d'insieme.
 
 ---
 
-### Task 1: Scaffold del backend
+### Task 1: Repo `demo-master-agent` e configurazione — ✅ GIÀ COMPLETATO
+
+> Eseguito e committato prima della migrazione a multi-repo. La sua storia vive in
+> `demo-master-agent` (`62c800c` scaffold, `530bdf6` migrazione). Resta qui per
+> riferimento: **non rieseguirlo**, si riparte dalla Task 2.
 
 **Files:**
-- Create: `backend/pyproject.toml`
-- Create: `backend/.env.example`
-- Create: `backend/src/demo/__init__.py`
-- Create: `backend/src/demo/config.py`
-- Test: `backend/tests/test_config.py`
+- Create: `demo-master-agent/pyproject.toml`
+- Create: `demo-master-agent/.env.example`
+- Create: `demo-master-agent/.gitignore`
+- Create: `demo-master-agent/src/demo/__init__.py`
+- Create: `demo-master-agent/src/demo/config.py`
+- Test: `demo-master-agent/tests/test_config.py`
 
 **Interfaces:**
 - Consumes: niente (prima task)
 - Produces: `demo.config.Settings` (dataclass con `base_url: str`, `api_key: str`, `model: str`, `use_fake_client: bool`), `demo.config.get_settings() -> Settings`
 
-- [ ] **Step 1: Creare il progetto e installare le dipendenze**
+**Stato finale a valle della migrazione**, per chi arriva adesso:
 
-```bash
-# Il repo git non esiste ancora: le spec sono gia' in docs/, si parte da li'.
-cd /mnt/c/project/demo
-git init -b main
-
-mkdir -p backend
-cd /mnt/c/project/demo/backend
-uv init --no-workspace --python 3.12 .
-uv add "agent-framework-core==1.17.0" "agent-framework-ag-ui>=1.2.2" agent-framework-openai fastapi uvicorn python-dotenv
-uv add --dev pytest pytest-asyncio httpx
+```
+demo-master-agent/          <- repo git proprio, branch main
+  .gitignore                __pycache__/, .venv/, .pytest_cache/, .env
+  .env.example
+  pyproject.toml            name = "demo-master-agent"
+  uv.lock
+  src/demo/config.py
+  tests/test_config.py
 ```
 
-- [ ] **Step 2: Scrivere `backend/pyproject.toml`**
-
-Sostituire la sezione di config generata aggiungendo in coda:
+`pyproject.toml` contiene:
 
 ```toml
+[project]
+name = "demo-master-agent"
+version = "0.1.0"
+description = "Master agent del laboratorio AG-UI: AG-UI su SSE + tool nativi"
+requires-python = ">=3.12"
+dependencies = [
+    "agent-framework-ag-ui>=1.2.2",
+    "agent-framework-core==1.17.0",
+    "agent-framework-openai>=1.14.2",
+    "fastapi>=0.139.2",
+    "python-dotenv>=1.2.3",
+    "uvicorn>=0.52.4",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 ```
 
-- [ ] **Step 3: Scrivere `backend/.env.example`**
+- [x] **Verifica dello stato** (l'unico passo da rifare se hai dubbi)
 
-```bash
-# Profilo OpenRouter (default)
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
-OPENAI_API_KEY=sk-or-v1-...
-OPENAI_CHAT_COMPLETION_MODEL=anthropic/claude-sonnet-5
-
-# Profilo LM Studio -- richiede un modello con tool-calling reale
-# OPENAI_BASE_URL=http://localhost:1234/v1
-# OPENAI_API_KEY=lm-studio
-# OPENAI_CHAT_COMPLETION_MODEL=qwen3-14b
-
-# true = nessuna chiamata LLM, usa il fake client (sviluppo offline)
-DEMO_FAKE_CLIENT=false
-```
-
-- [ ] **Step 4: Scrivere il test**
-
-`backend/tests/test_config.py`:
-
-```python
-from demo.config import get_settings
-
-
-def test_settings_read_from_env(monkeypatch):
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-    monkeypatch.setenv("OPENAI_CHAT_COMPLETION_MODEL", "m")
-    monkeypatch.setenv("DEMO_FAKE_CLIENT", "true")
-
-    s = get_settings()
-
-    assert s.base_url == "http://localhost:1234/v1"
-    assert s.model == "m"
-    assert s.use_fake_client is True
-
-
-def test_fake_client_defaults_to_false(monkeypatch):
-    monkeypatch.delenv("DEMO_FAKE_CLIENT", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-
-    assert get_settings().use_fake_client is False
-```
-
-- [ ] **Step 5: Eseguire il test e verificare che fallisca**
-
-Run: `cd /mnt/c/project/demo/backend && uv run pytest tests/test_config.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'demo.config'`
-
-- [ ] **Step 6: Implementare `backend/src/demo/config.py`**
-
-```python
-"""Lettura della configurazione da variabili d'ambiente."""
-from __future__ import annotations
-
-import os
-from dataclasses import dataclass
-
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
-@dataclass(frozen=True)
-class Settings:
-    base_url: str
-    api_key: str
-    model: str
-    use_fake_client: bool
-
-
-def get_settings() -> Settings:
-    """Costruisce le Settings dall'ambiente. Nessuna cache: i test cambiano l'env."""
-    return Settings(
-        base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        model=os.getenv("OPENAI_CHAT_COMPLETION_MODEL", "anthropic/claude-sonnet-5"),
-        use_fake_client=os.getenv("DEMO_FAKE_CLIENT", "false").lower() == "true",
-    )
-```
-
-- [ ] **Step 7: Eseguire il test e verificare che passi**
-
-Run: `uv run pytest tests/test_config.py -v`
+Run: `cd /mnt/c/project/demo/demo-master-agent && uv run pytest -v`
 Expected: PASS (2 test)
-
-- [ ] **Step 8: Commit**
-
-```bash
-cd /mnt/c/project/demo
-git add backend/pyproject.toml backend/.env.example backend/src/demo/config.py backend/tests/test_config.py
-git commit -m "feat: scaffold backend con lettura configurazione"
-```
 
 ---

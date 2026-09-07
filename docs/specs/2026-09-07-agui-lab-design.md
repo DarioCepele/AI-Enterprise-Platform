@@ -78,22 +78,49 @@ Next.js  --POST /agui (RunAgentInput)-->  master agent (FastAPI + MAF)
 ```
 
 ```
-demo/
-  backend/
+C:\project\demo\                    cartella di lavoro, NON un repo
+
+  demo-master-agent\                 REPO 1 -- agente principale
+    Dockerfile
     src/demo/
-      agents/        master.py, knowledge.py
-      tools/         plan_tools.py, skill_tools.py, ui_tools.py, subagent_tools.py
-      skills/        <nome>/SKILL.md
-      server/        app.py (AG-UI + A2A + health)
-      a2a/           card.py, client.py  (fetch card + factory A2AAgent)
+      agents/master.py
+      tools/          ui_tools.py, poi plan_tools.py, skill_tools.py, subagent_tools.py
+      skills/         <nome>/SKILL.md
+      chat_clients/   fake client per test e sviluppo offline
+      server/app.py   endpoint AG-UI
+      a2a/            client A2A (tappa 3): fetch card + factory
       config.py
-    .env.openrouter, .env.lmstudio
-  frontend/
+    tests/
+
+  demo-knowledge-agent\              REPO 2 -- sottoagente A2A (tappa 3)
+    Dockerfile
+    src/demo_kb/
+      agent.py, executor.py, card.py
+      server/app.py   mount A2A
+
+  demo-frontend\                     REPO 3 -- interfaccia Next.js
+    Dockerfile
     app/, components/{chat,plan,inspector,log}/
-    lib/agui/        client SSE + reducer
-  compose.yaml
-  docs/specs/
+    lib/agui/         client SSE + reducer
+
+  demo-infra\                        REPO 4 -- orchestrazione e documentazione
+    compose.yaml
+    .env.example
+    README.md
+    docs/specs, docs/plans, docs/prompts
 ```
+
+**Un repo per unita' deployabile, piu' un repo infra.** E' la forma della
+piattaforma di riferimento, dove ogni agente ha repo, immagine e pipeline
+proprie, affiancati da repo di deployment e infrastruttura. Il costo e'
+duplicazione fra i due repo agente; il beneficio, oltre alla fedelta', e' che
+ogni agente si versiona e si rilascia da solo.
+
+`compose.yaml` costruisce da percorsi fratelli (`../demo-master-agent`), quindi i
+repo devono stare nella stessa cartella padre.
+
+In sviluppo si gira nativi (`uv run`, `npm run dev`): i container servono a
+verificare che tutto si alzi insieme, non a fare da ciclo di feedback.
 
 **Un solo canale.** Chat, piano, inspector e log sono quattro riduzioni dello stesso stream SSE. Nessuna seconda API, nessun polling. È anche il motivo per cui l'inspector è didatticamente utile: mostra esattamente ciò che alimenta gli altri tre pannelli.
 
@@ -212,7 +239,7 @@ Ordinate per rischio decrescente, non per area funzionale. Le due cose che posso
 | # | Nome | Consegna | Stato |
 |---|---|---|---|
 | 0 | spike A2A streaming | risposta sì/no sullo streaming fra agenti MAF | **fatto**, vedi §5 |
-| 1 | walking skeleton | prompt → LLM → `TEXT_MESSAGE_*` + un tool → UI a tre pannelli. Niente piano, niente skill, niente tabelle. | da fare |
+| 1 | walking skeleton | prompt → LLM → `TEXT_MESSAGE_*` + un tool → UI a tre pannelli, piu' le immagini docker e il compose. Niente piano, niente skill, niente tabelle. | in corso |
 | 2 | flusso del video | piano di lavoro, `SKILL.md` + `load_skill`, `ui_table`, filtri inspector, tab log | da fare |
 | 3 | sottoagenti A2A | knowledge agent come processo separato, invocazione parallela, update rilanciati | da fare |
 
@@ -235,7 +262,7 @@ La tappa 1 esiste per validare che il frontend consumi correttamente ciò che il
 - Autenticazione: niente MSAL, niente OBO. Il codice lascia un punto d'innesto, la demo gira senza.
 - Persistenza delle conversazioni.
 - MCP: il pattern è supportato dal framework ma non serve al flusso del video.
-- Deploy: la demo gira in locale, `compose.yaml` serve solo a lanciare i due processi.
+- Deploy remoto: niente pipeline CI, niente chart helm, niente registry. `compose.yaml` alza tutto in locale e si ferma li'.
 
 ## 10. Note sulla piattaforma di riferimento
 

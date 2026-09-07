@@ -17,16 +17,17 @@ Alla fine incolla l'output reale dei comandi di test, non un riassunto.
 - Lo `state` passato a `state_update` è fuso con semantica `dict.update`: le chiavi di primo livello vengono **sostituite**, non fuse in profondità. Due tool che scrivono la stessa chiave si sovrascrivono a vicenda. Rilevante dalla tappa 2 in poi.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
-- Directory di lavoro: `C:\project\demo` (in WSL: `/mnt/c/project/demo`).
+- Struttura **multi-repo**: `demo-master-agent`, `demo-frontend`, `demo-infra` sono repo git distinti e fratelli dentro `C:\project\demo` (in WSL: `/mnt/c/project/demo`). Ogni task committa nel proprio repo. Non esiste un repo che li contiene tutti.
+- Ogni repo deployabile ha il suo `Dockerfile`; `demo-infra/compose.yaml` li costruisce da percorsi fratelli. In sviluppo si gira nativi, i container servono alla verifica d'insieme.
 
 ---
 
 ### Task 3: Tool `ui_table`
 
 **Files:**
-- Create: `backend/src/demo/tools/__init__.py`
-- Create: `backend/src/demo/tools/ui_tools.py`
-- Test: `backend/tests/test_ui_tools.py`
+- Create: `demo-master-agent/src/demo/tools/__init__.py`
+- Create: `demo-master-agent/src/demo/tools/ui_tools.py`
+- Test: `demo-master-agent/tests/test_ui_tools.py`
 
 **Interfaces:**
 - Consumes: niente
@@ -36,7 +37,7 @@ Il tool restituisce un `Content` costruito con `state_update(text, *, state, too
 
 - [ ] **Step 1: Scrivere il test**
 
-`backend/tests/test_ui_tools.py`:
+`demo-master-agent/tests/test_ui_tools.py`:
 
 ```python
 import json
@@ -88,9 +89,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'demo.tools'`
 
 - [ ] **Step 3: Implementare il tool**
 
-`backend/src/demo/tools/__init__.py` — file vuoto.
+`demo-master-agent/src/demo/tools/__init__.py` — file vuoto.
 
-`backend/src/demo/tools/ui_tools.py`:
+`demo-master-agent/src/demo/tools/ui_tools.py`:
 
 ```python
 """Tool che producono artefatti renderizzati dal frontend."""
@@ -143,8 +144,11 @@ Expected: PASS (4 test)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/demo/tools backend/tests/test_ui_tools.py
+cd /mnt/c/project/demo/demo-master-agent
+git add src/demo/tools tests/test_ui_tools.py
 git commit -m "feat: tool ui_table con payload per la UI"
 ```
+
+---
 
 ---

@@ -17,133 +17,130 @@ Alla fine incolla l'output reale dei comandi di test, non un riassunto.
 - Lo `state` passato a `state_update` è fuso con semantica `dict.update`: le chiavi di primo livello vengono **sostituite**, non fuse in profondità. Due tool che scrivono la stessa chiave si sovrascrivono a vicenda. Rilevante dalla tappa 2 in poi.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
-- Directory di lavoro: `C:\project\demo` (in WSL: `/mnt/c/project/demo`).
+- Struttura **multi-repo**: `demo-master-agent`, `demo-frontend`, `demo-infra` sono repo git distinti e fratelli dentro `C:\project\demo` (in WSL: `/mnt/c/project/demo`). Ogni task committa nel proprio repo. Non esiste un repo che li contiene tutti.
+- Ogni repo deployabile ha il suo `Dockerfile`; `demo-infra/compose.yaml` li costruisce da percorsi fratelli. In sviluppo si gira nativi, i container servono alla verifica d'insieme.
 
 ---
 
-### Task 5: Tipi e client SSE del frontend
+### Task 5: Immagine del master agent e repo `demo-infra`
+
+Il primo dei due task di containerizzazione. Qui l'agente diventa un'immagine e
+`demo-infra` acquisisce il `compose.yaml` che, per ora, alza un servizio solo.
 
 **Files:**
-- Create: `frontend/` (progetto Next.js)
-- Create: `frontend/lib/agui/types.ts`
-- Create: `frontend/lib/agui/client.ts`
+- Create: `demo-master-agent/Dockerfile`
+- Create: `demo-master-agent/.dockerignore`
+- Create: `demo-infra/compose.yaml`
+- Create: `demo-infra/.env.example`
 
 **Interfaces:**
-- Consumes: l'endpoint `POST /agui` della Task 4
-- Produces: `AGUIEvent` (union type), `runAgent(input: RunInput, onEvent: (e: AGUIEvent) => void): Promise<void>`
+- Consumes: `demo.server.app.create_app` (Task 4)
+- Produces: servizio compose `master-agent`, in ascolto su `8000`
 
-- [ ] **Step 1: Creare il progetto Next.js**
+- [ ] **Step 1: Scrivere `demo-master-agent/.dockerignore`**
+
+```gitignore
+.venv/
+__pycache__/
+.pytest_cache/
+.git/
+.env
+tests/
+```
+
+- [ ] **Step 2: Scrivere `demo-master-agent/Dockerfile`**
+
+```dockerfile
+# uv fornisce l'immagine con il gestore gia' dentro: niente pip, niente wheel a mano.
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+WORKDIR /app
+
+# Prima i soli manifest: cosi' il layer delle dipendenze si invalida
+# solo quando cambiano le dipendenze, non a ogni modifica del codice.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY src ./src
+RUN uv sync --frozen --no-dev
+
+EXPOSE 8000
+
+# host 0.0.0.0: dentro un container 127.0.0.1 non e' raggiungibile da fuori.
+CMD ["uv", "run", "uvicorn", "demo.server.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+- [ ] **Step 3: Costruire l'immagine e verificare che l'app risponda**
 
 ```bash
-cd /mnt/c/project/demo
-npx create-next-app@latest frontend --typescript --tailwind --app --eslint --no-src-dir --import-alias "@/*" --use-npm
-cd frontend && npm i -D vitest
+cd /mnt/c/project/demo/demo-master-agent
+docker build -t demo-master-agent:dev .
+docker run --rm -d --name ma-test -p 8000:8000 -e DEMO_FAKE_CLIENT=true demo-master-agent:dev
+sleep 3
+curl -s http://127.0.0.1:8000/health
+docker rm -f ma-test
 ```
 
-- [ ] **Step 2: Aggiungere lo script di test in `frontend/package.json`**
+Expected: `{"status":"ok"}`
 
-Dentro `"scripts"`, aggiungere:
-
-```json
-"test": "vitest run"
-```
-
-- [ ] **Step 3: Scrivere i tipi degli eventi**
-
-`frontend/lib/agui/types.ts`:
-
-```typescript
-// Eventi AG-UI, in camelCase come arrivano sul filo.
-// Solo il sottoinsieme prodotto dalla tappa 1; le tappe 2 e 3 ne aggiungono altri.
-
-export type AGUIEvent =
-  | { type: "RUN_STARTED"; threadId: string; runId: string }
-  | { type: "RUN_FINISHED"; threadId: string; runId: string }
-  | { type: "RUN_ERROR"; message: string }
-  | { type: "TEXT_MESSAGE_START"; messageId: string; role: string }
-  | { type: "TEXT_MESSAGE_CONTENT"; messageId: string; delta: string }
-  | { type: "TEXT_MESSAGE_END"; messageId: string }
-  | { type: "TOOL_CALL_START"; toolCallId: string; toolCallName: string }
-  | { type: "TOOL_CALL_ARGS"; toolCallId: string; delta: string }
-  | { type: "TOOL_CALL_END"; toolCallId: string }
-  | { type: "TOOL_CALL_RESULT"; toolCallId: string; content: unknown }
-  | { type: "STATE_SNAPSHOT"; snapshot: Record<string, unknown> }
-  | { type: "STATE_DELTA"; delta: unknown[] }
-  | { type: "MESSAGES_SNAPSHOT"; messages: unknown[] }
-  | { type: string; [key: string]: unknown }; // fallback esplicito sull'ignoto
-
-export interface RunInput {
-  threadId: string;
-  runId: string;
-  messages: { id: string; role: string; content: string }[];
-  state: Record<string, unknown>;
-  tools: unknown[];
-  context: unknown[];
-  forwardedProps: Record<string, unknown>;
-}
-```
-
-- [ ] **Step 4: Scrivere il client SSE**
-
-`frontend/lib/agui/client.ts`:
-
-```typescript
-import type { AGUIEvent, RunInput } from "./types";
-
-const ENDPOINT = process.env.NEXT_PUBLIC_AGUI_URL ?? "http://127.0.0.1:8000/agui";
-
-/**
- * Esegue una run e invoca onEvent per ogni evento SSE ricevuto.
- * Il parsing e' manuale perche' EventSource non supporta POST.
- */
-export async function runAgent(
-  input: RunInput,
-  onEvent: (event: AGUIEvent) => void,
-): Promise<void> {
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify(input),
-  });
-
-  if (!response.ok || !response.body) {
-    throw new Error(`AG-UI ha risposto ${response.status}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    // Gli eventi SSE sono separati da una riga vuota.
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() ?? "";
-
-    for (const chunk of chunks) {
-      for (const line of chunk.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        onEvent(JSON.parse(line.slice(6)) as AGUIEvent);
-      }
-    }
-  }
-}
-```
-
-- [ ] **Step 5: Verificare che il progetto compili**
-
-Run: `cd /mnt/c/project/demo/frontend && npx tsc --noEmit`
-Expected: nessun errore
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Scrivere `demo-infra/.env.example`**
 
 ```bash
-cd /mnt/c/project/demo
-git add frontend/
-git commit -m "feat: scaffold frontend Next.js con client AG-UI SSE"
+# Copiare in .env e riempire. compose lo legge automaticamente.
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=sk-or-v1-...
+OPENAI_CHAT_COMPLETION_MODEL=anthropic/claude-sonnet-5
+
+# true = nessuna chiamata LLM
+DEMO_FAKE_CLIENT=false
+```
+
+- [ ] **Step 5: Scrivere `demo-infra/compose.yaml`**
+
+```yaml
+# I servizi si costruiscono dai repo fratelli: i tre repo devono stare
+# nella stessa cartella padre perche' questi context relativi funzionino.
+services:
+  master-agent:
+    build: ../demo-master-agent
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_COMPLETION_MODEL: ${OPENAI_CHAT_COMPLETION_MODEL}
+      DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+```
+
+- [ ] **Step 6: Alzare il servizio via compose e verificarlo**
+
+```bash
+cd /mnt/c/project/demo/demo-infra
+cp .env.example .env
+docker compose up -d --build
+sleep 5
+docker compose ps
+curl -s http://127.0.0.1:8000/health
+docker compose down
+```
+
+Expected: `master-agent` in stato `running (healthy)`, e `{"status":"ok"}` dal curl.
+
+- [ ] **Step 7: Commit nei due repo**
+
+```bash
+cd /mnt/c/project/demo/demo-master-agent
+git add Dockerfile .dockerignore
+git commit -m "feat: immagine docker del master agent"
+
+cd /mnt/c/project/demo/demo-infra
+git add compose.yaml .env.example
+git commit -m "feat: compose con il servizio master-agent"
 ```
 
 ---

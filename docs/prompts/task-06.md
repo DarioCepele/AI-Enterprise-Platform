@@ -17,254 +17,141 @@ Alla fine incolla l'output reale dei comandi di test, non un riassunto.
 - Lo `state` passato a `state_update` è fuso con semantica `dict.update`: le chiavi di primo livello vengono **sostituite**, non fuse in profondità. Due tool che scrivono la stessa chiave si sovrascrivono a vicenda. Rilevante dalla tappa 2 in poi.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
-- Directory di lavoro: `C:\project\demo` (in WSL: `/mnt/c/project/demo`).
+- Struttura **multi-repo**: `demo-master-agent`, `demo-frontend`, `demo-infra` sono repo git distinti e fratelli dentro `C:\project\demo` (in WSL: `/mnt/c/project/demo`). Ogni task committa nel proprio repo. Non esiste un repo che li contiene tutti.
+- Ogni repo deployabile ha il suo `Dockerfile`; `demo-infra/compose.yaml` li costruisce da percorsi fratelli. In sviluppo si gira nativi, i container servono alla verifica d'insieme.
 
 ---
 
-### Task 6: Reducer
-
-Il pezzo con più logica, e l'unico interamente testabile senza browser né rete.
+### Task 6: Tipi e client SSE del frontend
 
 **Files:**
-- Create: `frontend/lib/agui/reducer.ts`
-- Test: `frontend/lib/agui/reducer.test.ts`
+- Create: `demo-frontend/` (repo Next.js)
+- Create: `demo-frontend/lib/agui/types.ts`
+- Create: `demo-frontend/lib/agui/client.ts`
 
 **Interfaces:**
-- Consumes: `AGUIEvent` dalla Task 5
-- Produces: `LabState`, `initialState: LabState`, `reduce(state: LabState, event: AGUIEvent): LabState`
+- Consumes: l'endpoint `POST /agui` della Task 4
+- Produces: `AGUIEvent` (union type), `runAgent(input: RunInput, onEvent: (e: AGUIEvent) => void): Promise<void>`
 
-- [ ] **Step 1: Scrivere il test**
+- [ ] **Step 1: Creare il progetto Next.js**
 
-`frontend/lib/agui/reducer.test.ts`:
+```bash
+# Fratello degli altri repo: compose lo costruira' da ../demo-frontend.
+cd /mnt/c/project/demo
+npx create-next-app@latest demo-frontend --typescript --tailwind --app --eslint --no-src-dir --import-alias "@/*" --use-npm
 
-```typescript
-import { describe, expect, it } from "vitest";
-import { initialState, reduce } from "./reducer";
-import type { AGUIEvent } from "./types";
-
-function run(events: AGUIEvent[]) {
-  return events.reduce(reduce, initialState);
-}
-
-describe("reduce", () => {
-  it("accumula i delta di testo in un solo messaggio", () => {
-    const state = run([
-      { type: "RUN_STARTED", threadId: "t", runId: "r" },
-      { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant" },
-      { type: "TEXT_MESSAGE_CONTENT", messageId: "m1", delta: "ciao " },
-      { type: "TEXT_MESSAGE_CONTENT", messageId: "m1", delta: "mondo" },
-      { type: "TEXT_MESSAGE_END", messageId: "m1" },
-    ]);
-
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0].content).toBe("ciao mondo");
-  });
-
-  it("segna la run come in corso e poi conclusa", () => {
-    let state = run([{ type: "RUN_STARTED", threadId: "t", runId: "r" }]);
-    expect(state.running).toBe(true);
-
-    state = reduce(state, { type: "RUN_FINISHED", threadId: "t", runId: "r" });
-    expect(state.running).toBe(false);
-  });
-
-  it("registra ogni evento nell'inspector", () => {
-    const state = run([
-      { type: "RUN_STARTED", threadId: "t", runId: "r" },
-      { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant" },
-    ]);
-
-    expect(state.events.map((e) => e.type)).toEqual([
-      "RUN_STARTED",
-      "TEXT_MESSAGE_START",
-    ]);
-  });
-
-  it("sostituisce lo stato condiviso su STATE_SNAPSHOT", () => {
-    const state = run([
-      { type: "STATE_SNAPSHOT", snapshot: { artifacts: [{ component: "ui-table" }] } },
-    ]);
-
-    expect(state.shared).toEqual({ artifacts: [{ component: "ui-table" }] });
-  });
-
-  it("raccoglie i risultati dei tool", () => {
-    // content arriva come stringa JSON: state_update serializza il payload.
-    const state = run([
-      { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "ui_table" },
-      { type: "TOOL_CALL_RESULT", toolCallId: "c1", content: '{"component":"ui-table"}' },
-    ]);
-
-    expect(state.toolCalls).toHaveLength(1);
-    expect(state.toolCalls[0].name).toBe("ui_table");
-    expect(state.toolCalls[0].result).toBe('{"component":"ui-table"}');
-  });
-
-  it("espone l'errore su RUN_ERROR e ferma la run", () => {
-    let state = run([{ type: "RUN_STARTED", threadId: "t", runId: "r" }]);
-    state = reduce(state, { type: "RUN_ERROR", message: "boom" });
-
-    expect(state.running).toBe(false);
-    expect(state.error).toBe("boom");
-  });
-
-  it("scarta il messaggio vuoto che avvolge una tool call", () => {
-    // Sul filo ogni tool call e' racchiusa fra START ed END senza CONTENT.
-    const state = run([
-      { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant" },
-      { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "ui_table" },
-      { type: "TOOL_CALL_END", toolCallId: "c1" },
-      { type: "TEXT_MESSAGE_END", messageId: "m1" },
-      { type: "TEXT_MESSAGE_START", messageId: "m2", role: "assistant" },
-      { type: "TEXT_MESSAGE_CONTENT", messageId: "m2", delta: "Ecco il confronto." },
-      { type: "TEXT_MESSAGE_END", messageId: "m2" },
-    ]);
-
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0].content).toBe("Ecco il confronto.");
-  });
-
-  it("ignora un evento sconosciuto senza rompersi", () => {
-    const state = run([{ type: "EVENTO_FUTURO", qualcosa: 1 } as AGUIEvent]);
-
-    expect(state.events).toHaveLength(1);
-    expect(state.messages).toHaveLength(0);
-  });
-});
+cd demo-frontend
+npm i -D vitest
+# create-next-app inizializza gia' un repo git: verificare, e crearlo se manca.
+git rev-parse --git-dir >/dev/null 2>&1 || git init -b main
 ```
 
-- [ ] **Step 2: Eseguire il test e verificare che fallisca**
+- [ ] **Step 2: Aggiungere lo script di test in `demo-frontend/package.json`**
 
-Run: `cd /mnt/c/project/demo/frontend && npm test`
-Expected: FAIL — `Failed to resolve import "./reducer"`
+Dentro `"scripts"`, aggiungere:
 
-- [ ] **Step 3: Implementare il reducer**
+```json
+"test": "vitest run"
+```
 
-`frontend/lib/agui/reducer.ts`:
+- [ ] **Step 3: Scrivere i tipi degli eventi**
+
+`demo-frontend/lib/agui/types.ts`:
 
 ```typescript
-import type { AGUIEvent } from "./types";
+// Eventi AG-UI, in camelCase come arrivano sul filo.
+// Solo il sottoinsieme prodotto dalla tappa 1; le tappe 2 e 3 ne aggiungono altri.
 
-export interface ChatMessage {
-  id: string;
-  role: string;
-  content: string;
+export type AGUIEvent =
+  | { type: "RUN_STARTED"; threadId: string; runId: string }
+  | { type: "RUN_FINISHED"; threadId: string; runId: string }
+  | { type: "RUN_ERROR"; message: string }
+  | { type: "TEXT_MESSAGE_START"; messageId: string; role: string }
+  | { type: "TEXT_MESSAGE_CONTENT"; messageId: string; delta: string }
+  | { type: "TEXT_MESSAGE_END"; messageId: string }
+  | { type: "TOOL_CALL_START"; toolCallId: string; toolCallName: string }
+  | { type: "TOOL_CALL_ARGS"; toolCallId: string; delta: string }
+  | { type: "TOOL_CALL_END"; toolCallId: string }
+  | { type: "TOOL_CALL_RESULT"; toolCallId: string; content: unknown }
+  | { type: "STATE_SNAPSHOT"; snapshot: Record<string, unknown> }
+  | { type: "STATE_DELTA"; delta: unknown[] }
+  | { type: "MESSAGES_SNAPSHOT"; messages: unknown[] }
+  | { type: string; [key: string]: unknown }; // fallback esplicito sull'ignoto
+
+export interface RunInput {
+  threadId: string;
+  runId: string;
+  messages: { id: string; role: string; content: string }[];
+  state: Record<string, unknown>;
+  tools: unknown[];
+  context: unknown[];
+  forwardedProps: Record<string, unknown>;
 }
+```
 
-export interface ToolCall {
-  id: string;
-  name: string;
-  args: string;
-  result?: unknown;
-}
+- [ ] **Step 4: Scrivere il client SSE**
 
-export interface LabState {
-  running: boolean;
-  error: string | null;
-  messages: ChatMessage[];
-  toolCalls: ToolCall[];
-  shared: Record<string, unknown>;
-  events: AGUIEvent[];
-}
+`demo-frontend/lib/agui/client.ts`:
 
-export const initialState: LabState = {
-  running: false,
-  error: null,
-  messages: [],
-  toolCalls: [],
-  shared: {},
-  events: [],
-};
+```typescript
+import type { AGUIEvent, RunInput } from "./types";
 
-/** Funzione pura: un evento entra, un nuovo stato esce. Nessuna rete, nessun effetto. */
-export function reduce(state: LabState, event: AGUIEvent): LabState {
-  // Ogni evento finisce nell'inspector, riconosciuto o no.
-  const next: LabState = { ...state, events: [...state.events, event] };
+const ENDPOINT = process.env.NEXT_PUBLIC_AGUI_URL ?? "http://127.0.0.1:8000/agui";
 
-  switch (event.type) {
-    case "RUN_STARTED":
-      return { ...next, running: true, error: null };
+/**
+ * Esegue una run e invoca onEvent per ogni evento SSE ricevuto.
+ * Il parsing e' manuale perche' EventSource non supporta POST.
+ */
+export async function runAgent(
+  input: RunInput,
+  onEvent: (event: AGUIEvent) => void,
+): Promise<void> {
+  const response = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(input),
+  });
 
-    case "RUN_FINISHED":
-      return { ...next, running: false };
+  if (!response.ok || !response.body) {
+    throw new Error(`AG-UI ha risposto ${response.status}`);
+  }
 
-    case "RUN_ERROR":
-      return { ...next, running: false, error: String(event.message ?? "errore") };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
 
-    case "TEXT_MESSAGE_START":
-      return {
-        ...next,
-        messages: [
-          ...next.messages,
-          { id: event.messageId, role: event.role ?? "assistant", content: "" },
-        ],
-      };
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
 
-    case "TEXT_MESSAGE_CONTENT":
-      return {
-        ...next,
-        messages: next.messages.map((m) =>
-          m.id === event.messageId ? { ...m, content: m.content + event.delta } : m,
-        ),
-      };
+    buffer += decoder.decode(value, { stream: true });
+    // Gli eventi SSE sono separati da una riga vuota.
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
 
-    case "TOOL_CALL_START":
-      return {
-        ...next,
-        toolCalls: [
-          ...next.toolCalls,
-          { id: event.toolCallId, name: event.toolCallName, args: "" },
-        ],
-      };
-
-    case "TOOL_CALL_ARGS":
-      return {
-        ...next,
-        toolCalls: next.toolCalls.map((c) =>
-          c.id === event.toolCallId ? { ...c, args: c.args + event.delta } : c,
-        ),
-      };
-
-    case "TOOL_CALL_RESULT":
-      return {
-        ...next,
-        toolCalls: next.toolCalls.map((c) =>
-          c.id === event.toolCallId ? { ...c, result: event.content } : c,
-        ),
-      };
-
-    case "TEXT_MESSAGE_END":
-      // Ogni tool call e' avvolta da START/END senza CONTENT in mezzo:
-      // senza questo filtro la chat mostrerebbe una bolla vuota per ogni tool.
-      return {
-        ...next,
-        messages: next.messages.filter(
-          (m) => m.id !== event.messageId || m.content.length > 0,
-        ),
-      };
-
-    case "STATE_SNAPSHOT":
-      return { ...next, shared: event.snapshot };
-
-    // MESSAGES_SNAPSHOT ed eventi ancora sconosciuti: registrati
-    // nell'inspector, nessun altro effetto.
-    default:
-      return next;
+    for (const chunk of chunks) {
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        onEvent(JSON.parse(line.slice(6)) as AGUIEvent);
+      }
+    }
   }
 }
 ```
 
-- [ ] **Step 4: Eseguire il test e verificare che passi**
+- [ ] **Step 5: Verificare che il progetto compili**
 
-Run: `npm test`
-Expected: PASS (8 test)
+Run: `cd /mnt/c/project/demo/demo-frontend && npx tsc --noEmit`
+Expected: nessun errore
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-cd /mnt/c/project/demo
-git add frontend/lib/agui/reducer.ts frontend/lib/agui/reducer.test.ts
-git commit -m "feat: reducer AG-UI puro con test"
+cd /mnt/c/project/demo/demo-frontend
+git add .
+git commit -m "feat: scaffold frontend Next.js con client AG-UI SSE"
 ```
+
+---
 
 ---

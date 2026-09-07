@@ -17,7 +17,8 @@ Alla fine incolla l'output reale dei comandi di test, non un riassunto.
 - Lo `state` passato a `state_update` è fuso con semantica `dict.update`: le chiavi di primo livello vengono **sostituite**, non fuse in profondità. Due tool che scrivono la stessa chiave si sovrascrivono a vicenda. Rilevante dalla tappa 2 in poi.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
-- Directory di lavoro: `C:\project\demo` (in WSL: `/mnt/c/project/demo`).
+- Struttura **multi-repo**: `demo-master-agent`, `demo-frontend`, `demo-infra` sono repo git distinti e fratelli dentro `C:\project\demo` (in WSL: `/mnt/c/project/demo`). Ogni task committa nel proprio repo. Non esiste un repo che li contiene tutti.
+- Ogni repo deployabile ha il suo `Dockerfile`; `demo-infra/compose.yaml` li costruisce da percorsi fratelli. In sviluppo si gira nativi, i container servono alla verifica d'insieme.
 
 ---
 
@@ -26,9 +27,9 @@ Alla fine incolla l'output reale dei comandi di test, non un riassunto.
 Serve prima di tutto il resto: è ciò che rende i test deterministici e permette di sviluppare senza LLM.
 
 **Files:**
-- Create: `backend/src/demo/chat_clients/__init__.py`
-- Create: `backend/src/demo/chat_clients/fake.py`
-- Test: `backend/tests/test_fake_client.py`
+- Create: `demo-master-agent/src/demo/chat_clients/__init__.py`
+- Create: `demo-master-agent/src/demo/chat_clients/fake.py`
+- Test: `demo-master-agent/tests/test_fake_client.py`
 
 **Interfaces:**
 - Consumes: niente
@@ -36,7 +37,7 @@ Serve prima di tutto il resto: è ciò che rende i test deterministici e permett
 
 - [ ] **Step 1: Scrivere il test**
 
-`backend/tests/test_fake_client.py`:
+`demo-master-agent/tests/test_fake_client.py`:
 
 ```python
 import pytest
@@ -75,9 +76,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'demo.chat_clients'`
 
 - [ ] **Step 3: Implementare il fake client**
 
-`backend/src/demo/chat_clients/__init__.py` — file vuoto.
+`demo-master-agent/src/demo/chat_clients/__init__.py` — file vuoto.
 
-`backend/src/demo/chat_clients/fake.py`:
+`demo-master-agent/src/demo/chat_clients/fake.py`:
 
 ```python
 """Chat client finto: emette chunk deterministici, senza rete.
@@ -206,8 +207,11 @@ Expected: PASS (2 test)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/demo/chat_clients backend/tests/test_fake_client.py
+cd /mnt/c/project/demo/demo-master-agent
+git add src/demo/chat_clients tests/test_fake_client.py
 git commit -m "feat: fake chat client per test deterministici"
 ```
+
+---
 
 ---

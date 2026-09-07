@@ -4,7 +4,7 @@
 
 **Goal:** Un giro end-to-end minimo — l'utente scrive un prompt, l'agente risponde in streaming e chiama un tool, e una UI a tre pannelli mostra chat, stato condiviso ed event inspector alimentati dallo stesso stream SSE.
 
-**Architecture:** Backend FastAPI che espone un agente MAF via `agent-framework-ag-ui` su `POST /agui` (SSE, protocollo AG-UI). Frontend Next.js con client SSE e reducer scritti a mano: un solo stream alimenta tre viste. Nessun sottoagente, nessun piano di lavoro, nessuna skill — arrivano nelle tappe 2 e 3.
+**Architecture:** Tre repo distinti — `demo-master-agent` (FastAPI che espone un agente MAF via `agent-framework-ag-ui` su `POST /agui`, SSE), `demo-frontend` (Next.js con client SSE e reducer scritti a mano), `demo-infra` (compose e documentazione). Un solo stream alimenta tre viste. Nessun sottoagente, nessun piano di lavoro, nessuna skill — arrivano nelle tappe 2 e 3.
 
 **Tech Stack:** Python 3.12, MAF 1.17.0, `agent-framework-ag-ui` 1.2.2, FastAPI, uvicorn, pytest, uv. Next.js (App Router) + TypeScript + Tailwind, vitest.
 
@@ -24,190 +24,130 @@
 - Lo `state` passato a `state_update` è fuso con semantica `dict.update`: le chiavi di primo livello vengono **sostituite**, non fuse in profondità. Due tool che scrivono la stessa chiave si sovrascrivono a vicenda. Rilevante dalla tappa 2 in poi.
 - Un chat client che deve eseguire tool **deve** ereditare da `agent_framework._tools.FunctionInvocationLayer` oltre che da `BaseChatClient`, nell'ordine `class X(FunctionInvocationLayer, BaseChatClient)`. Senza, `Agent` logga *"The provided chat client does not support function invoking"* e i tool non vengono mai eseguiti.
 - Nessuna autenticazione in questa tappa. Niente MSAL, niente OBO.
-- Directory di lavoro: `C:\project\demo` (in WSL: `/mnt/c/project/demo`).
+- Struttura **multi-repo**: `demo-master-agent`, `demo-frontend`, `demo-infra` sono repo git distinti e fratelli dentro `C:\project\demo` (in WSL: `/mnt/c/project/demo`). Ogni task committa nel proprio repo. Non esiste un repo che li contiene tutti.
+- Ogni repo deployabile ha il suo `Dockerfile`; `demo-infra/compose.yaml` li costruisce da percorsi fratelli. In sviluppo si gira nativi, i container servono alla verifica d'insieme.
 
 ---
 
 ## File Structure
 
 ```
-demo/
-  backend/
-    pyproject.toml                     dipendenze e config pytest
-    .env.example                       profili OpenRouter / LM Studio
+C:\project\demo\                    cartella di lavoro, NON un repo
+
+  demo-master-agent\                 REPO 1 -- agente principale
+    Dockerfile
+    .dockerignore
+    .env.example                     profili OpenRouter / LM Studio
+    pyproject.toml                   dipendenze e config pytest
     src/demo/
-      __init__.py
-      config.py                        lettura env -> Settings
-      chat_clients/
-        __init__.py
-        fake.py                        fake client: testo, e variante che chiama tool
-      tools/
-        __init__.py
-        ui_tools.py                    tool ui_table
-      agents/
-        __init__.py
-        master.py                      build_master_agent()
-      server/
-        __init__.py
-        app.py                         create_app(): FastAPI + endpoint AG-UI
-      __main__.py                      uvicorn entrypoint
+      config.py                      lettura env -> Settings
+      chat_clients/fake.py           fake client: testo, e variante che chiama tool
+      tools/ui_tools.py              tool ui_table
+      agents/master.py               build_master_agent()
+      server/app.py                  create_app(): FastAPI + endpoint AG-UI
+      __main__.py                    entrypoint uvicorn
     tests/
-      conftest.py
-      test_fake_client.py
-      test_ui_tools.py
-      test_agui_stream.py              test di integrazione sugli eventi
-  frontend/
-    package.json, tsconfig.json, next.config.ts, tailwind.config.ts
+      conftest.py, test_config.py, test_fake_client.py
+      test_ui_tools.py, test_agui_stream.py
+
+  demo-frontend\                     REPO 2 -- interfaccia Next.js
+    Dockerfile
+    .dockerignore
     app/layout.tsx, app/page.tsx
     lib/agui/
-      types.ts                         tipi degli eventi AG-UI
-      client.ts                        POST + parser SSE
-      reducer.ts                       eventi -> stato UI
+      types.ts                       tipi degli eventi AG-UI
+      client.ts                      POST + parser SSE
+      reducer.ts                     eventi -> stato UI
       reducer.test.ts
     components/
-      Chat.tsx
-      StatePanel.tsx
-      Inspector.tsx
-      Lab.tsx                          layout a tre pannelli, possiede lo stato
-  docs/specs/, docs/plans/
+      Chat.tsx, StatePanel.tsx, Inspector.tsx
+      Lab.tsx                        layout a tre pannelli, possiede lo stato
+
+  demo-infra\                        REPO 3 -- orchestrazione e documentazione
+    compose.yaml                     alza gli altri repo come servizi
+    .env.example
+    README.md
+    docs/specs, docs/plans, docs/prompts
+
+  demo-knowledge-agent\              REPO 4 -- arriva in tappa 3
 ```
+
+Un repo per unita' deployabile, piu' un repo infra: e' la forma della piattaforma
+di riferimento, dove ogni agente ha il proprio repo, la propria immagine e la
+propria pipeline. `compose.yaml` costruisce da percorsi fratelli
+(`../demo-master-agent`), quindi i tre repo devono stare nella stessa cartella padre.
+
+In sviluppo si gira comunque nativi (`uv run`, `npm run dev`): i container servono a
+verificare che tutto si alzi insieme, non a fare da ciclo di feedback.
 
 Responsabilità: `client.ts` sa solo di rete e di parsing SSE; `reducer.ts` è puro e non sa nulla di rete; i componenti non contengono logica di stato. Questa separazione è ciò che rende testabile il reducer senza un browser.
 
 ---
 
-### Task 1: Scaffold del backend
+### Task 1: Repo `demo-master-agent` e configurazione — ✅ GIÀ COMPLETATO
+
+> Eseguito e committato prima della migrazione a multi-repo. La sua storia vive in
+> `demo-master-agent` (`62c800c` scaffold, `530bdf6` migrazione). Resta qui per
+> riferimento: **non rieseguirlo**, si riparte dalla Task 2.
 
 **Files:**
-- Create: `backend/pyproject.toml`
-- Create: `backend/.env.example`
-- Create: `backend/src/demo/__init__.py`
-- Create: `backend/src/demo/config.py`
-- Test: `backend/tests/test_config.py`
+- Create: `demo-master-agent/pyproject.toml`
+- Create: `demo-master-agent/.env.example`
+- Create: `demo-master-agent/.gitignore`
+- Create: `demo-master-agent/src/demo/__init__.py`
+- Create: `demo-master-agent/src/demo/config.py`
+- Test: `demo-master-agent/tests/test_config.py`
 
 **Interfaces:**
 - Consumes: niente (prima task)
 - Produces: `demo.config.Settings` (dataclass con `base_url: str`, `api_key: str`, `model: str`, `use_fake_client: bool`), `demo.config.get_settings() -> Settings`
 
-- [ ] **Step 1: Creare il progetto e installare le dipendenze**
+**Stato finale a valle della migrazione**, per chi arriva adesso:
 
-```bash
-# Il repo git non esiste ancora: le spec sono gia' in docs/, si parte da li'.
-cd /mnt/c/project/demo
-git init -b main
-
-mkdir -p backend
-cd /mnt/c/project/demo/backend
-uv init --no-workspace --python 3.12 .
-uv add "agent-framework-core==1.17.0" "agent-framework-ag-ui>=1.2.2" agent-framework-openai fastapi uvicorn python-dotenv
-uv add --dev pytest pytest-asyncio httpx
+```
+demo-master-agent/          <- repo git proprio, branch main
+  .gitignore                __pycache__/, .venv/, .pytest_cache/, .env
+  .env.example
+  pyproject.toml            name = "demo-master-agent"
+  uv.lock
+  src/demo/config.py
+  tests/test_config.py
 ```
 
-- [ ] **Step 2: Scrivere `backend/pyproject.toml`**
-
-Sostituire la sezione di config generata aggiungendo in coda:
+`pyproject.toml` contiene:
 
 ```toml
+[project]
+name = "demo-master-agent"
+version = "0.1.0"
+description = "Master agent del laboratorio AG-UI: AG-UI su SSE + tool nativi"
+requires-python = ">=3.12"
+dependencies = [
+    "agent-framework-ag-ui>=1.2.2",
+    "agent-framework-core==1.17.0",
+    "agent-framework-openai>=1.14.2",
+    "fastapi>=0.139.2",
+    "python-dotenv>=1.2.3",
+    "uvicorn>=0.52.4",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 ```
 
-- [ ] **Step 3: Scrivere `backend/.env.example`**
+- [x] **Verifica dello stato** (l'unico passo da rifare se hai dubbi)
 
-```bash
-# Profilo OpenRouter (default)
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
-OPENAI_API_KEY=sk-or-v1-...
-OPENAI_CHAT_COMPLETION_MODEL=anthropic/claude-sonnet-5
-
-# Profilo LM Studio -- richiede un modello con tool-calling reale
-# OPENAI_BASE_URL=http://localhost:1234/v1
-# OPENAI_API_KEY=lm-studio
-# OPENAI_CHAT_COMPLETION_MODEL=qwen3-14b
-
-# true = nessuna chiamata LLM, usa il fake client (sviluppo offline)
-DEMO_FAKE_CLIENT=false
-```
-
-- [ ] **Step 4: Scrivere il test**
-
-`backend/tests/test_config.py`:
-
-```python
-from demo.config import get_settings
-
-
-def test_settings_read_from_env(monkeypatch):
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-    monkeypatch.setenv("OPENAI_CHAT_COMPLETION_MODEL", "m")
-    monkeypatch.setenv("DEMO_FAKE_CLIENT", "true")
-
-    s = get_settings()
-
-    assert s.base_url == "http://localhost:1234/v1"
-    assert s.model == "m"
-    assert s.use_fake_client is True
-
-
-def test_fake_client_defaults_to_false(monkeypatch):
-    monkeypatch.delenv("DEMO_FAKE_CLIENT", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-
-    assert get_settings().use_fake_client is False
-```
-
-- [ ] **Step 5: Eseguire il test e verificare che fallisca**
-
-Run: `cd /mnt/c/project/demo/backend && uv run pytest tests/test_config.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'demo.config'`
-
-- [ ] **Step 6: Implementare `backend/src/demo/config.py`**
-
-```python
-"""Lettura della configurazione da variabili d'ambiente."""
-from __future__ import annotations
-
-import os
-from dataclasses import dataclass
-
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
-@dataclass(frozen=True)
-class Settings:
-    base_url: str
-    api_key: str
-    model: str
-    use_fake_client: bool
-
-
-def get_settings() -> Settings:
-    """Costruisce le Settings dall'ambiente. Nessuna cache: i test cambiano l'env."""
-    return Settings(
-        base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        model=os.getenv("OPENAI_CHAT_COMPLETION_MODEL", "anthropic/claude-sonnet-5"),
-        use_fake_client=os.getenv("DEMO_FAKE_CLIENT", "false").lower() == "true",
-    )
-```
-
-- [ ] **Step 7: Eseguire il test e verificare che passi**
-
-Run: `uv run pytest tests/test_config.py -v`
+Run: `cd /mnt/c/project/demo/demo-master-agent && uv run pytest -v`
 Expected: PASS (2 test)
-
-- [ ] **Step 8: Commit**
-
-```bash
-cd /mnt/c/project/demo
-git add backend/pyproject.toml backend/.env.example backend/src/demo/config.py backend/tests/test_config.py
-git commit -m "feat: scaffold backend con lettura configurazione"
-```
 
 ---
 
@@ -216,9 +156,9 @@ git commit -m "feat: scaffold backend con lettura configurazione"
 Serve prima di tutto il resto: è ciò che rende i test deterministici e permette di sviluppare senza LLM.
 
 **Files:**
-- Create: `backend/src/demo/chat_clients/__init__.py`
-- Create: `backend/src/demo/chat_clients/fake.py`
-- Test: `backend/tests/test_fake_client.py`
+- Create: `demo-master-agent/src/demo/chat_clients/__init__.py`
+- Create: `demo-master-agent/src/demo/chat_clients/fake.py`
+- Test: `demo-master-agent/tests/test_fake_client.py`
 
 **Interfaces:**
 - Consumes: niente
@@ -226,7 +166,7 @@ Serve prima di tutto il resto: è ciò che rende i test deterministici e permett
 
 - [ ] **Step 1: Scrivere il test**
 
-`backend/tests/test_fake_client.py`:
+`demo-master-agent/tests/test_fake_client.py`:
 
 ```python
 import pytest
@@ -265,9 +205,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'demo.chat_clients'`
 
 - [ ] **Step 3: Implementare il fake client**
 
-`backend/src/demo/chat_clients/__init__.py` — file vuoto.
+`demo-master-agent/src/demo/chat_clients/__init__.py` — file vuoto.
 
-`backend/src/demo/chat_clients/fake.py`:
+`demo-master-agent/src/demo/chat_clients/fake.py`:
 
 ```python
 """Chat client finto: emette chunk deterministici, senza rete.
@@ -396,18 +336,21 @@ Expected: PASS (2 test)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/demo/chat_clients backend/tests/test_fake_client.py
+cd /mnt/c/project/demo/demo-master-agent
+git add src/demo/chat_clients tests/test_fake_client.py
 git commit -m "feat: fake chat client per test deterministici"
 ```
+
+---
 
 ---
 
 ### Task 3: Tool `ui_table`
 
 **Files:**
-- Create: `backend/src/demo/tools/__init__.py`
-- Create: `backend/src/demo/tools/ui_tools.py`
-- Test: `backend/tests/test_ui_tools.py`
+- Create: `demo-master-agent/src/demo/tools/__init__.py`
+- Create: `demo-master-agent/src/demo/tools/ui_tools.py`
+- Test: `demo-master-agent/tests/test_ui_tools.py`
 
 **Interfaces:**
 - Consumes: niente
@@ -417,7 +360,7 @@ Il tool restituisce un `Content` costruito con `state_update(text, *, state, too
 
 - [ ] **Step 1: Scrivere il test**
 
-`backend/tests/test_ui_tools.py`:
+`demo-master-agent/tests/test_ui_tools.py`:
 
 ```python
 import json
@@ -469,9 +412,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'demo.tools'`
 
 - [ ] **Step 3: Implementare il tool**
 
-`backend/src/demo/tools/__init__.py` — file vuoto.
+`demo-master-agent/src/demo/tools/__init__.py` — file vuoto.
 
-`backend/src/demo/tools/ui_tools.py`:
+`demo-master-agent/src/demo/tools/ui_tools.py`:
 
 ```python
 """Tool che producono artefatti renderizzati dal frontend."""
@@ -524,22 +467,25 @@ Expected: PASS (4 test)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/demo/tools backend/tests/test_ui_tools.py
+cd /mnt/c/project/demo/demo-master-agent
+git add src/demo/tools tests/test_ui_tools.py
 git commit -m "feat: tool ui_table con payload per la UI"
 ```
+
+---
 
 ---
 
 ### Task 4: Master agent e app FastAPI
 
 **Files:**
-- Create: `backend/src/demo/agents/__init__.py`
-- Create: `backend/src/demo/agents/master.py`
-- Create: `backend/src/demo/server/__init__.py`
-- Create: `backend/src/demo/server/app.py`
-- Create: `backend/src/demo/__main__.py`
-- Test: `backend/tests/test_agui_stream.py`
-- Test: `backend/tests/conftest.py`
+- Create: `demo-master-agent/src/demo/agents/__init__.py`
+- Create: `demo-master-agent/src/demo/agents/master.py`
+- Create: `demo-master-agent/src/demo/server/__init__.py`
+- Create: `demo-master-agent/src/demo/server/app.py`
+- Create: `demo-master-agent/src/demo/__main__.py`
+- Test: `demo-master-agent/tests/test_agui_stream.py`
+- Test: `demo-master-agent/tests/conftest.py`
 
 **Interfaces:**
 - Consumes: `demo.config.get_settings`, `demo.chat_clients.fake.FakeStreamingChatClient` e `ToolCallingFakeClient`, `demo.tools.ui_tools.get_tools`
@@ -554,7 +500,7 @@ add_agent_framework_fastapi_endpoint(app, agent, path='/', state_schema=None,
     checkpoint_storage=None, keepalive_seconds=15, a2ui_config=None) -> None
 ```
 
-- [ ] **Step 1: Scrivere `backend/tests/conftest.py`**
+- [ ] **Step 1: Scrivere `demo-master-agent/tests/conftest.py`**
 
 ```python
 import pytest
@@ -592,7 +538,7 @@ def tool_app():
 
 - [ ] **Step 2: Scrivere il test di integrazione**
 
-`backend/tests/test_agui_stream.py`:
+`demo-master-agent/tests/test_agui_stream.py`:
 
 ```python
 """Verifica la sequenza di eventi AG-UI prodotta da una run."""
@@ -699,9 +645,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'demo.agents'`
 
 - [ ] **Step 4: Implementare il master agent**
 
-`backend/src/demo/agents/__init__.py` — file vuoto.
+`demo-master-agent/src/demo/agents/__init__.py` — file vuoto.
 
-`backend/src/demo/agents/master.py`:
+`demo-master-agent/src/demo/agents/master.py`:
 
 ```python
 """Costruzione del master agent."""
@@ -743,9 +689,9 @@ def build_master_agent(chat_client: BaseChatClient | None = None) -> Agent:
 
 - [ ] **Step 5: Implementare l'app**
 
-`backend/src/demo/server/__init__.py` — file vuoto.
+`demo-master-agent/src/demo/server/__init__.py` — file vuoto.
 
-`backend/src/demo/server/app.py`:
+`demo-master-agent/src/demo/server/app.py`:
 
 ```python
 """App FastAPI: espone il master agent via AG-UI su SSE."""
@@ -782,7 +728,7 @@ def create_app(agent: Agent | None = None) -> FastAPI:
     return app
 ```
 
-`backend/src/demo/__main__.py`:
+`demo-master-agent/src/demo/__main__.py`:
 
 ```python
 """Entrypoint: python -m demo"""
@@ -802,7 +748,7 @@ Expected: PASS (tutti — 6 nuovi in `test_agui_stream.py`)
 - [ ] **Step 7: Verifica manuale contro il server reale**
 
 ```bash
-cd /mnt/c/project/demo/backend
+cd /mnt/c/project/demo/demo-master-agent
 DEMO_FAKE_CLIENT=true uv run python -m demo &
 curl -sN -X POST http://127.0.0.1:8000/agui \
   -H 'Content-Type: application/json' -H 'Accept: text/event-stream' \
@@ -814,18 +760,144 @@ Expected: una sequenza che inizia con `data: {"type":"RUN_STARTED",...}` e termi
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/src/demo/agents backend/src/demo/server backend/src/demo/__main__.py backend/tests/
+cd /mnt/c/project/demo/demo-master-agent
+git add src/demo/agents src/demo/server src/demo/__main__.py tests/
 git commit -m "feat: endpoint AG-UI SSE con master agent"
 ```
 
 ---
 
-### Task 5: Tipi e client SSE del frontend
+---
+
+### Task 5: Immagine del master agent e repo `demo-infra`
+
+Il primo dei due task di containerizzazione. Qui l'agente diventa un'immagine e
+`demo-infra` acquisisce il `compose.yaml` che, per ora, alza un servizio solo.
 
 **Files:**
-- Create: `frontend/` (progetto Next.js)
-- Create: `frontend/lib/agui/types.ts`
-- Create: `frontend/lib/agui/client.ts`
+- Create: `demo-master-agent/Dockerfile`
+- Create: `demo-master-agent/.dockerignore`
+- Create: `demo-infra/compose.yaml`
+- Create: `demo-infra/.env.example`
+
+**Interfaces:**
+- Consumes: `demo.server.app.create_app` (Task 4)
+- Produces: servizio compose `master-agent`, in ascolto su `8000`
+
+- [ ] **Step 1: Scrivere `demo-master-agent/.dockerignore`**
+
+```gitignore
+.venv/
+__pycache__/
+.pytest_cache/
+.git/
+.env
+tests/
+```
+
+- [ ] **Step 2: Scrivere `demo-master-agent/Dockerfile`**
+
+```dockerfile
+# uv fornisce l'immagine con il gestore gia' dentro: niente pip, niente wheel a mano.
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+WORKDIR /app
+
+# Prima i soli manifest: cosi' il layer delle dipendenze si invalida
+# solo quando cambiano le dipendenze, non a ogni modifica del codice.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY src ./src
+RUN uv sync --frozen --no-dev
+
+EXPOSE 8000
+
+# host 0.0.0.0: dentro un container 127.0.0.1 non e' raggiungibile da fuori.
+CMD ["uv", "run", "uvicorn", "demo.server.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+- [ ] **Step 3: Costruire l'immagine e verificare che l'app risponda**
+
+```bash
+cd /mnt/c/project/demo/demo-master-agent
+docker build -t demo-master-agent:dev .
+docker run --rm -d --name ma-test -p 8000:8000 -e DEMO_FAKE_CLIENT=true demo-master-agent:dev
+sleep 3
+curl -s http://127.0.0.1:8000/health
+docker rm -f ma-test
+```
+
+Expected: `{"status":"ok"}`
+
+- [ ] **Step 4: Scrivere `demo-infra/.env.example`**
+
+```bash
+# Copiare in .env e riempire. compose lo legge automaticamente.
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=sk-or-v1-...
+OPENAI_CHAT_COMPLETION_MODEL=anthropic/claude-sonnet-5
+
+# true = nessuna chiamata LLM
+DEMO_FAKE_CLIENT=false
+```
+
+- [ ] **Step 5: Scrivere `demo-infra/compose.yaml`**
+
+```yaml
+# I servizi si costruiscono dai repo fratelli: i tre repo devono stare
+# nella stessa cartella padre perche' questi context relativi funzionino.
+services:
+  master-agent:
+    build: ../demo-master-agent
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_COMPLETION_MODEL: ${OPENAI_CHAT_COMPLETION_MODEL}
+      DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+```
+
+- [ ] **Step 6: Alzare il servizio via compose e verificarlo**
+
+```bash
+cd /mnt/c/project/demo/demo-infra
+cp .env.example .env
+docker compose up -d --build
+sleep 5
+docker compose ps
+curl -s http://127.0.0.1:8000/health
+docker compose down
+```
+
+Expected: `master-agent` in stato `running (healthy)`, e `{"status":"ok"}` dal curl.
+
+- [ ] **Step 7: Commit nei due repo**
+
+```bash
+cd /mnt/c/project/demo/demo-master-agent
+git add Dockerfile .dockerignore
+git commit -m "feat: immagine docker del master agent"
+
+cd /mnt/c/project/demo/demo-infra
+git add compose.yaml .env.example
+git commit -m "feat: compose con il servizio master-agent"
+```
+
+---
+
+### Task 6: Tipi e client SSE del frontend
+
+**Files:**
+- Create: `demo-frontend/` (repo Next.js)
+- Create: `demo-frontend/lib/agui/types.ts`
+- Create: `demo-frontend/lib/agui/client.ts`
 
 **Interfaces:**
 - Consumes: l'endpoint `POST /agui` della Task 4
@@ -834,12 +906,17 @@ git commit -m "feat: endpoint AG-UI SSE con master agent"
 - [ ] **Step 1: Creare il progetto Next.js**
 
 ```bash
+# Fratello degli altri repo: compose lo costruira' da ../demo-frontend.
 cd /mnt/c/project/demo
-npx create-next-app@latest frontend --typescript --tailwind --app --eslint --no-src-dir --import-alias "@/*" --use-npm
-cd frontend && npm i -D vitest
+npx create-next-app@latest demo-frontend --typescript --tailwind --app --eslint --no-src-dir --import-alias "@/*" --use-npm
+
+cd demo-frontend
+npm i -D vitest
+# create-next-app inizializza gia' un repo git: verificare, e crearlo se manca.
+git rev-parse --git-dir >/dev/null 2>&1 || git init -b main
 ```
 
-- [ ] **Step 2: Aggiungere lo script di test in `frontend/package.json`**
+- [ ] **Step 2: Aggiungere lo script di test in `demo-frontend/package.json`**
 
 Dentro `"scripts"`, aggiungere:
 
@@ -849,7 +926,7 @@ Dentro `"scripts"`, aggiungere:
 
 - [ ] **Step 3: Scrivere i tipi degli eventi**
 
-`frontend/lib/agui/types.ts`:
+`demo-frontend/lib/agui/types.ts`:
 
 ```typescript
 // Eventi AG-UI, in camelCase come arrivano sul filo.
@@ -884,7 +961,7 @@ export interface RunInput {
 
 - [ ] **Step 4: Scrivere il client SSE**
 
-`frontend/lib/agui/client.ts`:
+`demo-frontend/lib/agui/client.ts`:
 
 ```typescript
 import type { AGUIEvent, RunInput } from "./types";
@@ -934,34 +1011,36 @@ export async function runAgent(
 
 - [ ] **Step 5: Verificare che il progetto compili**
 
-Run: `cd /mnt/c/project/demo/frontend && npx tsc --noEmit`
+Run: `cd /mnt/c/project/demo/demo-frontend && npx tsc --noEmit`
 Expected: nessun errore
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /mnt/c/project/demo
-git add frontend/
+cd /mnt/c/project/demo/demo-frontend
+git add .
 git commit -m "feat: scaffold frontend Next.js con client AG-UI SSE"
 ```
 
 ---
 
-### Task 6: Reducer
+---
+
+### Task 7: Reducer
 
 Il pezzo con più logica, e l'unico interamente testabile senza browser né rete.
 
 **Files:**
-- Create: `frontend/lib/agui/reducer.ts`
-- Test: `frontend/lib/agui/reducer.test.ts`
+- Create: `demo-frontend/lib/agui/reducer.ts`
+- Test: `demo-frontend/lib/agui/reducer.test.ts`
 
 **Interfaces:**
-- Consumes: `AGUIEvent` dalla Task 5
+- Consumes: `AGUIEvent` dalla Task 6
 - Produces: `LabState`, `initialState: LabState`, `reduce(state: LabState, event: AGUIEvent): LabState`
 
 - [ ] **Step 1: Scrivere il test**
 
-`frontend/lib/agui/reducer.test.ts`:
+`demo-frontend/lib/agui/reducer.test.ts`:
 
 ```typescript
 import { describe, expect, it } from "vitest";
@@ -1061,12 +1140,12 @@ describe("reduce", () => {
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
 
-Run: `cd /mnt/c/project/demo/frontend && npm test`
+Run: `cd /mnt/c/project/demo/demo-frontend && npm test`
 Expected: FAIL — `Failed to resolve import "./reducer"`
 
 - [ ] **Step 3: Implementare il reducer**
 
-`frontend/lib/agui/reducer.ts`:
+`demo-frontend/lib/agui/reducer.ts`:
 
 ```typescript
 import type { AGUIEvent } from "./types";
@@ -1188,27 +1267,29 @@ Expected: PASS (8 test)
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /mnt/c/project/demo
-git add frontend/lib/agui/reducer.ts frontend/lib/agui/reducer.test.ts
+cd /mnt/c/project/demo/demo-frontend
+git add lib/agui/reducer.ts lib/agui/reducer.test.ts
 git commit -m "feat: reducer AG-UI puro con test"
 ```
 
 ---
 
-### Task 7: UI a tre pannelli
+---
+
+### Task 8: UI a tre pannelli
 
 **Files:**
-- Create: `frontend/components/Chat.tsx`
-- Create: `frontend/components/StatePanel.tsx`
-- Create: `frontend/components/Inspector.tsx`
-- Create: `frontend/components/Lab.tsx`
-- Modify: `frontend/app/page.tsx`
+- Create: `demo-frontend/components/Chat.tsx`
+- Create: `demo-frontend/components/StatePanel.tsx`
+- Create: `demo-frontend/components/Inspector.tsx`
+- Create: `demo-frontend/components/Lab.tsx`
+- Modify: `demo-frontend/app/page.tsx`
 
 **Interfaces:**
-- Consumes: `runAgent` (Task 5), `reduce` / `initialState` / `LabState` (Task 6)
+- Consumes: `runAgent` (Task 6), `reduce` / `initialState` / `LabState` (Task 7)
 - Produces: la pagina completa
 
-- [ ] **Step 1: Scrivere `frontend/components/Chat.tsx`**
+- [ ] **Step 1: Scrivere `demo-frontend/components/Chat.tsx`**
 
 ```tsx
 "use client";
@@ -1269,7 +1350,7 @@ export function Chat({ messages, running, error, onSend }: Props) {
 }
 ```
 
-- [ ] **Step 2: Scrivere `frontend/components/StatePanel.tsx`**
+- [ ] **Step 2: Scrivere `demo-frontend/components/StatePanel.tsx`**
 
 ```tsx
 "use client";
@@ -1302,7 +1383,7 @@ export function StatePanel({ shared }: Props) {
 }
 ```
 
-- [ ] **Step 3: Scrivere `frontend/components/Inspector.tsx`**
+- [ ] **Step 3: Scrivere `demo-frontend/components/Inspector.tsx`**
 
 ```tsx
 "use client";
@@ -1358,7 +1439,7 @@ export function Inspector({ events }: { events: AGUIEvent[] }) {
 }
 ```
 
-- [ ] **Step 4: Scrivere `frontend/components/Lab.tsx`**
+- [ ] **Step 4: Scrivere `demo-frontend/components/Lab.tsx`**
 
 ```tsx
 "use client";
@@ -1419,7 +1500,7 @@ export function Lab() {
 }
 ```
 
-- [ ] **Step 5: Sostituire `frontend/app/page.tsx`**
+- [ ] **Step 5: Sostituire `demo-frontend/app/page.tsx`**
 
 ```tsx
 import { Lab } from "@/components/Lab";
@@ -1431,7 +1512,7 @@ export default function Page() {
 
 - [ ] **Step 6: Verificare che compili**
 
-Run: `cd /mnt/c/project/demo/frontend && npx tsc --noEmit && npm run build`
+Run: `cd /mnt/c/project/demo/demo-frontend && npx tsc --noEmit && npm run build`
 Expected: nessun errore
 
 - [ ] **Step 7: Verifica manuale end-to-end**
@@ -1440,10 +1521,10 @@ Due terminali:
 
 ```bash
 # terminale 1
-cd /mnt/c/project/demo/backend && DEMO_FAKE_CLIENT=true uv run python -m demo
+cd /mnt/c/project/demo/demo-master-agent && DEMO_FAKE_CLIENT=true uv run python -m demo
 
 # terminale 2
-cd /mnt/c/project/demo/frontend && npm run dev
+cd /mnt/c/project/demo/demo-frontend && npm run dev
 ```
 
 Aprire `http://localhost:3000`, scrivere "ciao", premere invia.
@@ -1453,107 +1534,140 @@ Expected:
 - l'inspector elenca `RUN_STARTED`, `TEXT_MESSAGE_START`, più `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_END`, `MESSAGES_SNAPSHOT`, `RUN_FINISHED`;
 - i filtri `testo` / `tool` / `stato` riducono la lista;
 - nessun errore CORS in console;
-- il pannello "Stato condiviso" resta vuoto — **è corretto**: il fake client non chiama tool, quindi nessuno `STATE_SNAPSHOT` viene emesso. Si popola nella Task 8 con un LLM vero.
+- il pannello "Stato condiviso" resta vuoto — **è corretto**: il fake client non chiama tool, quindi nessuno `STATE_SNAPSHOT` viene emesso. Si popola nella Task 9 con un LLM vero.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /mnt/c/project/demo
-git add frontend/components frontend/app/page.tsx
+cd /mnt/c/project/demo/demo-frontend
+git add components app/page.tsx
 git commit -m "feat: UI a tre pannelli alimentata da un solo stream"
 ```
 
 ---
 
-### Task 8: README e verifica con LLM reale
+---
+
+### Task 9: Immagine del frontend, compose completo, README
 
 **Files:**
-- Create: `demo/README.md`
-- Create: `demo/.gitignore`
+- Create: `demo-frontend/Dockerfile`
+- Create: `demo-frontend/.dockerignore`
+- Modify: `demo-infra/compose.yaml`
+- Create: `demo-infra/README.md`
 
 **Interfaces:**
 - Consumes: tutto quanto sopra
-- Produces: istruzioni di avvio
+- Produces: `docker compose up` che alza l'intera demo
 
-- [ ] **Step 1: Scrivere `demo/.gitignore`**
+**Attenzione a due cose, entrambe fonte di errori silenziosi:**
+
+1. Le variabili `NEXT_PUBLIC_*` sono **incorporate al momento della build**, non lette a runtime. Vanno passate come `ARG`, non come `environment`.
+2. La fetch verso l'agente parte dal **browser**, non dal container del frontend. L'URL deve quindi essere `http://localhost:8000/agui` — il nome di servizio compose `master-agent` non è risolvibile dal browser.
+
+- [ ] **Step 1: Scrivere `demo-frontend/.dockerignore`**
 
 ```gitignore
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-.pytest_cache/
-backend/.env
-
-# Node
 node_modules/
 .next/
-frontend/.env.local
-
-# OS
-.DS_Store
+.git/
+.env.local
 ```
 
-- [ ] **Step 2: Scrivere `demo/README.md`**
+- [ ] **Step 2: Abilitare l'output standalone in `demo-frontend/next.config.ts`**
 
-````markdown
-# Laboratorio AG-UI
+```typescript
+import type { NextConfig } from "next";
 
-Demo locale di un'interfaccia agentica: chat in streaming, stato condiviso
-ed event inspector, tutti alimentati da un solo stream SSE in protocollo AG-UI.
+const nextConfig: NextConfig = {
+  // Produce un bundle autosufficiente: immagine finale senza node_modules.
+  output: "standalone",
+};
 
-Design: `docs/specs/2026-09-07-agui-lab-design.md`
-
-## Requisiti
-
-- Python 3.12 e [uv](https://docs.astral.sh/uv/)
-- Node 20+
-- Una API key OpenRouter, oppure LM Studio in ascolto su `localhost:1234`
-
-## Avvio
-
-```bash
-# backend
-cd backend
-cp .env.example .env        # inserire la propria API key
-uv run python -m demo       # http://127.0.0.1:8000
-
-# frontend, in un altro terminale
-cd frontend
-npm install
-npm run dev                 # http://localhost:3000
+export default nextConfig;
 ```
 
-Per lavorare senza LLM e senza rete: `DEMO_FAKE_CLIENT=true uv run python -m demo`
+- [ ] **Step 3: Scrivere `demo-frontend/Dockerfile`**
 
-## Test
+```dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
 
-```bash
-cd backend && uv run pytest -v
-cd frontend && npm test
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+# NEXT_PUBLIC_* viene incorporato qui, in build: a runtime sarebbe troppo tardi.
+ARG NEXT_PUBLIC_AGUI_URL=http://localhost:8000/agui
+ENV NEXT_PUBLIC_AGUI_URL=$NEXT_PUBLIC_AGUI_URL
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+EXPOSE 3000
+CMD ["node", "server.js"]
 ```
 
-## Stato
+- [ ] **Step 4: Aggiungere il servizio frontend a `demo-infra/compose.yaml`**
 
-Tappa 1 (walking skeleton) completata. Mancano il piano di lavoro, le skill,
-la tabella comparativa (tappa 2) e i sottoagenti A2A (tappa 3).
-````
+Sotto `master-agent`, allo stesso livello di indentazione:
 
-- [ ] **Step 3: Eseguire l'intera suite di test**
+```yaml
+  frontend:
+    build:
+      context: ../demo-frontend
+      args:
+        # URL usato dal browser, non dalla rete interna di compose.
+        NEXT_PUBLIC_AGUI_URL: http://localhost:8000/agui
+    ports:
+      - "3000:3000"
+    depends_on:
+      master-agent:
+        condition: service_healthy
+```
+
+- [ ] **Step 5: Alzare tutto e verificare**
 
 ```bash
-cd /mnt/c/project/demo/backend && uv run pytest -v
-cd /mnt/c/project/demo/frontend && npm test
+cd /mnt/c/project/demo/demo-infra
+docker compose up -d --build
+sleep 10
+docker compose ps
+```
+
+Expected: `master-agent` e `frontend` entrambi `running`, il primo `healthy`.
+
+Aprire `http://localhost:3000`, scrivere "ciao".
+
+Expected: la risposta compare progressivamente, l'inspector si popola, nessun errore CORS in console.
+
+```bash
+docker compose down
+```
+
+- [ ] **Step 6: Eseguire l'intera suite di test**
+
+```bash
+cd /mnt/c/project/demo/demo-master-agent && uv run pytest -v
+cd /mnt/c/project/demo/demo-frontend && npm test
 ```
 
 Expected: tutti verdi. Riportare il conteggio effettivo.
 
-- [ ] **Step 4: Verifica con un LLM reale e il tool**
+- [ ] **Step 7: Verifica con un LLM reale e il tool**
 
-Configurare `.env` con una API key vera, poi:
+Configurare `demo-infra/.env` con una API key vera, poi in sviluppo nativo:
 
 ```bash
-cd /mnt/c/project/demo/backend && uv run python -m demo
+cd /mnt/c/project/demo/demo-master-agent && uv run python -m demo
+cd /mnt/c/project/demo/demo-frontend && npm run dev
 ```
 
 Su `http://localhost:3000` scrivere: *"Confronta in tabella i vantaggi di SSE e WebSocket"*.
@@ -1584,15 +1698,73 @@ RUN_FINISHED
 
 Se il modello non chiama il tool: è un limite del modello, non un bug. Annotarlo nel README e riprovare con un modello più capace. Su LM Studio è l'esito atteso con modelli piccoli.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Scrivere `demo-infra/README.md`**
+
+````markdown
+# Laboratorio AG-UI
+
+Demo locale di un'interfaccia agentica: chat in streaming, stato condiviso ed
+event inspector, tutti alimentati da un solo stream SSE in protocollo AG-UI.
+
+Design: `docs/specs/2026-09-07-agui-lab-design.md`
+
+## Repo
+
+| Repo | Ruolo |
+|---|---|
+| `demo-master-agent` | agente principale, endpoint AG-UI su SSE |
+| `demo-frontend` | interfaccia Next.js |
+| `demo-infra` | compose, documentazione (questo repo) |
+| `demo-knowledge-agent` | sottoagente A2A — tappa 3, non ancora presente |
+
+I repo devono stare nella stessa cartella padre: `compose.yaml` li costruisce da
+percorsi fratelli.
+
+## Avvio con Docker
 
 ```bash
-cd /mnt/c/project/demo
-git add README.md .gitignore
-git commit -m "docs: README e istruzioni di avvio"
+cp .env.example .env        # inserire la propria API key
+docker compose up --build   # http://localhost:3000
+```
+
+## Avvio in sviluppo
+
+Più rapido per iterare, niente rebuild di immagini:
+
+```bash
+cd ../demo-master-agent && uv run python -m demo    # :8000
+cd ../demo-frontend && npm run dev                  # :3000
+```
+
+Senza LLM e senza rete: `DEMO_FAKE_CLIENT=true uv run python -m demo`
+
+## Test
+
+```bash
+cd ../demo-master-agent && uv run pytest -v
+cd ../demo-frontend && npm test
+```
+
+## Stato
+
+Tappa 1 (walking skeleton) completata. Mancano il piano di lavoro, le skill e la
+tabella comparativa (tappa 2), e i sottoagenti A2A (tappa 3).
+````
+
+- [ ] **Step 9: Commit nei due repo**
+
+```bash
+cd /mnt/c/project/demo/demo-frontend
+git add Dockerfile .dockerignore next.config.ts
+git commit -m "feat: immagine docker del frontend"
+
+cd /mnt/c/project/demo/demo-infra
+git add compose.yaml README.md
+git commit -m "feat: compose completo e README"
 ```
 
 ---
+
 
 ## Definizione di completo
 
@@ -1602,5 +1774,7 @@ La tappa 1 è finita quando:
 2. Con `DEMO_FAKE_CLIENT=true` la UI mostra testo che arriva progressivamente.
 3. Con un LLM reale, una richiesta di confronto produce eventi `TOOL_CALL_*` nell'inspector.
 4. I tre pannelli sono alimentati da un solo stream: nessuna seconda chiamata di rete oltre a `POST /agui`.
+5. `docker compose up --build` da `demo-infra` alza entrambi i servizi e la demo funziona su `http://localhost:3000`.
+6. I tre repo hanno storia git propria e nessuno di essi contiene gli altri.
 
 Il punto 4 è il vero obiettivo della tappa. Se per popolare un pannello serve una seconda API, l'architettura è sbagliata e la tappa 2 ci costruirebbe sopra.
