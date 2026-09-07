@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import itertools
+import logging
 from typing import Annotated
 
 from agent_framework import Content, FunctionTool, tool
 from agent_framework.ag_ui import state_update
+
+logger = logging.getLogger(__name__)
 
 # Chiavi riservate sotto cui state_update deposita i suoi payload in
 # Content.additional_properties. Il display payload e' una stringa JSON,
@@ -30,6 +33,7 @@ def ui_table(
     Usa questo tool quando devi confrontare piu' elementi lungo dimensioni comuni.
     """
     artifact_id = f"art_{next(_artifact_ids)}"
+    logger.info("Tabella '%s' prodotta: %d colonne, %d righe.", title, len(columns), len(rows))
     return state_update(
         text=f"Ho mostrato la tabella '{title}' con {len(rows)} righe.",
         tool_result={

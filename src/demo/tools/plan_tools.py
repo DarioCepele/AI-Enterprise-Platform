@@ -5,6 +5,7 @@ I tool non emettono testo per l'utente: mutano `state.plan`, e il pannello
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
@@ -12,6 +13,8 @@ from agent_framework import Content, FunctionTool, tool
 from agent_framework.ag_ui import state_update
 
 from demo.tools.ui_tools import STATE_KEY
+
+logger = logging.getLogger(__name__)
 
 STEP_STATUSES = ("pending", "in_progress", "completed", "failed")
 
@@ -120,6 +123,7 @@ def build_plan_tools(store: PlanStore) -> list[FunctionTool]:
         richiede piu' passi. Non usarlo per richieste da un passo solo.
         """
         plan = store.write(steps)
+        logger.info("Piano scritto: %d passi.", len(plan["steps"]))
         return state_update(
             text=f"Piano scritto: {len(plan['steps'])} passi.",
             tool_result={"component": "plan", "steps": len(plan["steps"])},
@@ -140,6 +144,10 @@ def build_plan_tools(store: PlanStore) -> list[FunctionTool]:
         finito, cosi' l'utente vede il piano avanzare mentre lavori.
         """
         plan = store.set_status(step_id, status, note)
+        if status == "failed":
+            logger.error("Passo %d: failed. Motivo: %s", step_id, note)
+        else:
+            logger.info("Passo %d: %s.", step_id, status)
         return state_update(
             text=f"Passo {step_id}: {status}.",
             tool_result={"component": "plan", "step_id": step_id, "status": status},

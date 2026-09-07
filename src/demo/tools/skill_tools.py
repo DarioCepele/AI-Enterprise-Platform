@@ -5,11 +5,14 @@ una skill scritta qui si porta altrove senza riscriverla.
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Annotated, Any
 
 from agent_framework import Content, FunctionTool, tool
+
+logger = logging.getLogger(__name__)
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
@@ -78,12 +81,14 @@ def build_skill_tools(root: Path = SKILLS_DIR) -> list[FunctionTool]:
         """
         wanted = next((s for s in catalogue if s["name"] == name), None)
         if wanted is None:
+            logger.warning("Skill '%s' non trovata.", name)
             known = ", ".join(s["name"] for s in catalogue) or "nessuna"
             # Errore come testo, non eccezione: il modello legge, si corregge,
             # e la run continua invece di morire su un nome sbagliato.
             return Content.from_text(
                 f"La skill '{name}' non esiste. Skill disponibili: {known}."
             )
+        logger.info("Skill '%s' caricata.", name)
         return Content.from_text(wanted["body"])
 
     # La docstring del tool e' cio' che il modello legge: il catalogo va dentro.
