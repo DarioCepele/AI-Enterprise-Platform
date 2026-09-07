@@ -14,8 +14,13 @@ export type AGUIEvent =
   | { type: "TOOL_CALL_RESULT"; toolCallId: string; content: unknown }
   | { type: "STATE_SNAPSHOT"; snapshot: Record<string, unknown> }
   | { type: "STATE_DELTA"; delta: unknown[] }
-  | { type: "MESSAGES_SNAPSHOT"; messages: unknown[] }
-  | { type: string; [key: string]: unknown }; // fallback esplicito sull'ignoto
+  | { type: "MESSAGES_SNAPSHOT"; messages: unknown[] };
+
+// Nessun membro catch-all nell'unione: combaciando con ogni `type` distruggerebbe
+// il narrowing, e dentro ogni `case` del reducer i campi tornerebbero `unknown`.
+// Gli eventi non ancora modellati (le tappe 2 e 3 ne aggiungono) arrivano comunque
+// a runtime: li raccoglie il ramo `default` del reducer, che li registra
+// nell'inspector senza interpretarli.
 
 export interface RunInput {
   threadId: string;

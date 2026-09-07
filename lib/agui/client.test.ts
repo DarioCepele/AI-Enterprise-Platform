@@ -32,7 +32,8 @@ describe("runAgent", () => {
     const expected: AGUIEvent[] = [
       { type: "RUN_STARTED", threadId: "t1", runId: "r1" },
       { type: "TOOL_CALL_RESULT", toolCallId: "c1", content: '{"component":"ui-table"}' },
-      { type: "EVENTO_FUTURO", valore: 42 },
+      // Non modellato nei tipi: il client deve comunque consegnarlo intatto.
+      { type: "EVENTO_FUTURO", valore: 42 } as unknown as AGUIEvent,
       { type: "RUN_FINISHED", threadId: "t1", runId: "r1" },
     ];
     const { body, fetchMock } = mockStream([
