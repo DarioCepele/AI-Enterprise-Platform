@@ -10,6 +10,12 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_CHAT_COMPLETION_MODEL: ${OPENAI_CHAT_COMPLETION_MODEL}
       DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
+      # Vuoto = default del backend (localhost e 127.0.0.1 su 3000 e 3001).
+      DEMO_ALLOWED_ORIGINS: ${DEMO_ALLOWED_ORIGINS:-}
+    # Per raggiungere un LLM in ascolto sull'host (LM Studio, Ollama):
+    # dentro il container "localhost" e' il container stesso.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
