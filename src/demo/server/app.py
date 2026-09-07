@@ -7,9 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..agents.master import build_master_agent
-
-# Origini del dev server Next.js.
-ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+from ..config import get_settings
 
 # Stato condiviso iniziale. In tappa 2 `plan` viene popolato dai tool del piano.
 DEFAULT_STATE = {"artifacts": []}
@@ -18,10 +16,13 @@ DEFAULT_STATE = {"artifacts": []}
 def create_app(agent: Agent | None = None) -> FastAPI:
     """Costruisce l'app. `agent` va passato nei test per iniettare il fake client."""
     app = FastAPI(title="Laboratorio AG-UI")
+    # Le origini non sono hardcoded: il dev server di Next slitta di porta se la
+    # 3000 e' occupata, e un'origine sbagliata fallisce solo nel browser.
+    allowed_origins = list(get_settings().allowed_origins)
     # In agent-framework-ag-ui 1.2.2 allow_origins non e' ancora implementato.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=ALLOWED_ORIGINS,
+        allow_origins=allowed_origins,
         allow_methods=["POST"],
         allow_headers=["Content-Type"],
     )
@@ -34,7 +35,7 @@ def create_app(agent: Agent | None = None) -> FastAPI:
         app,
         agent or build_master_agent(),
         "/agui",
-        allow_origins=ALLOWED_ORIGINS,
+        allow_origins=allowed_origins,
         default_state=DEFAULT_STATE,
     )
     return app

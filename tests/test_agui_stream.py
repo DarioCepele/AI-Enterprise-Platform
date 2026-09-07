@@ -124,3 +124,21 @@ async def test_cors_preflight_allows_dev_frontend(app):
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert "POST" in response.headers["access-control-allow-methods"]
     assert "content-type" in response.headers["access-control-allow-headers"].lower()
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight_allows_next_fallback_port(app):
+    """Se la 3000 e' occupata Next slitta sulla 3001: il CORS deve seguirlo."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.options(
+            "/agui",
+            headers={
+                "Origin": "http://localhost:3001",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3001"

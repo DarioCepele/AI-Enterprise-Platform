@@ -20,3 +20,19 @@ def test_fake_client_defaults_to_false(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
 
     assert get_settings().use_fake_client is False
+
+
+def test_allowed_origins_default_covers_next_fallback_port(monkeypatch):
+    """Next slitta su 3001 se la 3000 e' occupata: entrambe devono passare il CORS."""
+    monkeypatch.delenv("DEMO_ALLOWED_ORIGINS", raising=False)
+
+    origins = get_settings().allowed_origins
+
+    assert "http://localhost:3000" in origins
+    assert "http://localhost:3001" in origins
+
+
+def test_allowed_origins_read_from_env(monkeypatch):
+    monkeypatch.setenv("DEMO_ALLOWED_ORIGINS", "http://a.test , http://b.test")
+
+    assert get_settings().allowed_origins == ("http://a.test", "http://b.test")
