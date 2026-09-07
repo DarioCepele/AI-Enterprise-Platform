@@ -3,6 +3,7 @@ import pytest
 from demo.agents.master import build_master_agent
 from demo.chat_clients.fake import FakeStreamingChatClient, ToolCallingFakeClient
 from demo.server.app import create_app
+from demo.tools.plan_tools import PlanStore
 
 
 @pytest.fixture
@@ -27,5 +28,28 @@ def tool_app():
             },
             final_text="Ecco il confronto.",
         )
+    )
+    return create_app(agent=agent)
+
+
+@pytest.fixture
+def plan_app():
+    """App con un client che al primo giro scrive un piano."""
+    agent = build_master_agent(
+        chat_client=ToolCallingFakeClient(
+            tool_name="todo_write",
+            tool_args={
+                "steps": [
+                    {
+                        "id": 1,
+                        "title": "Primo passo",
+                        "detail": "dettaglio",
+                        "source": "ui_table",
+                    }
+                ]
+            },
+            final_text="Piano pronto.",
+        ),
+        plan_store=PlanStore(),
     )
     return create_app(agent=agent)

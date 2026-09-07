@@ -1,4 +1,4 @@
-"""App FastAPI: espone il master agent via AG-UI su SSE."""
+"""App FastAPI: espone il master agent via AG-UI su SSE, piu' i log operativi."""
 from __future__ import annotations
 
 from agent_framework import Agent
@@ -8,14 +8,23 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..agents.master import build_master_agent
 from ..config import get_settings
+from ..logging_bridge import LogCollector
 
-# Stato condiviso iniziale. In tappa 2 `plan` viene popolato dai tool del piano.
-DEFAULT_STATE = {"artifacts": []}
+# La forma iniziale dello stato condiviso. `plan` c'e' gia' vuoto perche' il
+# pannello del frontend possa renderlo prima del primo todo_write, invece di
+# doverne indovinare la forma.
+DEFAULT_STATE = {"artifacts": [], "plan": {"status": "idle", "steps": []}}
 
 
-def create_app(agent: Agent | None = None) -> FastAPI:
-    """Costruisce l'app. `agent` va passato nei test per iniettare il fake client."""
+def create_app(
+    agent: Agent | None = None,
+    collector: LogCollector | None = None,
+) -> FastAPI:
+    """Costruisce l'app. `agent` e `collector` vanno passati nei test."""
     app = FastAPI(title="Laboratorio AG-UI")
+    log_collector = collector if collector is not None else LogCollector()
+    log_collector.attach()
+
     # Le origini non sono hardcoded: il dev server di Next slitta di porta se la
     # 3000 e' occupata, e un'origine sbagliata fallisce solo nel browser.
     allowed_origins = list(get_settings().allowed_origins)
@@ -23,13 +32,23 @@ def create_app(agent: Agent | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
-        allow_methods=["POST"],
+        # GET serve a /logs: senza, il preflight fallisce solo nel browser.
+        allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )
 
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/logs")
+    async def logs(cursor: int = 0) -> dict[str, object]:
+        """I log applicativi dopo `cursor`.
+
+        Canale separato dallo stream AG-UI: gli eventi CUSTOM del protocollo
+        sono riservati al framework e non sono emettibili dal codice applicativo.
+        """
+        return log_collector.since(cursor)
 
     add_agent_framework_fastapi_endpoint(
         app,

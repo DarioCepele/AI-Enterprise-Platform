@@ -127,6 +127,21 @@ async def test_cors_preflight_allows_dev_frontend(app):
 
 
 @pytest.mark.asyncio
+async def test_plan_tool_reaches_the_shared_state(plan_app):
+    events = await collect_events(plan_app)
+
+    snapshots = [e for e in events if e["type"] == "STATE_SNAPSHOT"]
+    assert snapshots, "nessuno STATE_SNAPSHOT: il tool del piano non ha girato"
+
+    plan = snapshots[-1]["snapshot"]["plan"]
+    assert plan["status"] == "in_progress"
+    assert plan["steps"][0]["title"] == "Primo passo"
+    # `artifacts` sopravvive accanto a `plan`: sono due chiavi di primo livello
+    # diverse proprio perche' state_update sostituisce, non fonde.
+    assert "artifacts" in snapshots[-1]["snapshot"]
+
+
+@pytest.mark.asyncio
 async def test_cors_preflight_allows_next_fallback_port(app):
     """Se la 3000 e' occupata Next slitta sulla 3001: il CORS deve seguirlo."""
     transport = httpx.ASGITransport(app=app)
