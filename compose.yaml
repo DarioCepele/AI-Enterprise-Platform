@@ -1,0 +1,17 @@
+# I servizi si costruiscono dai repo fratelli: i tre repo devono stare
+# nella stessa cartella padre perche' questi context relativi funzionino.
+services:
+  master-agent:
+    build: ../demo-master-agent
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_COMPLETION_MODEL: ${OPENAI_CHAT_COMPLETION_MODEL}
+      DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
