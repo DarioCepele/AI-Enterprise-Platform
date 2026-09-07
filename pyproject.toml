@@ -30,3 +30,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/demo"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/demo/skills" = "demo/skills"
