@@ -59,6 +59,14 @@ def test_a_failed_step_fails_the_plan():
     assert plan["steps"][1]["note"] == "il tool non ha risposto"
 
 
+def test_a_failed_step_requires_a_reason():
+    store = PlanStore()
+    store.write(STEPS)
+
+    with pytest.raises(ValueError, match="failed"):
+        store.set_status(1, "failed", None)
+
+
 def test_unknown_step_is_rejected_loudly():
     store = PlanStore()
     store.write(STEPS)

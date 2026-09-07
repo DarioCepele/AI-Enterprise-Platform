@@ -77,6 +77,11 @@ class PlanStore:
             known = ", ".join(str(s["id"]) for s in self._plan["steps"]) or "nessuno"
             raise ValueError(f"passo {step_id} non esiste: passi noti {known}")
 
+        if status == "failed" and (not note or not note.strip()):
+            raise ValueError(
+                f"stato 'failed' richiede un motivo (note): passare un messaggio non vuoto"
+            )
+
         step["status"] = status
         step["note"] = note
         if status == "in_progress" and step["started_at"] is None:
