@@ -61,6 +61,7 @@ class LogCollector:
     def __init__(self) -> None:
         self._entries: deque[dict[str, Any]] = deque(maxlen=MAX_LOG_EVENTS)
         self._handler: _CollectingHandler | None = None
+        self._previous_level: int = logging.NOTSET
         self._next_seq = 1
         # uvicorn serve le richieste su piu' thread: append e since si incrociano.
         self._lock = threading.Lock()
@@ -78,6 +79,10 @@ class LogCollector:
         self._handler = _CollectingHandler(self)
         self._handler.setFormatter(logging.Formatter())
         logger = logging.getLogger(APP_LOGGER)
+        # logging.getLogger("demo") e' un oggetto globale di processo: se non
+        # salviamo il livello di partenza qui, detach() non ha modo di sapere
+        # cosa ripristinare e il livello INFO resterebbe per sempre.
+        self._previous_level = logger.level
         logger.addHandler(self._handler)
         # Senza questo, il livello ereditato dal root (WARNING) scarta gli INFO.
         logger.setLevel(logging.INFO)
@@ -85,7 +90,9 @@ class LogCollector:
     def detach(self) -> None:
         if self._handler is None:
             return
-        logging.getLogger(APP_LOGGER).removeHandler(self._handler)
+        logger = logging.getLogger(APP_LOGGER)
+        logger.removeHandler(self._handler)
+        logger.setLevel(self._previous_level)
         self._handler = None
 
     def since(self, cursor: int) -> dict[str, Any]:

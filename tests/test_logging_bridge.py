@@ -92,3 +92,14 @@ def test_exceptions_arrive_as_text_not_as_objects():
     assert entry["level"] == "ERROR"
     assert "il tool e' esploso" in entry["message"]
     assert "Traceback" in entry["message"]
+
+
+def test_detach_restores_the_previous_level():
+    logger = logging.getLogger("demo")
+    before = logger.level
+
+    collector = LogCollector()
+    collector.attach()
+    collector.detach()
+
+    assert logger.level == before
