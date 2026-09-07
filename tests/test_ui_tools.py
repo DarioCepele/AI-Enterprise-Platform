@@ -27,10 +27,9 @@ def test_ui_table_builds_a_ui_payload():
 def test_ui_table_merges_into_shared_state():
     content = ui_table.func(title="Confronto", columns=["A"], rows=[["1"]])
 
-    # Lo state invece resta un dict.
-    assert content.additional_properties[STATE_KEY] == {
-        "artifacts": [{"component": "ui-table", "title": "Confronto"}]
-    }
+    state = content.additional_properties[STATE_KEY]
+    assert state["artifacts"][0]["component"] == "ui-table"
+    assert state["artifacts"][0]["title"] == "Confronto"
 
 
 def test_ui_table_text_is_for_the_model_not_the_ui():
@@ -38,3 +37,24 @@ def test_ui_table_text_is_for_the_model_not_the_ui():
 
     assert "Confronto" in content.text
     assert "rows" not in content.text
+
+
+def test_ui_table_assigns_matching_ids_to_result_and_state():
+    content = ui_table.func(title="Confronto", columns=["A"], rows=[["1"]])
+
+    payload = json.loads(content.additional_properties[DISPLAY_KEY])
+    state = content.additional_properties[STATE_KEY]
+
+    # La chiave che unisce l'elenco nello stato al payload pieno del tool result.
+    assert payload["id"] == state["artifacts"][0]["id"]
+    assert payload["id"].startswith("art_")
+
+
+def test_ui_table_ids_are_unique_across_calls():
+    first = ui_table.func(title="Uno", columns=["A"], rows=[["1"]])
+    second = ui_table.func(title="Due", columns=["A"], rows=[["2"]])
+
+    first_id = json.loads(first.additional_properties[DISPLAY_KEY])["id"]
+    second_id = json.loads(second.additional_properties[DISPLAY_KEY])["id"]
+
+    assert first_id != second_id
