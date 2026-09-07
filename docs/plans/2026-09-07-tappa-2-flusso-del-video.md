@@ -537,11 +537,11 @@ La spec §2.4 impone il formato **Agent Skills**: una cartella per skill, con de
 - Modify: `demo-master-agent/pyproject.toml` (le skill sono dati, vanno incluse nel wheel)
 
 **Interfaces:**
-- Consumes: `STATE_KEY`, `DISPLAY_KEY` da `demo.tools.ui_tools`
+- Consumes: niente. `load_skill` restituisce testo al modello con `Content.from_text`, non un artefatto UI: non passa da `state_update` e non usa `STATE_KEY` / `DISPLAY_KEY`.
 - Produces:
   - `SKILLS_DIR: Path` — la cartella `src/demo/skills`
   - `parse_skill(text: str) -> dict` con chiavi `name`, `description`, `body`
-  - `list_skills(root: Path = SKILLS_DIR) -> list[dict]` — `[{"name", "description"}]`
+  - `list_skills(root: Path = SKILLS_DIR) -> list[dict]` — `[{"name", "description", "body"}]`. Include il corpo perche' `build_skill_tools` riusa lo stesso dict per servirlo a `load_skill`, senza una seconda funzione di lettura.
   - `build_skill_tools(root: Path = SKILLS_DIR) -> list[FunctionTool]` che restituisce `[load_skill]`
   - `load_skill(name: str) -> Content`: il corpo della skill finisce in `content.text`, cioe' **al modello**; non e' un artefatto UI.
 
@@ -1177,9 +1177,12 @@ def plan_app():
 
 E in `demo-master-agent/tests/test_agui_stream.py`, seguendo lo stile dei casi gia' presenti:
 
+L'helper esistente e' `async def collect_events(app) -> list[dict]` e prende **solo** l'app: il prompt e' fisso, nella costante `REQUEST` in cima al file. I test sono `async` e marcati `@pytest.mark.asyncio`.
+
 ```python
-def test_plan_tool_reaches_the_shared_state(plan_app):
-    events = collect_events(plan_app, "scrivi un piano")
+@pytest.mark.asyncio
+async def test_plan_tool_reaches_the_shared_state(plan_app):
+    events = await collect_events(plan_app)
 
     snapshots = [e for e in events if e["type"] == "STATE_SNAPSHOT"]
     assert snapshots, "nessuno STATE_SNAPSHOT: il tool del piano non ha girato"
@@ -1191,8 +1194,6 @@ def test_plan_tool_reaches_the_shared_state(plan_app):
     # diverse proprio perche' state_update sostituisce, non fonde.
     assert "artifacts" in snapshots[-1]["snapshot"]
 ```
-
-Se `collect_events` non esiste in `test_agui_stream.py` con questo nome, usare l'helper che c'e' e adattare la chiamata: la forma dell'asserzione non cambia.
 
 - [ ] **Step 2: Eseguire i test e verificare che falliscano**
 
@@ -1362,6 +1363,194 @@ git commit -m "feat: master agent con piano e skill, endpoint /logs"
 
 ---
 
+
+### Task 5b: I tool emettono log
+
+Aggiunto **durante l'esecuzione del piano**, non nella stesura. I task 4 e 5 hanno costruito il collettore e l'endpoint, ma nessun modulo applicativo chiama `logging`: `GET /logs` restituisce `entries: []` a ogni run, e il tab LOG del Task 11 sarebbe vuoto per costruzione. Verificato dopo il Task 5: nessuna occorrenza di `getLogger` in `src/demo/` fuori da `logging_bridge.py`.
+
+Le righe di log devono raccontare **cosa ha fatto l'agente**, non ripetere quello che l'inspector mostra già. L'inspector porta gli eventi del protocollo; il log porta il punto di vista del server: quale tool è partito, con che esito, quanto ci ha messo, cosa è andato storto.
+
+**Files:**
+- Modify: `demo-master-agent/src/demo/tools/plan_tools.py`
+- Modify: `demo-master-agent/src/demo/tools/skill_tools.py`
+- Modify: `demo-master-agent/src/demo/tools/ui_tools.py`
+- Test: `demo-master-agent/tests/test_tool_logging.py`
+
+**Interfaces:**
+- Consumes: `LogCollector` da `demo.logging_bridge` (Task 4); i tool dei Task 1, 2, 3
+- Produces: nessuna interfaccia nuova. Ogni modulo di tool ottiene un `logger = logging.getLogger(__name__)`, che essendo i moduli sotto il pacchetto `demo` produce nomi `demo.tools.plan_tools` e simili — quindi il filtro del collettore li cattura e la loro `source` diventa `tools.plan_tools`.
+
+- [ ] **Step 1: Scrivere il test che fallisce**
+
+Creare `demo-master-agent/tests/test_tool_logging.py`:
+
+```python
+from demo.logging_bridge import LogCollector
+from demo.tools.plan_tools import PlanStore, build_plan_tools
+from demo.tools.skill_tools import build_skill_tools
+from demo.tools.ui_tools import ui_table
+
+STEPS = [
+    {"id": 1, "title": "Primo", "detail": "d", "source": "ui_table"},
+    {"id": 2, "title": "Secondo", "detail": "d", "source": "ui_table"},
+]
+
+
+def test_writing_a_plan_is_logged():
+    store = PlanStore()
+    todo_write, _ = build_plan_tools(store)
+
+    with LogCollector() as collector:
+        todo_write.func(steps=STEPS)
+
+    entries = collector.since(0)["entries"]
+    assert len(entries) == 1
+    assert entries[0]["source"] == "tools.plan_tools"
+    assert "2" in entries[0]["message"]
+
+
+def test_every_step_transition_is_logged():
+    store = PlanStore()
+    todo_write, todo_set_status = build_plan_tools(store)
+    todo_write.func(steps=STEPS)
+
+    with LogCollector() as collector:
+        todo_set_status.func(step_id=1, status="in_progress", note=None)
+        todo_set_status.func(step_id=1, status="completed", note=None)
+
+    messages = [e["message"] for e in collector.since(0)["entries"]]
+    assert len(messages) == 2
+    assert "in_progress" in messages[0]
+    assert "completed" in messages[1]
+
+
+def test_a_failed_step_is_logged_as_an_error_with_its_reason():
+    store = PlanStore()
+    todo_write, todo_set_status = build_plan_tools(store)
+    todo_write.func(steps=STEPS)
+
+    with LogCollector() as collector:
+        todo_set_status.func(step_id=1, status="failed", note="il tool non risponde")
+
+    entry = collector.since(0)["entries"][0]
+    # Un passo fallito e' la riga che qualcuno cerchera' nel tab LOG: deve
+    # distinguersi per livello, e portare il motivo con se'.
+    assert entry["level"] == "ERROR"
+    assert "il tool non risponde" in entry["message"]
+
+
+def test_loading_a_skill_is_logged_with_its_name():
+    (load_skill,) = build_skill_tools()
+
+    with LogCollector() as collector:
+        load_skill.func(name="comparison")
+
+    entry = collector.since(0)["entries"][0]
+    assert entry["source"] == "tools.skill_tools"
+    assert "comparison" in entry["message"]
+
+
+def test_asking_for_an_unknown_skill_is_logged_as_a_warning():
+    (load_skill,) = build_skill_tools()
+
+    with LogCollector() as collector:
+        load_skill.func(name="inesistente")
+
+    entry = collector.since(0)["entries"][0]
+    assert entry["level"] == "WARNING"
+    assert "inesistente" in entry["message"]
+
+
+def test_producing_a_table_is_logged_with_its_shape():
+    with LogCollector() as collector:
+        ui_table.func(title="Confronto", columns=["A", "B"], rows=[["1", "2"]])
+
+    entry = collector.since(0)["entries"][0]
+    assert entry["source"] == "tools.ui_tools"
+    # La forma della tabella e' cio' che serve per capire un artefatto sbagliato.
+    assert "Confronto" in entry["message"]
+    assert "1" in entry["message"]
+
+
+def test_tool_logs_never_carry_the_whole_payload():
+    # Il log e' una riga da leggere, non un dump: il payload completo e' gia'
+    # nell'inspector. Una riga lunga rende il tab LOG inutilizzabile.
+    with LogCollector() as collector:
+        ui_table.func(
+            title="Confronto",
+            columns=["A", "B"],
+            rows=[["testo molto lungo " * 20, "altro testo lungo " * 20]],
+        )
+
+    entry = collector.since(0)["entries"][0]
+    assert len(entry["message"]) < 200
+```
+
+- [ ] **Step 2: Eseguire il test e verificare che fallisca**
+
+Run: `cd demo-master-agent && uv run pytest tests/test_tool_logging.py -v`
+Expected: FAIL, `assert len(entries) == 1` con `entries` vuoto — nessun modulo logga ancora.
+
+- [ ] **Step 3: Implementare**
+
+In ciascuno dei tre moduli di tool, aggiungere in cima:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+```
+
+Poi una riga di log per ogni esito osservabile:
+
+- `plan_tools.py`, dentro `todo_write`: dopo aver scritto il piano, un `logger.info` che dice quanti passi ha il piano.
+- `plan_tools.py`, dentro `todo_set_status`: un `logger.error` con il motivo quando lo stato è `failed`, un `logger.info` col nuovo stato negli altri casi. Il messaggio deve contenere la stringa dello stato (`in_progress`, `completed`, `failed`), perché è su quella che i test filtrano.
+- `skill_tools.py`, dentro `load_skill`: un `logger.info` col nome quando la skill esiste, un `logger.warning` col nome richiesto quando non esiste.
+- `ui_tools.py`, dentro `ui_table`: un `logger.info` con titolo, numero di colonne e numero di righe. **Mai le celle**: il test `test_tool_logs_never_carry_the_whole_payload` lo impedisce, ed è il punto — il payload completo sta già nell'inspector.
+
+Nessun log dentro `PlanStore`: è la struttura dati, e loggare lì produrrebbe righe doppie quando i tool la chiamano.
+
+- [ ] **Step 4: Eseguire i test**
+
+Run: `cd demo-master-agent && uv run pytest tests/test_tool_logging.py -v`
+Expected: PASS, 7 test.
+
+Run: `cd demo-master-agent && uv run pytest -q`
+Expected: nessuna regressione.
+
+- [ ] **Step 5: Verificare che i log arrivino davvero all'endpoint**
+
+Con i container su e una chiave valida in `demo-infra/.env`:
+
+```bash
+cd demo-infra
+docker compose up -d --build
+curl -s -X POST http://localhost:8000/agui \
+  -H 'Content-Type: application/json' \
+  -d '{"threadId":"t1","runId":"r1","messages":[{"id":"m1","role":"user","content":"Confronta Python e Go su tipizzazione e concorrenza. Fai prima un piano."}],"state":{},"tools":[],"context":[],"forwardedProps":{}}' \
+  > /dev/null
+curl -s "http://localhost:8000/logs?cursor=0"
+```
+
+Expected: `entries` **non** vuoto, con righe da `tools.plan_tools`, `tools.skill_tools` e `tools.ui_tools`. Riportare l'output reale.
+
+E il controllo che nessun segreto sia passato:
+
+```bash
+curl -s "http://localhost:8000/logs?cursor=0" | grep -c "sk-"
+```
+
+Expected: `0`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd demo-master-agent
+git add src/demo/tools tests/test_tool_logging.py
+git commit -m "feat: i tool emettono log operativi per il tab LOG"
+```
+
+---
 ### Task 6: La fixture di stream reale e i tipi degli eventi di ragionamento
 
 I test del reducer girano su uno stream vero catturato dal backend, non su eventi scritti a mano: e' l'unico modo perche' una sorpresa del protocollo rompa un test invece della demo.
