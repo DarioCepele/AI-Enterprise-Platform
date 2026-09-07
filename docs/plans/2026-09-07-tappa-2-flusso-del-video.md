@@ -2176,6 +2176,7 @@ npm install -D @testing-library/react @testing-library/jest-dom jsdom
 In `demo-frontend/vitest.config.ts` (crearlo se non esiste):
 
 ```ts
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
@@ -2186,7 +2187,7 @@ export default defineConfig({
     globals: true,
   },
   resolve: {
-    alias: { "@": new URL("./", import.meta.url).pathname },
+    alias: { "@": fileURLToPath(new URL("./", import.meta.url)) },
   },
 });
 ```
@@ -2360,6 +2361,8 @@ export function EntryView({ entry }: { entry: Entry }) {
     case "artifact":
       return <UiTable artifact={entry.artifact} />;
   }
+  const unreachable: never = entry;
+  throw new Error(`Variante di entry non supportata: ${JSON.stringify(unreachable)}`);
 }
 ```
 
