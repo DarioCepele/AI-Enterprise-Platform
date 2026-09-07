@@ -1941,21 +1941,26 @@ export function parseArtifact(content: unknown): Artifact | null {
   if (
     shape.component === "ui-table" &&
     typeof shape.title === "string" &&
-    Array.isArray(shape.columns) &&
-    Array.isArray(shape.rows)
+    isStringArray(shape.columns) &&
+    Array.isArray(shape.rows) &&
+    shape.rows.every(isStringArray)
   ) {
     return {
       component: "ui-table",
       id,
       title: shape.title,
-      columns: shape.columns as string[],
-      rows: shape.rows as string[][],
+      columns: shape.columns,
+      rows: shape.rows,
     };
   }
 
   // Variante non ancora implementata: si rende un fallback esplicito invece
   // di far sparire in silenzio qualcosa che il backend ha prodotto.
   return { component: "unknown", id, raw: payload };
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 ```
 
@@ -2128,7 +2133,9 @@ export function withUserMessage(state: LabState, id: string, text: string): LabS
 - [ ] **Step 5: Eseguire i test**
 
 Run: `cd demo-frontend && npx vitest run && npx tsc --noEmit`
-Expected: PASS. I test della tappa 1 che parlavano di `state.messages` vanno riscritti in termini di `state.entries`: sono la stessa asserzione su un nome diverso.
+Expected: test PASS. I test della tappa 1 che parlavano di `state.messages` vanno riscritti in termini di `state.entries`.
+
+`tsc` fallisce temporaneamente gia' dal Task 7: `Chat.tsx` importa ancora `ChatMessage` e `Lab.tsx` usa `messages` in due punti. Il Task 8 migra Chat e il Task 12 migra Lab; non aggiungere compatibilita' temporanea nel reducer. Verificare che non compaiano errori diversi da questi riferimenti. L'intervallo con la migrazione incompleta parte dal Task 7 e termina con il Task 12.
 
 - [ ] **Step 6: Commit**
 
