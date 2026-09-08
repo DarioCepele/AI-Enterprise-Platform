@@ -14,8 +14,6 @@ export function Lab() {
   const inFlight = useRef(false);
   const abort = useRef<AbortController | null>(null);
 
-  // Interrompere e' una scelta dell'utente, non un errore: la run si chiude
-  // con quello che ha gia' prodotto, senza riquadro rosso.
   const stop = useCallback(() => abort.current?.abort(), []);
 
   const send = useCallback(
@@ -25,7 +23,6 @@ export function Lab() {
       const controller = new AbortController();
       abort.current = controller;
       const userMessage = { id: crypto.randomUUID(), role: "user", content: text };
-      // Il messaggio utente lo aggiunge il client: il server non lo rimanda indietro.
       setState((s) => ({ ...withUserMessage(s, userMessage.id, text), running: true }));
 
       try {
@@ -39,8 +36,6 @@ export function Lab() {
             context: [],
             forwardedProps: {},
           },
-          // Il trasporto puo' restare aperto dopo l'evento terminale.
-          // Il modulo si sblocca soltanto quando runAgent termina.
           (event) => setState((s) => ({ ...reduce(s, event), running: true })),
           controller.signal,
         );

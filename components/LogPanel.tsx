@@ -9,13 +9,6 @@ const TONE: Record<string, string> = {
   INFO: "text-[var(--muted)]",
 };
 
-/**
- * I log operativi del server.
- *
- * Interroga /logs mentre una run e' in corso, piu' una volta subito dopo per
- * raccogliere la coda. A riposo non chiama nulla: un pannello che interroga il
- * server per sempre e' un difetto, non una funzione.
- */
 export function LogPanel({ running }: { running: boolean }) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);

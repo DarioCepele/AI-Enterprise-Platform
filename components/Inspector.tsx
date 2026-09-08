@@ -13,17 +13,8 @@ const FILTERS = {
   testo: (e: AGUIEvent) => e.type.startsWith("TEXT_MESSAGE"),
 } as const;
 
-/** Oltre questa soglia il payload del gruppo viene troncato: 2000 oggetti
- *  serializzati non si leggono e bloccano il thread principale. */
 const MAX_PAYLOAD = 50;
 
-/**
- * Una riga per gruppo di eventi consecutivi dello stesso tipo.
- *
- * Il payload si serializza solo quando la riga e' aperta: con la fixture di
- * Qwen sono oltre duemila eventi, e stringificarli tutti a ogni render
- * costerebbe piu' di tutto il resto della pagina messo insieme.
- */
 const EventRow = memo(function EventRow({ group }: { group: EventGroup }) {
   const [open, setOpen] = useState(false);
   const count = group.events.length;
@@ -32,8 +23,6 @@ const EventRow = memo(function EventRow({ group }: { group: EventGroup }) {
 
   return (
     <details role="group" open={open} className="border-b border-[var(--border)] py-1">
-      {/* Apertura controllata: il payload va serializzato solo su richiesta,
-          quindi lo stato React deve precedere il toggle nativo. */}
       <summary
         onClick={(e) => {
           e.preventDefault();
@@ -115,7 +104,6 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
           ))}
         </div>
       </div>
-      {/* Il polling segue la run anche quando si guardano gli eventi. */}
       <div hidden={tab !== "log"} className={tab === "log" ? "flex min-h-0 flex-1 flex-col" : undefined}>
         <LogPanel running={running} />
       </div>

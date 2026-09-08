@@ -1,6 +1,4 @@
 @import "tailwindcss";
-/* Streamdown porta le proprie classi utility: senza questa riga Tailwind non
-   le vede, perche' vivono dentro node_modules e non nel sorgente scansionato. */
 @source "../node_modules/streamdown/dist/*.js";
 
 :root {
@@ -17,8 +15,6 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  /* Nomi attesi dalle classi di Streamdown, mappati sui token del laboratorio:
-     il Markdown della risposta usa la stessa tavolozza del resto della pagina. */
   --color-muted: var(--surface);
   --color-muted-foreground: var(--muted);
   --color-border: var(--border);

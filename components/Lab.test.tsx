@@ -20,7 +20,6 @@ describe("Lab", () => {
       onEvent({ type: "TEXT_MESSAGE_START", messageId: "a", role: "assistant" });
       onEvent({ type: "TEXT_MESSAGE_CONTENT", messageId: "a", delta: "Ecco il confronto." });
       onEvent({ type: "RUN_FINISHED", threadId: "t", runId: "r" });
-      // L'evento terminale puo' precedere l'EOF della risposta HTTP.
       await new Promise<void>((resolve) => { finish = resolve; });
     });
     render(<Lab />);

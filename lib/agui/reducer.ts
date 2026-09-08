@@ -19,14 +19,11 @@ export const initialState: LabState = {
   events: [],
 };
 
-/** Rimpiazza la entry con quell'id, lasciando invariate le altre. */
 function patch(entries: Entry[], id: string, change: (entry: Entry) => Entry): Entry[] {
   return entries.map((e) => (e.id === id ? change(e) : e));
 }
 
-/** Funzione pura: un evento entra, un nuovo stato esce. Nessuna rete, nessun effetto. */
 export function reduce(state: LabState, event: AGUIEvent): LabState {
-  // Ogni evento finisce nell'inspector, riconosciuto o no.
   const next: LabState = { ...state, events: [...state.events, event] };
 
   switch (event.type) {
@@ -54,8 +51,6 @@ export function reduce(state: LabState, event: AGUIEvent): LabState {
       };
 
     case "TEXT_MESSAGE_END":
-      // Ogni tool call e' avvolta da START/END senza CONTENT in mezzo:
-      // senza questo filtro la chat mostra una bolla vuota per ogni tool.
       return {
         ...next,
         entries: next.entries.filter(
@@ -63,10 +58,6 @@ export function reduce(state: LabState, event: AGUIEvent): LabState {
         ),
       };
 
-    // Il testo del ragionamento arriva solo dentro REASONING_ENCRYPTED_VALUE,
-    // un evento per token: REASONING_MESSAGE_CONTENT non viene mai emesso.
-    // I delta si fondono in una entry sola, altrimenti un giro di Qwen ne
-    // produce 400 e la timeline diventa illeggibile.
     case "REASONING_MESSAGE_START":
       return {
         ...next,
@@ -142,14 +133,11 @@ export function reduce(state: LabState, event: AGUIEvent): LabState {
     case "STATE_SNAPSHOT":
       return { ...next, shared: event.snapshot };
 
-    // REASONING_START, REASONING_END, CUSTOM, MESSAGES_SNAPSHOT ed eventi
-    // ancora sconosciuti: registrati nell'inspector, nessun altro effetto.
     default:
       return next;
   }
 }
 
-/** Aggiunge il messaggio dell'utente: il server non lo rimanda indietro. */
 export function withUserMessage(state: LabState, id: string, text: string): LabState {
   return {
     ...state,

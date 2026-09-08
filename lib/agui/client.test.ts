@@ -32,7 +32,6 @@ describe("runAgent", () => {
     const expected: AGUIEvent[] = [
       { type: "RUN_STARTED", threadId: "t1", runId: "r1" },
       { type: "TOOL_CALL_RESULT", toolCallId: "c1", content: '{"component":"ui-table"}' },
-      // Non modellato nei tipi: il client deve comunque consegnarlo intatto.
       { type: "EVENTO_FUTURO", valore: 42 } as unknown as AGUIEvent,
       { type: "RUN_FINISHED", threadId: "t1", runId: "r1" },
     ];
@@ -72,7 +71,6 @@ describe("runAgent", () => {
       start(c) {
         c.enqueue(encoder.encode('data: {"type":"RUN_STARTED","threadId":"t1","runId":"r1"}\n\n'));
       },
-      // Il fetch reale rifiuta la lettura in corso quando il segnale scatta.
       cancel() {},
     });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body)));

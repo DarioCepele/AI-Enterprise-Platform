@@ -7,8 +7,6 @@ import { EntryView } from "./index";
 
 describe("EntryView", () => {
   it("blocca script e URL pericolosi nella risposta del modello", () => {
-    // Il renderer accetta il markup inerte e neutralizza il resto: quello che
-    // scrive il modello non deve poter eseguire nulla nella pagina.
     const text = '<script>alert(1)</script><a href="javascript:alert(1)">click</a>';
     const { container } = render(<EntryView entry={{ kind: "assistant", id: "a", text }} />);
 
@@ -37,7 +35,6 @@ describe("EntryView", () => {
   });
 
   it("non mostra la sintassi ancora aperta durante lo streaming", () => {
-    // Un token alla volta: senza completamento si vedrebbero gli asterischi.
     const { container } = render(<EntryView entry={{ kind: "assistant", id: "a", text: "Confronto **net" }} />);
 
     expect(container.textContent).not.toContain("**");
@@ -54,7 +51,6 @@ describe("EntryView", () => {
     const entry: Entry = { kind: "reasoning", id: "2", text: "penso", done: true };
     const { container } = render(<EntryView entry={entry} />);
 
-    // Il ragionamento e' contesto, non risposta: arriva collassato.
     const details = container.querySelector("details");
     expect(details?.open).toBe(false);
     expect(screen.getByText("Ragionamento")).toBeInTheDocument();
@@ -71,7 +67,6 @@ describe("EntryView", () => {
     const { container } = render(<EntryView entry={entry} />);
 
     expect(screen.getByText("load_skill")).toBeInTheDocument();
-    // Gli argomenti ci sono ma stanno chiusi: il chip resta una riga sola.
     expect(container.querySelector("details")?.open).toBe(false);
     expect(container.querySelector("pre")?.textContent).toBe(
       JSON.stringify({ name: "comparison" }, null, 2),
@@ -119,7 +114,6 @@ describe("EntryView", () => {
     };
     render(<EntryView entry={entry} />);
 
-    // Meglio un riquadro che dice "non so renderlo" di un artefatto sparito.
     expect(screen.getByText(/non so rendere/i)).toBeInTheDocument();
   });
 });
@@ -180,7 +174,6 @@ describe("Chat", () => {
     rerender(<Chat entries={[entry(1), entry(2)]} running error={null} onSend={vi.fn()} />);
     expect(scroller.scrollTop).toBe(1000);
 
-    // L'utente scorre indietro: da qui in poi la timeline non lo insegue piu'.
     scroller.scrollTop = 100;
     fireEvent.scroll(scroller);
     rerender(<Chat entries={[entry(1), entry(2), entry(3)]} running error={null} onSend={vi.fn()} />);

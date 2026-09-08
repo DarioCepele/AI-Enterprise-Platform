@@ -38,8 +38,6 @@ describe("Inspector", () => {
   });
 
   it("i delta consecutivi diventano una riga sola col conteggio", () => {
-    // 408 righe identiche rendevano l'inspector illeggibile: ora una riga per
-    // gruppo, con il numero di eventi accorpati.
     render(<Inspector events={EVENTS} running={false} />);
     const deltas = EVENTS.filter((e) => e.type === "REASONING_ENCRYPTED_VALUE").length;
     const badges = screen
@@ -87,7 +85,6 @@ describe("Inspector", () => {
   });
 
   it("il filtro tutti include il ragionamento", () => {
-    // Non si nasconde nulla dal flusso grezzo: e' il punto dell'inspector.
     render(<Inspector events={EVENTS} running={false} />);
 
     expect(screen.getAllByRole("group").length).toBe(groupEvents(EVENTS).length);

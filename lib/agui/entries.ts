@@ -1,5 +1,3 @@
-/** Le voci della timeline della chat. Un'unione discriminata su `kind`. */
-
 export type Artifact =
   | {
       component: "ui-table";
@@ -17,12 +15,6 @@ export type Entry =
   | { kind: "tool"; id: string; name: string; args: string; done: boolean }
   | { kind: "artifact"; id: string; artifact: Artifact };
 
-/**
- * Estrae il testo da REASONING_ENCRYPTED_VALUE.
- *
- * Malgrado il nome, `encryptedValue` non e' cifrato: e' una stringa JSON che
- * contiene una lista di frammenti, di cui interessano quelli `reasoning.text`.
- */
 export function parseReasoningDelta(encryptedValue: string): string {
   let fragments: unknown;
   try {
@@ -47,13 +39,6 @@ export function parseReasoningDelta(encryptedValue: string): string {
     .join("");
 }
 
-/**
- * Riconosce un artefatto UI dentro il `content` di un TOOL_CALL_RESULT.
- *
- * Restituisce null quando il tool result non e' un artefatto: i tool del piano
- * restituiscono `{"component": "plan"}`, che il pannello del piano rende e la
- * chat no. Restituisce null anche quando il content e' testo semplice.
- */
 export function parseArtifact(content: unknown): Artifact | null {
   if (typeof content !== "string") return null;
 
@@ -61,7 +46,6 @@ export function parseArtifact(content: unknown): Artifact | null {
   try {
     payload = JSON.parse(content);
   } catch {
-    // Testo per il modello, non un artefatto. Non e' un errore.
     return null;
   }
   if (typeof payload !== "object" || payload === null) return null;
@@ -88,8 +72,6 @@ export function parseArtifact(content: unknown): Artifact | null {
     };
   }
 
-  // Variante non ancora implementata: si rende un fallback esplicito invece
-  // di far sparire in silenzio qualcosa che il backend ha prodotto.
   return { component: "unknown", id, raw: payload };
 }
 

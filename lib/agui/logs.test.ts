@@ -5,8 +5,6 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("fetchLogs", () => {
   it("deriva l'URL dei log da quello di AG-UI", () => {
-    // Una seconda variabile d'ambiente potrebbe divergere dalla prima:
-    // meglio derivarla, cosi' non c'e' niente da tenere allineato.
     expect(LOGS_URL.endsWith("/logs")).toBe(true);
     expect(LOGS_URL).not.toContain("/agui");
   });

@@ -5,7 +5,6 @@ describe("loadFixture", () => {
   it("legge lo stream reale in ordine", () => {
     const events = loadFixture("stream-qwen");
 
-    // 487 righe non vuote: 486 eventi data: e un commento : keepalive.
     expect(events).toHaveLength(486);
     expect(events[0].type).toBe("RUN_STARTED");
     expect(events.at(-1)?.type).toBe("RUN_FINISHED");

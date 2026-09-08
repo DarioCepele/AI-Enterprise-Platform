@@ -1,9 +1,3 @@
-/**
- * Una riga compatta: il nome del tool, con gli argomenti a richiesta.
- *
- * Gli argomenti arrivano come delta e restano una stringa: si mostrano
- * indentati quando sono JSON valido, grezzi quando il modello li tronca.
- */
 export function ToolEntry({ name, args, done }: { name: string; args: string; done: boolean }) {
   const shown = format(args);
 

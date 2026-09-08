@@ -12,15 +12,12 @@ interface Props {
   onStop?: () => void;
 }
 
-/** Sotto questa distanza dal fondo la timeline continua a seguire lo stream. */
 const STICKY_PX = 80;
 
 export function Chat({ entries, running, error, onSend, onStop }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
-  // La risposta arriva un token alla volta: senza questo la timeline resta
-  // ferma in cima. Chi scorre indietro per rileggere non viene riportato giu'.
   useEffect(() => {
     const el = scroller.current;
     if (!el || !stick.current) return;

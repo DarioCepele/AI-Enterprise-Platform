@@ -2,8 +2,6 @@ import type { Artifact } from "@/lib/agui/entries";
 
 export function UiTable({ artifact }: { artifact: Artifact }) {
   if (artifact.component !== "ui-table") {
-    // Il backend ha prodotto qualcosa che questa versione del frontend non
-    // conosce. Dirlo e' meglio che farlo sparire.
     return (
       <div className="rounded-lg border border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted)]">
         Non so rendere questo artefatto ({artifact.id}).

@@ -6,9 +6,6 @@ RUN npm ci
 
 COPY . .
 
-# NEXT_PUBLIC_* viene incorporato qui, in build: a runtime sarebbe troppo tardi.
-# Il valore e' l'URL usato dal BROWSER, non dalla rete interna di compose:
-# il nome di servizio "master-agent" non e' risolvibile dal browser.
 ARG NEXT_PUBLIC_AGUI_URL=http://localhost:8000/agui
 ENV NEXT_PUBLIC_AGUI_URL=$NEXT_PUBLIC_AGUI_URL
 RUN npm run build

@@ -82,7 +82,6 @@ describe("PlanPanel", () => {
   });
 
   it("regge uno stato condiviso senza piano", () => {
-    // Prima del primo STATE_SNAPSHOT lo stato del client e' vuoto.
     render(<PlanPanel shared={{}} />);
 
     expect(screen.getByText(/nessun piano/i)).toBeInTheDocument();

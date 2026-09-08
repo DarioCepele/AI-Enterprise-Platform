@@ -59,7 +59,6 @@ function readPlan(shared: Record<string, unknown>): Plan | null {
   return plan as Plan;
 }
 
-/** Funzione pura di `shared.plan`. Nessuna logica di stato qui dentro. */
 export function PlanPanel({ shared }: { shared: Record<string, unknown> }) {
   const plan = readPlan(shared);
 

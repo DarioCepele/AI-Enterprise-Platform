@@ -50,7 +50,6 @@ describe("reduce", () => {
   });
 
   it("raccoglie i risultati dei tool", () => {
-    // content arriva come stringa JSON: state_update serializza il payload.
     const state = run([
       { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "ui_table" },
       { type: "TOOL_CALL_RESULT", toolCallId: "c1", content: '{"component":"ui-table"}' },
@@ -87,7 +86,6 @@ describe("reduce", () => {
   });
 
   it("scarta il messaggio vuoto che avvolge una tool call", () => {
-    // Sul filo ogni tool call e' racchiusa fra START ed END senza CONTENT.
     const state = run([
       { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant" },
       { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "ui_table" },
@@ -104,7 +102,6 @@ describe("reduce", () => {
   });
 
   it("ignora un evento sconosciuto senza rompersi", () => {
-    // Un evento che i tipi non modellano ancora: arriva a runtime, non a compile time.
     const futuro = { type: "EVENTO_FUTURO", qualcosa: 1 } as unknown as AGUIEvent;
     const state = run([futuro]);
 

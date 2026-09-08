@@ -1,4 +1,3 @@
-/** Il ragionamento e' contesto, non risposta: arriva collassato. */
 export function ReasoningEntry({ text, done }: { text: string; done: boolean }) {
   return (
     <details className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
