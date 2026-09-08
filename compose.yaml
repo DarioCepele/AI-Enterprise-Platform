@@ -38,6 +38,11 @@ services:
       MEMORY_MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/?authSource=admin
       MEMORY_MONGO_DATABASE: ${MONGO_INITDB_DATABASE}
       MEMORY_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Il modello che riassume: stesso provider dell'agente, chiave e modello
+      # suoi. Vuoto = niente compattazione, e il servizio lo dice all'avvio.
+      MEMORY_SUMMARY_BASE_URL: ${OPENAI_BASE_URL}
+      MEMORY_SUMMARY_API_KEY: ${OPENAI_API_KEY}
+      MEMORY_SUMMARY_MODEL: ${MEMORY_SUMMARY_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
     # Nessuna porta pubblicata: e' un servizio interno, e l'unico modo serio di
     # dire "non esporlo" e' non esporlo.
     depends_on:
