@@ -1,8 +1,8 @@
 """Tool che producono artefatti renderizzati dal frontend."""
 from __future__ import annotations
 
-import itertools
 import logging
+from uuid import uuid4
 from typing import Annotated
 
 from agent_framework import Content, FunctionTool, tool
@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 STATE_KEY = "__ag_ui_tool_result_state__"
 DISPLAY_KEY = "__ag_ui_tool_result_display__"
 
-_artifact_ids = itertools.count(1)
 
 @tool
 def ui_table(
@@ -25,7 +24,7 @@ def ui_table(
 
     Usa questo tool quando devi confrontare piu' elementi lungo dimensioni comuni.
     """
-    artifact_id = f"art_{next(_artifact_ids)}"
+    artifact_id = f"art_{uuid4().hex[:8]}"
     logger.info("Tabella '%s' prodotta: %d colonne, %d righe.", title, len(columns), len(rows))
     return state_update(
         text=f"Ho mostrato la tabella '{title}' con {len(rows)} righe.",

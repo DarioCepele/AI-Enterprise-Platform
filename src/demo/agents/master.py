@@ -54,7 +54,6 @@ def build_master_agent(
     plan_store: PlanStore | None = None,
 ) -> Agent:
     """Il master agent. `chat_client` e `plan_store` vanno passati nei test."""
-    store = plan_store if plan_store is not None else PlanStore()
     settings = get_settings()
 
     subagent_tools = (
@@ -73,7 +72,7 @@ def build_master_agent(
         client=chat_client or _default_chat_client(),
         tools=[
             *get_tools(),
-            *build_plan_tools(store),
+            *build_plan_tools(plan_store),
             *build_skill_tools(),
             *memory_tools,
             *subagent_tools,

@@ -13,7 +13,7 @@ from agent_framework import Content, FunctionTool, tool
 from agent_framework.a2a import A2AAgent
 from google.protobuf.json_format import ParseDict
 
-from ..server.subagent_events import subagent_run
+from ..server.run_context import subagent_run
 
 logger = logging.getLogger(__name__)
 

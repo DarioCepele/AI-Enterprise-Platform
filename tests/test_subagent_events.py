@@ -6,13 +6,14 @@ import asyncio
 import pytest
 from ag_ui.core.events import BaseEvent, EventType, RunFinishedEvent, RunStartedEvent
 
-from demo.server.subagent_events import SubagentEventRelay, subagent_run
+from demo.server.run_context import LabRunner, subagent_run
 
 
-class Relay(SubagentEventRelay):
+class Relay(LabRunner):
     """La classe vera, con al posto del framework una sequenza controllata."""
 
     def __init__(self, passi) -> None:
+        super().__init__(agent=None, plan_loader=None)
         self._passi = passi
 
     async def _framework_events(self, input_data):

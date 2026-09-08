@@ -36,7 +36,11 @@ Il flusso del piano richiede un modello che esegua davvero le chiamate ai tool. 
 
 `todo_write(steps)` sostituisce il piano precedente. Ogni passo ha un `id` intero, `title`, `detail` e `source`; parte da `pending`. `todo_set_status(step_id, status, note)` accetta `pending`, `in_progress`, `completed` e `failed`. Per `failed` la nota deve essere non vuota. Gli aggiornamenti includono i tempi di inizio e fine e riemettono il piano intero. L'agente deve aggiornare i passi mentre lavora, per rendere visibile l'avanzamento.
 
-Il `PlanStore` vive in memoria nell'istanza dell'agente. L'app costruisce un solo agente: **un piano per processo, condiviso anche fra due schede del browser**. Non esiste isolamento per thread e il piano non persiste al riavvio. Questa è una limitazione dichiarata della demo.
+Il piano **appartiene al thread, non al processo**. A ogni run viene idratato dallo snapshot del thread e messo in una `ContextVar`; i tool leggono quello. Il processo non ne conserva copia, quindi due repliche non si contraddicono e due schede del browser hanno piani distinti.
+
+Verificato dal vivo: piano scritto, `docker compose restart master-agent`, e il turno successivo segna il primo passo come completato sul piano di prima.
+
+Lo si è scoperto proprio riavviando: idratare dallo stato della *richiesta* non basta, perché lo stato salvato viene fuso dal framework **dopo** quel punto. Il piano si legge dallo snapshot store, che è la fonte autorevole.
 
 `ui_table(title, columns, rows)` restituisce un artefatto `ui-table` con un `id` numerato per processo, usato per collegare il risultato del tool al riepilogo nello stato. L'id non è stabile fra riavvii. Il risultato AG-UI contiene una stringa JSON con titolo, colonne e righe; `state.artifacts` contiene il riepilogo della tabella corrente. `plan` e `artifacts` sono chiavi separate: gli aggiornamenti sostituiscono le chiavi di primo livello, quindi ogni gruppo scrive solo la propria.
 

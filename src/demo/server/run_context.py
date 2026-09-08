@@ -1,10 +1,10 @@
-"""Eventi SUBAGENT_* sullo stream AG-UI."""
+"""Lo stato che vive quanto una run, e non quanto il processo."""
 from __future__ import annotations
 
 import asyncio
 import contextvars
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
@@ -17,13 +17,24 @@ from ag_ui.core.events import (
 )
 from agent_framework_ag_ui import AgentFrameworkAgent
 
+from ..plan import PlanStore
+
 logger = logging.getLogger(__name__)
 
 current_run_events: contextvars.ContextVar[asyncio.Queue | None] = contextvars.ContextVar(
     "current_run_events", default=None
 )
+current_plan: contextvars.ContextVar[PlanStore | None] = contextvars.ContextVar(
+    "current_plan", default=None
+)
+
+PlanLoader = Callable[[str], Awaitable[dict[str, Any] | None]]
 
 _FINE = object()
+
+
+def plan_of_run() -> PlanStore | None:
+    return current_plan.get()
 
 
 @asynccontextmanager
@@ -60,24 +71,57 @@ async def subagent_run(
             await queue.put(SubagentFinishedEvent(subagent_run_id=run_id))
 
 
-class SubagentEventRelay(AgentFrameworkAgent):
-    """Runner AG-UI che intreccia gli eventi dei sottoagenti a quelli della run."""
+def plan_from_state(input_data: dict[str, Any], stored: dict[str, Any] | None = None) -> PlanStore:
+    if stored:
+        return PlanStore(stored)
+    state = input_data.get("state") or {}
+    return PlanStore(state.get("plan") if isinstance(state, dict) else None)
+
+
+class LabRunner(AgentFrameworkAgent):
+    """Runner AG-UI che apre un contesto per ogni run.
+
+    Il piano arriva dallo stato condiviso della richiesta e ci torna: il
+    processo non ne conserva copia, cosi' due repliche non si contraddicono.
+    Gli eventi dei sottoagenti si intrecciano a quelli del framework.
+    """
+
+    def __init__(self, *args: Any, plan_loader: PlanLoader | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._plan_loader = plan_loader
 
     def _framework_events(self, input_data: dict[str, Any]) -> AsyncGenerator[BaseEvent, None]:
         return super().run(input_data)
 
+    async def _stored_plan(self, input_data: dict[str, Any]) -> dict[str, Any] | None:
+        thread_id = input_data.get("thread_id") or input_data.get("threadId")
+        if self._plan_loader is None or not thread_id:
+            return None
+        try:
+            return await self._plan_loader(str(thread_id))
+        except Exception:
+            logger.error(
+                "Piano del thread %s non recuperato: la run riparte senza.",
+                thread_id,
+                exc_info=True,
+            )
+            return None
+
     async def run(self, input_data: dict[str, Any]) -> AsyncGenerator[BaseEvent, None]:
         queue: asyncio.Queue = asyncio.Queue()
+        plan = plan_from_state(input_data, await self._stored_plan(input_data))
 
         async def pompa() -> None:
-            token = current_run_events.set(queue)
+            eventi = current_run_events.set(queue)
+            piano = current_plan.set(plan)
             try:
                 async for event in self._framework_events(input_data):
                     await queue.put(event)
             except Exception as errore:
                 await queue.put(errore)
             finally:
-                current_run_events.reset(token)
+                current_run_events.reset(eventi)
+                current_plan.reset(piano)
                 await queue.put(_FINE)
 
         task = asyncio.create_task(pompa())

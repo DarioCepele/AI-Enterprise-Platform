@@ -18,7 +18,7 @@ from ..agents.master import build_master_agent
 from ..config import SINGLE_TENANT_SCOPE, get_settings
 from ..logging_bridge import LogCollector
 from ..memory.remote_store import MemoryServiceSnapshotStore
-from .subagent_events import SubagentEventRelay
+from .run_context import LabRunner
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +86,22 @@ def create_app(
         """
         return log_collector.since(cursor)
 
-    runner = SubagentEventRelay(agent=agent or build_master_agent())
+    store = snapshot_store or _default_snapshot_store()
+
+    async def plan_of_thread(thread_id: str) -> dict | None:
+        snapshot = await store.get(scope=SINGLE_TENANT_SCOPE, thread_id=thread_id)
+        stato = getattr(snapshot, "state", None) or {}
+        piano = stato.get("plan")
+        return piano if isinstance(piano, dict) else None
+
+    runner = LabRunner(agent=agent or build_master_agent(), plan_loader=plan_of_thread)
     add_agent_framework_fastapi_endpoint(
         app,
         runner,
         "/agui",
         allow_origins=allowed_origins,
         default_state=DEFAULT_STATE,
-        snapshot_store=snapshot_store or _default_snapshot_store(),
+        snapshot_store=store,
         snapshot_scope_resolver=_resolve_snapshot_scope,
     )
     return app
