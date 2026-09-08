@@ -1,4 +1,4 @@
-"""Il knowledge agent esposto via A2A."""
+"""The knowledge agent exposed over A2A."""
 from __future__ import annotations
 
 import logging
@@ -26,8 +26,8 @@ from a2a.types import (
 )
 from agent_framework import Agent
 from .executor import KnowledgeExecutor
-from .extended import SCHEMA, SoloConToken, build_extended_card, card_per_chi_chiede
-from .push import NotificheEssenziali
+from .extended import SCHEME, ServiceTokenOnly, build_extended_card, card_for_the_caller
+from .push import EssentialNotifications
 from fastapi import FastAPI
 
 from .agent import build_knowledge_agent, catalogue
@@ -35,17 +35,17 @@ from .agent import build_knowledge_agent, catalogue
 logger = logging.getLogger(__name__)
 
 SKILL = AgentSkill(
-    id="confronto-linguaggi",
-    name="Knowledge base sui linguaggi",
-    description="Risponde su tipizzazione, concorrenza, errori ed ecosistema dei linguaggi in catalogo.",
-    tags=["linguaggi", "knowledge-base"],
+    id="language-comparison",
+    name="Programming language knowledge base",
+    description="Answers about typing, concurrency, errors and ecosystem of the languages in the catalogue.",
+    tags=["languages", "knowledge-base"],
 )
 
 
 def build_agent_card(base_url: str) -> AgentCard:
     return AgentCard(
         name="knowledge",
-        description="Sottoagente di knowledge base del laboratorio AG-UI.",
+        description="Knowledge base subagent of the AG-UI laboratory.",
         version="0.1.0",
         supported_interfaces=[
             AgentInterface(url=base_url, protocol_binding="JSONRPC", protocol_version="1.0")
@@ -56,9 +56,9 @@ def build_agent_card(base_url: str) -> AgentCard:
             streaming=True, push_notifications=True, extended_agent_card=True
         ),
         security_schemes={
-            SCHEMA: SecurityScheme(
+            SCHEME: SecurityScheme(
                 http_auth_security_scheme=HTTPAuthSecurityScheme(
-                    description="Token di servizio per la card estesa.",
+                    description="Service token for the extended card.",
                     scheme="bearer",
                 )
             )
@@ -80,17 +80,17 @@ def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastA
         task_store=InMemoryTaskStore(),
         agent_card=card,
         push_config_store=push_store,
-        push_sender=NotificheEssenziali(httpx.AsyncClient(timeout=10.0), push_store),
+        push_sender=EssentialNotifications(httpx.AsyncClient(timeout=10.0), push_store),
         extended_agent_card=build_extended_card(card, sorted(catalogue())),
-        extended_card_modifier=card_per_chi_chiede,
+        extended_card_modifier=card_for_the_caller,
     )
 
     app = FastAPI(title="Knowledge agent")
-    app.add_middleware(SoloConToken)
+    app.add_middleware(ServiceTokenOnly)
 
     @app.get("/health")
     async def health() -> dict[str, object]:
-        return {"status": "ok", "documenti": sorted(catalogue())}
+        return {"status": "ok", "documents": sorted(catalogue())}
 
     add_a2a_routes_to_fastapi(
         app,
@@ -98,5 +98,5 @@ def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastA
         jsonrpc_routes=create_jsonrpc_routes(handler, rpc_url="/"),
         rest_routes=create_rest_routes(handler),
     )
-    logger.info("Knowledge agent pronto su %s, documenti: %s", url, sorted(catalogue()))
+    logger.info("Knowledge agent ready on %s, documents: %s", url, sorted(catalogue()))
     return app

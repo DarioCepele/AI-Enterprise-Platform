@@ -1,4 +1,4 @@
-"""L'executor A2A del knowledge agent, scritto contro l'SDK stabile."""
+"""The knowledge agent's A2A executor, written against the stable SDK."""
 from __future__ import annotations
 
 import json
@@ -16,79 +16,80 @@ from google.protobuf.struct_pb2 import Value
 
 logger = logging.getLogger(__name__)
 
-ARTEFATTO = "scheda"
+ARTIFACT = "briefing"
 
-# Marcatore che il modello mette quando la domanda non basta a se stessa.
-CHIEDE = "[SERVE-CHIARIMENTO]"
+# Marker the model emits when the question does not stand on its own.
+ASKS = "[NEEDS-CLARIFICATION]"
 
 
-class LettureDocumenti:
-    """Quali documenti ha letto l'agente, dagli argomenti che arrivano a delta.
+class DocumentReads:
+    """Which documents the agent read, from arguments that arrive as deltas.
 
-    Il modello streamma una tool call in piu' pezzi, e i pezzi non si assomigliano:
-    il primo porta il **nome** del tool e argomenti vuoti, quelli dopo portano gli
-    **argomenti** a delta e nessun nome. Chi filtra per nome a ogni pezzo scarta
-    proprio quelli che contengono la risposta -- misurato, non immaginato.
+    The model streams a tool call in several pieces, and the pieces do not look
+    alike: the first carries the tool **name** and empty arguments, the later
+    ones carry the **arguments** as deltas and no name. Filtering by name on
+    every piece drops exactly the ones holding the answer -- measured, not
+    imagined.
     """
 
     def __init__(self) -> None:
-        self._parziali: dict[str, str] = {}
-        self._nostre: set[str] = set()
-        self.documenti: list[str] = []
+        self._partials: dict[str, str] = {}
+        self._ours: set[str] = set()
+        self.documents: list[str] = []
 
-    def osserva(self, update: Any) -> None:
+    def observe(self, update: Any) -> None:
         for content in getattr(update, "contents", None) or []:
             if getattr(content, "type", "") != "function_call":
                 continue
             call_id = getattr(content, "call_id", "") or ""
-            nome_tool = getattr(content, "name", "") or ""
-            if nome_tool == "leggi_documento":
-                self._nostre.add(call_id)
-            elif nome_tool:
+            tool_name = getattr(content, "name", "") or ""
+            if tool_name == "read_document":
+                self._ours.add(call_id)
+            elif tool_name:
                 continue
-            if call_id not in self._nostre:
+            if call_id not in self._ours:
                 continue
-            argomenti = getattr(content, "arguments", None)
-            if isinstance(argomenti, dict):
-                self._registra(argomenti.get("nome"))
+            arguments = getattr(content, "arguments", None)
+            if isinstance(arguments, dict):
+                self._record(arguments.get("name"))
                 continue
-            if isinstance(argomenti, str):
-                self._parziali[call_id] = self._parziali.get(call_id, "") + argomenti
-                self._prova(self._parziali[call_id])
+            if isinstance(arguments, str):
+                self._partials[call_id] = self._partials.get(call_id, "") + arguments
+                self._try(self._partials[call_id])
 
-    def _prova(self, grezzo: str) -> None:
+    def _try(self, raw: str) -> None:
         try:
-            argomenti = json.loads(grezzo)
+            arguments = json.loads(raw)
         except json.JSONDecodeError:
             return
-        if isinstance(argomenti, dict):
-            self._registra(argomenti.get("nome"))
+        if isinstance(arguments, dict):
+            self._record(arguments.get("name"))
 
-    def _registra(self, nome: Any) -> None:
-        if isinstance(nome, str) and nome and nome not in self.documenti:
-            self.documenti.append(nome)
+    def _record(self, name: Any) -> None:
+        if isinstance(name, str) and name and name not in self.documents:
+            self.documents.append(name)
 
 
-def scheda(domanda: str, risposta: str, documenti: list[str]) -> list[Part]:
-    """L'output del sottoagente: testo per il modello, dati per l'interfaccia."""
-    dati = ParseDict(
+def briefing(question: str, answer: str, documents: list[str]) -> list[Part]:
+    """The subagent's output: text for the model, data for the interface."""
+    data = ParseDict(
         {
-            "component": "scheda",
-            "domanda": domanda,
-            "documenti": documenti,
-            "estratto": risposta,
+            "component": "briefing",
+            "question": question,
+            "documents": documents,
+            "summary": answer,
         },
         Value(),
     )
-    return [Part(text=risposta), Part(data=dati)]
+    return [Part(text=answer), Part(data=data)]
 
 
 class KnowledgeExecutor(AgentExecutor):
-    """Traduce una richiesta A2A in una run dell'agente, e viceversa.
+    """Turns an A2A request into an agent run, and back.
 
-    Scritto a mano invece di usare la colla in beta per due ragioni: toglie un
-    pacchetto beta dal percorso portante, e permette di emettere un artefatto
-    **con un nome e dei dati** invece di una sequenza di chunk anonimi.
+    Hand-written instead of using the beta glue for two reasons: it takes a
+    beta package off the load-bearing path, and it allows emitting an artifact
+    **with a name and data** instead of a sequence of anonymous chunks.
     """
 
     def __init__(self, agent: Agent) -> None:
@@ -101,62 +102,62 @@ class KnowledgeExecutor(AgentExecutor):
             await event_queue.enqueue_event(task)
 
         updater = TaskUpdater(event_queue, task.id, context.context_id)
-        domanda = context.get_user_input()
+        question = context.get_user_input()
 
         await updater.submit()
         await updater.start_work()
 
-        pezzi: list[str] = []
-        letture = LettureDocumenti()
+        pieces: list[str] = []
+        reads = DocumentReads()
         try:
-            async for update in self._agent.run(domanda, stream=True):
-                letture.osserva(update)
-                testo = getattr(update, "text", None)
-                if testo:
-                    pezzi.append(testo)
+            async for update in self._agent.run(question, stream=True):
+                reads.observe(update)
+                text = getattr(update, "text", None)
+                if text:
+                    pieces.append(text)
                     await updater.update_status(
                         TaskState.TASK_STATE_WORKING,
-                        message=updater.new_agent_message([Part(text=testo)]),
+                        message=updater.new_agent_message([Part(text=text)]),
                     )
-        except Exception as errore:
-            logger.error("Run fallita per '%s'.", domanda, exc_info=True)
+        except Exception as error:
+            logger.error("Run failed for '%s'.", question, exc_info=True)
             await updater.failed(
-                message=updater.new_agent_message([Part(text=f"knowledge agent: {errore}")])
+                message=updater.new_agent_message([Part(text=f"knowledge agent: {error}")])
             )
             return
 
-        risposta = "".join(pezzi).strip()
+        answer = "".join(pieces).strip()
 
-        if risposta.startswith(CHIEDE):
-            domanda_di_ritorno = risposta[len(CHIEDE) :].strip() or "Puoi precisare la richiesta?"
+        if answer.startswith(ASKS):
+            question_back = answer[len(ASKS) :].strip() or "Puoi precisare la richiesta?"
             await updater.requires_input(
-                message=updater.new_agent_message([Part(text=domanda_di_ritorno)])
+                message=updater.new_agent_message([Part(text=question_back)])
             )
-            logger.info("Task %s in attesa di un chiarimento.", task.id)
+            logger.info("Task %s is waiting for a clarification.", task.id)
             return
 
-        if not risposta:
+        if not answer:
             await updater.failed(
                 message=updater.new_agent_message(
-                    [Part(text="knowledge agent: nessuna risposta prodotta")]
+                    [Part(text="knowledge agent: no answer produced")]
                 )
             )
             return
 
         await updater.add_artifact(
-            scheda(domanda, risposta, letture.documenti),
-            name=ARTEFATTO,
+            briefing(question, answer, reads.documents),
+            name=ARTIFACT,
             last_chunk=True,
         )
         await updater.complete()
         logger.info(
-            "Task %s concluso: %d caratteri, documenti %s.",
+            "Task %s completed: %d characters, documents %s.",
             task.id,
-            len(risposta),
-            ", ".join(letture.documenti) or "nessuno",
+            len(answer),
+            ", ".join(reads.documents) or "none",
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         await updater.cancel()
-        logger.info("Task %s annullato su richiesta.", context.task_id)
+        logger.info("Task %s canceled on request.", context.task_id)

@@ -1,4 +1,4 @@
-"""La card estesa e chi ha diritto di vederla."""
+"""The extended card, and who is entitled to see it."""
 from __future__ import annotations
 
 import logging
@@ -15,97 +15,101 @@ from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
-SCHEMA = "servizio"
-PREFISSO = "bearer "
-PERCORSI_PROTETTI = ("/extendedAgentCard", "/v1/extendedAgentCard")
+SCHEME = "service"
+PREFIX = "bearer "
+PROTECTED_PATHS = ("/extendedAgentCard", "/v1/extendedAgentCard")
 
 
-def token_atteso() -> str:
+def expected_token() -> str:
     return os.getenv("KNOWLEDGE_SERVICE_TOKEN", "")
 
 
-def token_della_richiesta(intestazioni: dict[str, str]) -> str:
-    valore = ""
-    for nome, contenuto in intestazioni.items():
-        if nome.lower() == "authorization":
-            valore = contenuto
+def token_of_request(headers: dict[str, str]) -> str:
+    value = ""
+    for name, content in headers.items():
+        if name.lower() == "authorization":
+            value = content
             break
-    if not valore.lower().startswith(PREFISSO):
+    if not value.lower().startswith(PREFIX):
         return ""
-    return valore[len(PREFISSO) :].strip()
+    return value[len(PREFIX) :].strip()
 
 
-def intestazioni_valide(intestazioni: dict[str, str]) -> bool:
-    atteso = token_atteso()
-    ricevuto = token_della_richiesta(intestazioni)
-    return bool(atteso) and bool(ricevuto) and compare_digest(ricevuto, atteso)
+def headers_are_valid(headers: dict[str, str]) -> bool:
+    expected = expected_token()
+    received = token_of_request(headers)
+    return bool(expected) and bool(received) and compare_digest(received, expected)
 
 
-def autenticato(contesto: ServerCallContext | None) -> bool:
-    return intestazioni_valide((contesto.state.get("headers") if contesto else None) or {})
+def authenticated(context: ServerCallContext | None) -> bool:
+    return headers_are_valid((context.state.get("headers") if context else None) or {})
 
 
-class SoloConToken(BaseHTTPMiddleware):
-    """401 sul percorso REST della card estesa, con l'indicazione di come autenticarsi.
+class ServiceTokenOnly(BaseHTTPMiddleware):
+    """401 on the extended card's REST path, telling the caller how to authenticate.
 
-    Serve a un client legittimo, che dal 401 impara quale schema usare; il
-    resto dell'API non cambia, perche' l'agente pubblico resta pubblico.
+    It serves a legitimate client, which learns from the 401 which scheme to
+    use; the rest of the API is untouched, because the public agent stays
+    public.
     """
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in PERCORSI_PROTETTI and not intestazioni_valide(
+        if request.url.path in PROTECTED_PATHS and not headers_are_valid(
             dict(request.headers)
         ):
-            logger.warning("Card estesa negata su %s: token assente o non valido.", request.url.path)
+            logger.warning(
+                "Extended card refused on %s: token missing or invalid.", request.url.path
+            )
             return JSONResponse(
-                {"error": "serve un token di servizio"},
+                {"error": "a service token is required"},
                 status_code=401,
-                headers={"WWW-Authenticate": f'Bearer realm="{SCHEMA}"'},
+                headers={"WWW-Authenticate": f'Bearer realm="{SCHEME}"'},
             )
         return await call_next(request)
 
 
-def catalogo_skill(documenti: Sequence[str]) -> AgentSkill:
+def catalogue_skill(documents: Sequence[str]) -> AgentSkill:
     return AgentSkill(
-        id="catalogo",
-        name="Catalogo dei documenti",
+        id="catalogue",
+        name="Document catalogue",
         description=(
-            "Elenca i documenti indicizzati e permette di citarli per nome: "
-            + ", ".join(documenti)
+            "Lists the indexed documents and allows citing them by name: "
+            + ", ".join(documents)
         ),
-        tags=["catalogo", "interno"],
+        tags=["catalogue", "internal"],
     )
 
 
-def build_extended_card(pubblica: AgentCard, documenti: Sequence[str]) -> AgentCard:
-    """La card pubblica piu' cio' che non si mette in vetrina.
+def build_extended_card(public: AgentCard, documents: Sequence[str]) -> AgentCard:
+    """The public card plus what does not go in the shop window.
 
-    Quali documenti abbiamo indicizzato dice a chi guarda di cosa si occupa
-    l'organizzazione: e' esattamente il tipo di dettaglio che serve a chi deve
-    usare l'agente e non a chi passa di li'.
+    Which documents we have indexed tells an onlooker what the organization
+    works on: exactly the kind of detail that helps whoever has to use the
+    agent, and not whoever happens to walk past.
     """
-    estesa = AgentCard()
-    estesa.CopyFrom(pubblica)
-    estesa.description = (
-        f"{pubblica.description} Vista estesa: include il catalogo indicizzato."
+    extended = AgentCard()
+    extended.CopyFrom(public)
+    extended.description = (
+        f"{public.description} Extended view: includes the indexed catalogue."
     )
-    estesa.skills.append(catalogo_skill(documenti))
-    return estesa
+    extended.skills.append(catalogue_skill(documents))
+    return extended
 
 
-async def card_per_chi_chiede(card: AgentCard, contesto: ServerCallContext) -> AgentCard:
-    """Serve la card estesa solo a chi si e' autenticato.
+async def card_for_the_caller(card: AgentCard, context: ServerCallContext) -> AgentCard:
+    """Serves the extended card only to a caller that authenticated.
 
-    A chi non lo e' la card estesa non esiste, invece di esistere e negare: la
-    risposta e' la stessa che darebbe un agente che non ne ha una, e non
-    conferma a un estraneo che qui c'e' qualcosa di piu' da chiedere. Il 401
-    con `WWW-Authenticate` lo riceve chi arriva sul percorso REST, che e'
-    dove un client legittimo va a cercare le credenziali da usare.
+    To everyone else the extended card does not exist, rather than existing and
+    being denied: the answer is the same one an agent without an extended card
+    would give, and it does not confirm to a stranger that there is more to ask
+    for here. The 401 with `WWW-Authenticate` goes to whoever arrives on the
+    REST path, which is where a legitimate client looks for the credentials to
+    use.
     """
-    if not autenticato(contesto):
-        logger.warning("Card estesa negata: token di servizio assente o non valido.")
+    if not authenticated(context):
+        logger.warning("Extended card refused: service token missing or invalid.")
         raise ExtendedAgentCardNotConfiguredError(
             "Authenticated Extended Card is not configured"
         )
-    logger.info("Card estesa servita a un chiamante autenticato.")
+    logger.info("Extended card served to an authenticated caller.")
     return card

@@ -1,1 +1,1 @@
-"""Sottoagente di knowledge base del laboratorio AG-UI."""
+"""Knowledge base subagent of the AG-UI laboratory."""

@@ -1,4 +1,4 @@
-"""Avvio locale: uv run python -m knowledge."""
+"""Local start: uv run python -m knowledge."""
 from __future__ import annotations
 
 import logging

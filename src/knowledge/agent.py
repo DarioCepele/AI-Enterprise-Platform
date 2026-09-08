@@ -1,4 +1,4 @@
-"""Il sottoagente di knowledge base."""
+"""The knowledge base subagent."""
 from __future__ import annotations
 
 import logging
@@ -15,52 +15,52 @@ logger = logging.getLogger(__name__)
 
 CORPUS = Path(__file__).resolve().parent / "corpus"
 
-INSTRUCTIONS = """Sei un agente di knowledge base interrogato da un altro agente.
+INSTRUCTIONS = """You are a knowledge base agent queried by another agent.
 
-Rispondi solo con quello che trovi nei documenti: chiama `leggi_documento` per
-ogni argomento che ti serve. Se un argomento non e' nel catalogo, dillo invece
-di rispondere a memoria.
+Answer in Italian, and only with what you find in the documents: call
+`read_document` for every topic you need. If a topic is not in the catalogue,
+say so instead of answering from memory.
 
-Chi ti interroga non e' una persona ma un altro agente, che usera' la tua
-risposta dentro un lavoro piu' grande: niente convenevoli, prosa densa e breve.
+Whoever queries you is not a person but another agent, which will use your
+answer inside a larger job: no pleasantries, dense and short prose.
 
-Se la richiesta e' ambigua al punto che rispondere sarebbe indovinare -- per
-esempio non dice di quale linguaggio parli, e il catalogo ne ha piu' d'uno --
-rispondi con la sola riga:
+If the request is ambiguous to the point that answering would be guessing --
+for instance it does not say which language it is about, and the catalogue
+holds more than one -- reply with this single line:
 
-[SERVE-CHIARIMENTO] <la domanda che faresti>
+[NEEDS-CLARIFICATION] <the question you would ask, in Italian>
 
-Usalo con parsimonia: e' una domanda che risale fino alla persona."""
+Use it sparingly: it is a question that travels all the way up to a person."""
 
 
 def catalogue(root: Path = CORPUS) -> dict[str, str]:
-    """I documenti disponibili, per nome."""
+    """The available documents, by name."""
     return {path.stem: path.read_text(encoding="utf-8") for path in sorted(root.glob("*.md"))}
 
 
 def build_knowledge_tools(root: Path = CORPUS) -> list[FunctionTool]:
     documents = catalogue(root)
-    listing = ", ".join(documents) or "nessuno"
+    listing = ", ".join(documents) or "none"
 
     @tool
-    def leggi_documento(
-        nome: Annotated[str, "Il nome del documento, come compare nel catalogo"],
+    def read_document(
+        name: Annotated[str, "The document name, as it appears in the catalogue"],
     ) -> Content:
-        """Legge un documento della knowledge base.
+        """Reads a knowledge base document.
 
-        Documenti disponibili:
+        Available documents:
         """
-        testo = documents.get(nome)
-        if testo is None:
-            logger.warning("Documento '%s' non trovato.", nome)
+        text = documents.get(name)
+        if text is None:
+            logger.warning("Document '%s' not found.", name)
             return Content.from_text(
-                f"Il documento '{nome}' non esiste. Disponibili: {listing}."
+                f"The document '{name}' does not exist. Available: {listing}."
             )
-        logger.info("Documento '%s' letto.", nome)
-        return Content.from_text(testo)
+        logger.info("Document '%s' read.", name)
+        return Content.from_text(text)
 
-    leggi_documento.description = f"{leggi_documento.description}\n{listing}"
-    return [leggi_documento]
+    read_document.description = f"{read_document.description}\n{listing}"
+    return [read_document]
 
 
 def _default_chat_client() -> BaseChatClient:
@@ -74,7 +74,7 @@ def _default_chat_client() -> BaseChatClient:
 def build_knowledge_agent(chat_client: BaseChatClient | None = None) -> Agent:
     return Agent(
         name="knowledge",
-        description="Risponde su linguaggi di programmazione leggendo una knowledge base locale.",
+        description="Answers about programming languages by reading a local knowledge base.",
         instructions=INSTRUCTIONS,
         client=chat_client or _default_chat_client(),
         tools=build_knowledge_tools(),

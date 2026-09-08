@@ -1,4 +1,4 @@
-"""Il sottoagente e la sua carta d'identita' A2A."""
+"""The subagent and its A2A identity card."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,28 +34,28 @@ def test_the_corpus_is_not_empty():
 
 def test_reading_a_document_returns_its_text(tmp_path: Path):
     (tmp_path / "uno.md").write_text("# Uno\n\ncontenuto", encoding="utf-8")
-    leggi = build_knowledge_tools(tmp_path)[0]
+    read = build_knowledge_tools(tmp_path)[0]
 
-    assert "contenuto" in leggi.func(nome="uno").text
+    assert "contenuto" in read.func(name="uno").text
 
 
 def test_an_unknown_document_lists_the_available_ones(tmp_path: Path):
     (tmp_path / "uno.md").write_text("# Uno", encoding="utf-8")
-    leggi = build_knowledge_tools(tmp_path)[0]
+    read = build_knowledge_tools(tmp_path)[0]
 
-    testo = leggi.func(nome="due").text
+    text = read.func(name="due").text
 
-    assert "non esiste" in testo
-    assert "uno" in testo
+    assert "does not exist" in text
+    assert "uno" in text
 
 
 def test_the_catalogue_is_in_the_tool_description(tmp_path: Path):
     (tmp_path / "go.md").write_text("# Go", encoding="utf-8")
     (tmp_path / "rust.md").write_text("# Rust", encoding="utf-8")
 
-    leggi = build_knowledge_tools(tmp_path)[0]
+    read = build_knowledge_tools(tmp_path)[0]
 
-    assert "go" in leggi.description and "rust" in leggi.description
+    assert "go" in read.description and "rust" in read.description
 
 
 @pytest.mark.asyncio

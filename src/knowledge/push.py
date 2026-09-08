@@ -1,4 +1,4 @@
-"""Quali eventi meritano una notifica push."""
+"""Which events are worth a push notification."""
 from __future__ import annotations
 
 import logging
@@ -8,7 +8,7 @@ from a2a.types import TaskState
 
 logger = logging.getLogger(__name__)
 
-DA_NOTIFICARE = {
+WORTH_NOTIFYING = {
     TaskState.TASK_STATE_COMPLETED,
     TaskState.TASK_STATE_FAILED,
     TaskState.TASK_STATE_CANCELED,
@@ -17,25 +17,25 @@ DA_NOTIFICARE = {
 }
 
 
-def _stato(evento) -> int | None:
-    for campo in ("status", ):
-        if hasattr(evento, campo):
-            return getattr(evento, campo).state
+def _state_of(event) -> int | None:
+    for field in ("status",):
+        if hasattr(event, field):
+            return getattr(event, field).state
     return None
 
 
-class NotificheEssenziali(BasePushNotificationSender):
-    """Notifica solo i punti in cui il chiamante ha qualcosa da fare.
+class EssentialNotifications(BasePushNotificationSender):
+    """Notifies only the points where the caller has something to do.
 
-    Il default notifica ogni evento della coda: in streaming sono decine di
-    aggiornamenti per task, tutti scartati da chi li riceve. Restano la fine
-    del task e la richiesta di chiarimento, che sono gli unici momenti in cui
-    chi ha chiesto il lavoro deve muoversi.
+    The default notifies every event on the queue: while streaming that is
+    dozens of updates per task, all discarded by whoever receives them. What
+    remains is the end of the task and the request for a clarification, the
+    only moments when whoever asked for the work has to move.
     """
 
     async def send_notification(self, task_id: str, event) -> None:
-        stato = _stato(event)
-        if stato not in DA_NOTIFICARE:
+        state = _state_of(event)
+        if state not in WORTH_NOTIFYING:
             return
-        logger.info("Notifica push per il task %s: stato %s.", task_id[:8], stato)
+        logger.info("Push notification for task %s: state %s.", task_id[:8], state)
         await super().send_notification(task_id, event)
