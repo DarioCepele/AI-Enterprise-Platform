@@ -34,3 +34,19 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Contratti fra i repo
+
+I campioni di ciò che questo repo mette sul filo — o legge da un altro — stanno
+in `demo-infra/contracts`, versionati e in copia unica. I test di contratto li
+caricano da lì: se manca la cartella **falliscono**, invece di saltarsi da soli.
+Un test di contratto silenzioso quando la controparte non c'è è esattamente il
+silenzio che i contratti tolgono.
+
+```bash
+# i quattro repo come cloni fratelli: nessuna configurazione
+# altrove: AGUI_LAB_CONTRACTS=/percorso/a/demo-infra/contracts
+```
+
+Quando un campione cambia, cambia insieme in tutti i repo elencati nel suo
+`produced_by` e `consumed_by`. Il messaggio di fallimento dice quali sono.
