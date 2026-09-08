@@ -221,6 +221,36 @@ emettere qualunque altro evento applicativo sullo stream, `CUSTOM` compresi. Il
 canale separato dei log (§4.4) resta perché funziona ed è già documentato, non
 perché non ci fosse alternativa.
 
+#### Le cinque capacita' A2A che il laboratorio usa davvero
+
+Un sottoagente raggiunto in HTTP dentro un `try` non e' A2A: e' una chiamata di
+funzione con piu' latenza. Quello che il protocollo aggiunge sono cinque cose,
+e il laboratorio le esercita tutte.
+
+| Capacita' | Dove sta | Cosa cambia |
+|---|---|---|
+| ciclo di vita del task | `a2a/client.py`, `Avanzamento` | il chiamante vede `submitted -> working -> completed`, non solo l'esito |
+| notifiche push | `a2a/push.py`, `/a2a/push/{scope}/{thread_id}` | il lavoro lungo non tiene aperto un socket: l'esito arriva dopo, firmato |
+| artefatti di prima classe | `knowledge/executor.py`, artefatto `scheda` | un output con nome e dati strutturati, non testo indistinguibile |
+| input-required | `[SERVE-CHIARIMENTO]`, `subagent_pending` | il sottoagente si ferma e chiede: human-in-the-loop attraverso gli agenti |
+| extended agent card | -- | capability non pubbliche, dietro autenticazione (§11) |
+
+Due conseguenze di progetto che vale la pena fissare.
+
+**Chi aspetta e' informazione condivisa.** Il turno in cui il sottoagente chiede
+e quello in cui l'utente risponde sono due richieste HTTP, che con piu' repliche
+finiscono su processi diversi. `subagent_pending` sta nello stato del thread,
+che e' gia' condiviso e gia' durevole; il tool lo legge da una `ContextVar` che
+`LabRunner` popola dallo snapshot store, non dallo stato della richiesta -- che
+il framework fonde dopo quel punto.
+
+**Il filtro delle notifiche sta da chi le manda.** `BasePushNotificationSender`
+notifica ogni evento della coda: in streaming erano 196 POST per due domande,
+tutti scartati da chi li riceveva. Il sottoagente notifica ora solo gli stati in
+cui il chiamante deve muoversi -- terminali e `INPUT_REQUIRED` -- e chi riceve
+continua comunque a ignorare gli avanzamenti, perche' un contratto verificato
+solo da una parte non e' un contratto.
+
 ### 4.4 Log operativi
 
 Nell'adattatore MAF AG-UI in uso gli eventi `CUSTOM` sono riservati al framework;
@@ -382,6 +412,7 @@ Ordinate per rischio decrescente, non per area funzionale. Le due cose che posso
 | 1 | walking skeleton | prompt → LLM → `TEXT_MESSAGE_*` + un tool → UI a tre pannelli, piu' le immagini docker e il compose. Niente piano, niente skill, niente tabelle. | **fatto** |
 | 2 | flusso del video | piano di lavoro, `SKILL.md` + `load_skill`, `ui_table`, filtri inspector, tab log | **fatto**, verificato nel browser il 2026-09-08 |
 | 3 | sottoagenti A2A | knowledge agent come processo separato, invocazione parallela, update rilanciati | **fatto**, verificato nel browser il 2026-09-08 |
+| 4 | A2A per intero | ciclo di vita, push firmate, artefatti con nome, input-required end-to-end | **fatto**, verificato dal vivo il 2026-09-08; resta la extended card |
 
 La tappa 1 esiste per validare che il frontend consumi correttamente ciò che il package AG-UI emette, quando cambiare idea costa poco.
 
@@ -440,6 +471,11 @@ Due vincoli da rispettare quando si farà:
   agenti quasi identici la scoperta semantica rende il routing meno prevedibile,
   non più: se un ingegnere umano non sa dire quale agente usare, il modello
   nemmeno.
+
+**Extended agent card dietro autenticazione.** La card pubblica dichiara cosa
+l'agente sa fare per chiunque; A2A prevede una card estesa, servita solo a chi
+si autentica, per le capability che non si vogliono in vetrina. Manca il pezzo
+di autenticazione, rimandato per scelta.
 
 **Decadimento dei fatti duraturi.** Un fatto vecchio e mai più confermato pesa
 quanto uno di ieri. La pratica consigliata è abbassare una forza nel tempo

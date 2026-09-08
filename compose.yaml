@@ -11,6 +11,9 @@ services:
       DEMO_ALLOWED_ORIGINS: ${DEMO_ALLOWED_ORIGINS:-}
       DEMO_MEMORY_SERVICE_URL: http://memory-service:8100
       DEMO_KNOWLEDGE_AGENT_URL: http://knowledge-agent:8200/
+      DEMO_PUBLIC_URL: http://master-agent:8000
+      DEMO_PUSH_SECRET: ${DEMO_PUSH_SECRET:?serve in .env}
+      DEMO_SUBAGENT_WAIT_SECONDS: ${DEMO_SUBAGENT_WAIT_SECONDS:-60}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
