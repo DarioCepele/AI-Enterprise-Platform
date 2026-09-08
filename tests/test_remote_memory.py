@@ -15,7 +15,6 @@ SNAPSHOT = AGUIThreadSnapshot(
     session_state={"provider": "continuazione"},
 )
 
-
 def store_talking_to(handler) -> tuple[MemoryServiceSnapshotStore, list[httpx.Request]]:
     """Uno store collegato a un servizio finto, con le richieste registrate."""
     seen: list[httpx.Request] = []
@@ -26,7 +25,6 @@ def store_talking_to(handler) -> tuple[MemoryServiceSnapshotStore, list[httpx.Re
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(record), base_url="http://memoria")
     return MemoryServiceSnapshotStore("http://memoria", client=client), seen
-
 
 @pytest.mark.asyncio
 async def test_saving_sends_the_whole_snapshot_and_the_scope():
@@ -45,7 +43,6 @@ async def test_saving_sends_the_whole_snapshot_and_the_scope():
     assert body["state"] == SNAPSHOT.state
     assert body["session_state"] == SNAPSHOT.session_state
 
-
 @pytest.mark.asyncio
 async def test_reading_rebuilds_the_snapshot():
     payload = {
@@ -62,13 +59,11 @@ async def test_reading_rebuilds_the_snapshot():
     assert snapshot.state == SNAPSHOT.state
     assert snapshot.session_state == SNAPSHOT.session_state
 
-
 @pytest.mark.asyncio
 async def test_an_unknown_thread_reads_as_nothing():
     store, _ = store_talking_to(lambda _: httpx.Response(404, json={"detail": "sconosciuto"}))
 
     assert await store.get(scope="tenant-a", thread_id="mai-visto") is None
-
 
 @pytest.mark.asyncio
 async def test_a_memory_service_down_does_not_stop_the_conversation(caplog):
@@ -80,23 +75,18 @@ async def test_a_memory_service_down_does_not_stop_the_conversation(caplog):
     with caplog.at_level(logging.ERROR, logger="demo.memory.remote_store"):
         snapshot = await store.get(scope="tenant-a", thread_id="t1")
 
-    # Si riparte senza storia, ma si riparte -- e l'amnesia e' scritta nei log,
-    # non silenziosa.
     assert snapshot is None
     assert "non leggibile" in caplog.text
-
 
 @pytest.mark.asyncio
 async def test_a_failed_save_is_logged_and_does_not_raise(caplog):
     store, _ = store_talking_to(lambda _: httpx.Response(500, json={"detail": "rotto"}))
 
     with caplog.at_level(logging.ERROR, logger="demo.memory.remote_store"):
-        # La risposta all'utente e' gia' partita: sollevare qui romperebbe una
-        # run riuscita.
+
         await store.save(scope="tenant-a", thread_id="t1", snapshot=SNAPSHOT)
 
     assert "NON salvata" in caplog.text
-
 
 @pytest.mark.asyncio
 async def test_deleting_reports_whether_something_was_there():
@@ -108,7 +98,6 @@ async def test_deleting_reports_whether_something_was_there():
     assert seen[0].method == "DELETE"
     assert seen[0].url.path == "/threads/t1"
 
-
 @pytest.mark.asyncio
 async def test_clearing_everything_without_a_scope_is_refused():
     store, seen = store_talking_to(lambda _: httpx.Response(200, json={"thread_rimossi": 0}))
@@ -116,9 +105,7 @@ async def test_clearing_everything_without_a_scope_is_refused():
     with pytest.raises(ValueError):
         await store.clear()
 
-    # Nessuna richiesta partita: il rifiuto avviene prima della rete.
     assert seen == []
-
 
 @pytest.mark.asyncio
 async def test_clearing_a_scope_hits_that_scope_only():
@@ -128,7 +115,6 @@ async def test_clearing_a_scope_hits_that_scope_only():
 
     assert seen[0].url.path == "/scope"
     assert seen[0].headers["X-Memory-Scope"] == "tenant-a"
-
 
 @pytest.mark.asyncio
 async def test_the_pruning_done_by_the_memory_shows_up_in_the_logs(caplog):
@@ -149,6 +135,5 @@ async def test_the_pruning_done_by_the_memory_shows_up_in_the_logs(caplog):
     with caplog.at_level(logging.INFO, logger="demo.memory.remote_store"):
         await store.get(scope="tenant-a", thread_id="t1")
 
-    # Una potatura silenziosa e' indistinguibile da una perdita di memoria.
     assert "4 ragionamenti tolti" in caplog.text
     assert "2 risultati svuotati" in caplog.text

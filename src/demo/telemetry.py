@@ -17,10 +17,7 @@ from agent_framework import ChatContext, ChatResponse, Message, chat_middleware
 
 logger = logging.getLogger(__name__)
 
-# Content che portano il risultato di un tool. Contarli a parte serve a decidere
-# se convenga svuotarli (tool clearing) prima di riassumere il resto.
 _RESULT_ATTRS = ("result", "output")
-
 
 def _content_size(content: Any) -> int:
     """Caratteri di un content, qualunque forma abbia."""
@@ -36,10 +33,8 @@ def _content_size(content: Any) -> int:
             return len(str(value))
     return 0
 
-
 def _is_tool_result(content: Any) -> bool:
     return any(getattr(content, attr, None) is not None for attr in _RESULT_ATTRS)
-
 
 def measure(messages: Sequence[Message]) -> dict[str, int]:
     """Dimensione del contesto in partenza: messaggi, caratteri, quota dei tool.
@@ -58,7 +53,6 @@ def measure(messages: Sequence[Message]) -> dict[str, int]:
                 tool_chars += size
     return {"messages": len(messages), "chars": total, "tool_chars": tool_chars}
 
-
 def _usage(response: object) -> dict[str, int]:
     """Token realmente consumati, quando il provider li dichiara."""
     details = getattr(response, "usage_details", None) or {}
@@ -66,7 +60,6 @@ def _usage(response: object) -> dict[str, int]:
         "input_tokens": int(details.get("input_token_count") or 0),
         "output_tokens": int(details.get("output_token_count") or 0),
     }
-
 
 def _log(size: dict[str, int], usage: dict[str, int]) -> None:
     tokens = (
@@ -82,7 +75,6 @@ def _log(size: dict[str, int], usage: dict[str, int]) -> None:
         tokens,
     )
 
-
 @chat_middleware
 async def log_context_size(
     context: ChatContext,
@@ -95,8 +87,6 @@ async def log_context_size(
     """
     size = measure(context.messages)
 
-    # Nello streaming il conteggio dei token esiste solo alla fine, quando lo
-    # stream e' stato consumato e la risposta finalizzata.
     def _on_final(response: ChatResponse) -> ChatResponse:
         _log(size, _usage(response))
         return response

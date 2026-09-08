@@ -16,12 +16,9 @@ logger = logging.getLogger(__name__)
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
-# Frontmatter delimitato da --- in apertura e chiusura, corpo markdown dopo.
 _FRONTMATTER = re.compile(r"\A---\s*\n(?P<meta>.*?)\n---\s*\n(?P<body>.*)\Z", re.S)
-# Solo campi scalari `chiave: valore`. Due campi non giustificano pyyaml;
-# se il frontmatter diventasse annidato, e' questa riga da sostituire.
-_FIELD = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*):\s*(?P<value>.*)$")
 
+_FIELD = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*):\s*(?P<value>.*)$")
 
 def parse_skill(text: str) -> dict[str, str]:
     """Divide un SKILL.md in metadati e corpo. Solleva se la forma non torna."""
@@ -51,7 +48,6 @@ def parse_skill(text: str) -> dict[str, str]:
         "body": match.group("body").strip(),
     }
 
-
 def list_skills(root: Path = SKILLS_DIR) -> list[dict[str, Any]]:
     """Le skill disponibili, ordinate per nome. Una skill rotta solleva subito."""
     found = []
@@ -59,7 +55,6 @@ def list_skills(root: Path = SKILLS_DIR) -> list[dict[str, Any]]:
         parsed = parse_skill(skill_file.read_text(encoding="utf-8"))
         found.append(parsed)
     return found
-
 
 def build_skill_tools(root: Path = SKILLS_DIR) -> list[FunctionTool]:
     """Il tool load_skill, legato a una cartella di skill.
@@ -83,14 +78,12 @@ def build_skill_tools(root: Path = SKILLS_DIR) -> list[FunctionTool]:
         if wanted is None:
             logger.warning("Skill '%s' non trovata.", name)
             known = ", ".join(s["name"] for s in catalogue) or "nessuna"
-            # Errore come testo, non eccezione: il modello legge, si corregge,
-            # e la run continua invece di morire su un nome sbagliato.
+
             return Content.from_text(
                 f"La skill '{name}' non esiste. Skill disponibili: {known}."
             )
         logger.info("Skill '%s' caricata.", name)
         return Content.from_text(wanted["body"])
 
-    # La docstring del tool e' cio' che il modello legge: il catalogo va dentro.
     load_skill.description = f"{load_skill.description}\n{listing}"
     return [load_skill]

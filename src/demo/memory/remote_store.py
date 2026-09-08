@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 SCOPE_HEADER = "X-Memory-Scope"
 
-
 class MemoryServiceSnapshotStore:
     """La memoria dei thread, tenuta dal servizio di memoria."""
 
@@ -32,15 +31,12 @@ class MemoryServiceSnapshotStore:
         client: httpx.AsyncClient | None = None,
         timeout: float = 5.0,
     ) -> None:
-        # Un client riusato per tutte le richieste: aprirne uno per chiamata
-        # ripagherebbe l'handshake TCP a ogni turno di conversazione.
+
         self._client = client or httpx.AsyncClient(base_url=base_url, timeout=timeout)
 
     @staticmethod
     def _headers(scope: str) -> dict[str, str]:
-        # Lo scope arriva dal resolver dell'endpoint AG-UI, cioe' -- in
-        # produzione -- dall'identita' verificata della richiesta. Qui viaggia
-        # in un header perche' la fiducia sta nella rete fra i due servizi.
+
         return {SCOPE_HEADER: scope}
 
     async def save(
@@ -62,8 +58,7 @@ class MemoryServiceSnapshotStore:
             )
             response.raise_for_status()
         except Exception:
-            # La risposta all'utente e' gia' partita: sollevare qui romperebbe
-            # una run riuscita. Si perde la memoria di questo turno, e si dice.
+
             logger.error("Memoria NON salvata per il thread %s.", thread_id, exc_info=True)
             return
         logger.info(
@@ -82,8 +77,7 @@ class MemoryServiceSnapshotStore:
             response.raise_for_status()
             payload = response.json()
         except Exception:
-            # Degrado dichiarato: la conversazione riparte senza storia invece
-            # di non partire affatto.
+
             logger.error(
                 "Memoria del thread %s non leggibile: si riparte senza storia.",
                 thread_id,
@@ -94,9 +88,7 @@ class MemoryServiceSnapshotStore:
         messages = payload.get("messages") or []
         curation = payload.get("curation")
         if curation:
-            # La potatura la decide il servizio di memoria, ma chi ne subisce
-            # l'effetto e' questo contesto: la riga va scritta qui, dove si
-            # vede nel tab LOG insieme al resto della run.
+
             logger.info(
                 "Contesto dalla memoria: %d messaggi (%d ragionamenti tolti, "
                 "%d risultati svuotati, %d scartati).",

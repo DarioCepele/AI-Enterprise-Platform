@@ -18,7 +18,6 @@ STEPS = [
     },
 ]
 
-
 def test_write_creates_pending_steps_and_starts_the_plan():
     store = PlanStore()
     plan = store.write(STEPS)
@@ -27,7 +26,6 @@ def test_write_creates_pending_steps_and_starts_the_plan():
     assert [s["status"] for s in plan["steps"]] == ["pending", "pending"]
     assert plan["steps"][0]["title"] == "Carica la skill"
     assert plan["steps"][0]["started_at"] is None
-
 
 def test_set_status_touches_only_the_named_step():
     store = PlanStore()
@@ -38,7 +36,6 @@ def test_set_status_touches_only_the_named_step():
     assert plan["steps"][0]["started_at"] is not None
     assert plan["steps"][1]["status"] == "pending"
 
-
 def test_plan_completes_when_every_step_completes():
     store = PlanStore()
     store.write(STEPS)
@@ -47,7 +44,6 @@ def test_plan_completes_when_every_step_completes():
 
     assert plan["status"] == "completed"
     assert plan["steps"][1]["ended_at"] is not None
-
 
 def test_a_failed_step_fails_the_plan():
     store = PlanStore()
@@ -58,14 +54,12 @@ def test_a_failed_step_fails_the_plan():
     assert plan["status"] == "failed"
     assert plan["steps"][1]["note"] == "il tool non ha risposto"
 
-
 def test_a_failed_step_requires_a_reason():
     store = PlanStore()
     store.write(STEPS)
 
     with pytest.raises(ValueError, match="failed"):
         store.set_status(1, "failed", None)
-
 
 def test_unknown_step_is_rejected_loudly():
     store = PlanStore()
@@ -74,7 +68,6 @@ def test_unknown_step_is_rejected_loudly():
     with pytest.raises(ValueError, match="passo 99"):
         store.set_status(99, "completed", None)
 
-
 def test_unknown_status_is_rejected_loudly():
     store = PlanStore()
     store.write(STEPS)
@@ -82,16 +75,13 @@ def test_unknown_status_is_rejected_loudly():
     with pytest.raises(ValueError, match="quasi"):
         store.set_status(1, "quasi", None)
 
-
 def test_snapshot_is_a_copy_not_a_live_reference():
     store = PlanStore()
     store.write(STEPS)
     taken = store.snapshot()
     store.set_status(1, "completed", None)
 
-    # Chi ha preso lo snapshot lo serializza dopo: non deve vederlo cambiare.
     assert taken["steps"][0]["status"] == "pending"
-
 
 def test_tools_write_the_plan_into_shared_state():
     store = PlanStore()
@@ -101,11 +91,9 @@ def test_tools_write_the_plan_into_shared_state():
     state = content.additional_properties[STATE_KEY]
 
     assert "plan" in state
-    # Mai `artifacts` insieme a `plan`: state_update sostituisce le chiavi di
-    # primo livello, e passarle insieme cancellerebbe gli artefatti gia' emessi.
+
     assert "artifacts" not in state
     assert state["plan"]["steps"][0]["id"] == 1
-
 
 def test_set_status_tool_reemits_the_whole_plan():
     store = PlanStore()
@@ -115,10 +103,8 @@ def test_set_status_tool_reemits_the_whole_plan():
     content = todo_set_status.func(step_id=1, status="completed", note=None)
     plan = content.additional_properties[STATE_KEY]["plan"]
 
-    # Riemesso intero, non solo il passo cambiato.
     assert len(plan["steps"]) == 2
     assert plan["steps"][0]["status"] == "completed"
-
 
 def test_plan_tool_text_is_short_and_for_the_model():
     store = PlanStore()

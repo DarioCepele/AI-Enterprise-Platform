@@ -5,8 +5,9 @@ from agent_framework import Agent, BaseChatClient
 from agent_framework.openai import OpenAIChatCompletionClient
 
 from ..chat_clients.fake import FakeStreamingChatClient
-from ..config import get_settings
+from ..config import SINGLE_TENANT_SCOPE, get_settings
 from ..telemetry import log_context_size
+from ..tools.memory_tools import build_memory_tools
 from ..tools.plan_tools import PlanStore, build_plan_tools
 from ..tools.skill_tools import build_skill_tools
 from ..tools.ui_tools import get_tools
@@ -26,8 +27,11 @@ Quando richiede piu' passi:
 4. Se un passo fallisce, marcalo `failed` con una nota e prosegui con gli altri.
 
 Quando devi confrontare piu' elementi lungo dimensioni comuni, usa il tool
-`ui_table` invece di descrivere il confronto a parole."""
+`ui_table` invece di descrivere il confronto a parole.
 
+Se l'utente si riferisce a qualcosa di gia' detto che non vedi nel contesto,
+chiama `cerca_nei_ricordi` prima di dire che non lo sai: le conversazioni
+passate non stanno tutte davanti a te."""
 
 def _default_chat_client() -> BaseChatClient:
     settings = get_settings()
@@ -39,19 +43,29 @@ def _default_chat_client() -> BaseChatClient:
         base_url=settings.base_url,
     )
 
-
 def build_master_agent(
     chat_client: BaseChatClient | None = None,
     plan_store: PlanStore | None = None,
 ) -> Agent:
     """Il master agent. `chat_client` e `plan_store` vanno passati nei test."""
     store = plan_store if plan_store is not None else PlanStore()
+    settings = get_settings()
+
+    memory_tools = (
+        build_memory_tools(settings.memory_service_url, SINGLE_TENANT_SCOPE)
+        if settings.memory_service_url
+        else []
+    )
     return Agent(
         name="master",
         instructions=INSTRUCTIONS,
         client=chat_client or _default_chat_client(),
-        tools=[*get_tools(), *build_plan_tools(store), *build_skill_tools()],
-        # Una riga per chiamata al modello, non per run: e' dentro la singola
-        # run, fra un tool e l'altro, che il contesto si gonfia.
+        tools=[
+            *get_tools(),
+            *build_plan_tools(store),
+            *build_skill_tools(),
+            *memory_tools,
+        ],
+
         middleware=[log_context_size],
     )

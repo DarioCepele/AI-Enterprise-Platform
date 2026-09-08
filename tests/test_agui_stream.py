@@ -14,7 +14,6 @@ REQUEST = {
     "forwardedProps": {},
 }
 
-
 async def collect_events(app) -> list[dict]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -28,7 +27,6 @@ async def collect_events(app) -> list[dict]:
                     events.append(json.loads(line[len("data: "):]))
             return events
 
-
 @pytest.mark.asyncio
 async def test_run_starts_and_finishes(app):
     events = await collect_events(app)
@@ -39,14 +37,12 @@ async def test_run_starts_and_finishes(app):
     assert "RUN_ERROR" not in types
     assert types.count("RUN_STARTED") == 1
 
-
 @pytest.mark.asyncio
 async def test_text_is_streamed_in_deltas(app):
     events = await collect_events(app)
 
     deltas = [e["delta"] for e in events if e["type"] == "TEXT_MESSAGE_CONTENT"]
     assert deltas == ["ciao ", "mondo"]
-
 
 @pytest.mark.asyncio
 async def test_every_text_message_start_has_an_end(app):
@@ -56,7 +52,6 @@ async def test_every_text_message_start_has_an_end(app):
     ends = [e["messageId"] for e in events if e["type"] == "TEXT_MESSAGE_END"]
     assert sorted(starts) == sorted(ends)
 
-
 @pytest.mark.asyncio
 async def test_run_id_is_echoed_back(app):
     events = await collect_events(app)
@@ -64,7 +59,6 @@ async def test_run_id_is_echoed_back(app):
     started = next(e for e in events if e["type"] == "RUN_STARTED")
     assert started["runId"] == "r1"
     assert started["threadId"] == "t1"
-
 
 @pytest.mark.asyncio
 async def test_tool_call_emits_result_then_state_snapshot(tool_app):
@@ -76,13 +70,12 @@ async def test_tool_call_emits_result_then_state_snapshot(tool_app):
     assert types.index("TOOL_CALL_RESULT") < types.index("STATE_SNAPSHOT")
 
     result = next(e for e in events if e["type"] == "TOOL_CALL_RESULT")
-    # Il payload arriva serializzato, non come oggetto.
+
     assert isinstance(result["content"], str)
     assert json.loads(result["content"])["component"] == "ui-table"
 
     snapshot = next(e for e in events if e["type"] == "STATE_SNAPSHOT")
     assert snapshot["snapshot"]["artifacts"][0]["component"] == "ui-table"
-
 
 @pytest.mark.asyncio
 async def test_tool_snapshot_preserves_calls_and_nonempty_text(tool_app):
@@ -106,7 +99,6 @@ async def test_tool_snapshot_preserves_calls_and_nonempty_text(tool_app):
     ]
     assert events[-1]["type"] == "RUN_FINISHED"
 
-
 @pytest.mark.asyncio
 async def test_cors_preflight_allows_dev_frontend(app):
     transport = httpx.ASGITransport(app=app)
@@ -125,7 +117,6 @@ async def test_cors_preflight_allows_dev_frontend(app):
     assert "POST" in response.headers["access-control-allow-methods"]
     assert "content-type" in response.headers["access-control-allow-headers"].lower()
 
-
 @pytest.mark.asyncio
 async def test_plan_tool_reaches_the_shared_state(plan_app):
     events = await collect_events(plan_app)
@@ -136,10 +127,8 @@ async def test_plan_tool_reaches_the_shared_state(plan_app):
     plan = snapshots[-1]["snapshot"]["plan"]
     assert plan["status"] == "in_progress"
     assert plan["steps"][0]["title"] == "Primo passo"
-    # `artifacts` sopravvive accanto a `plan`: sono due chiavi di primo livello
-    # diverse proprio perche' state_update sostituisce, non fonde.
-    assert "artifacts" in snapshots[-1]["snapshot"]
 
+    assert "artifacts" in snapshots[-1]["snapshot"]
 
 @pytest.mark.asyncio
 async def test_cors_preflight_allows_next_fallback_port(app):

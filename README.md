@@ -25,13 +25,14 @@ La configurazione viene letta dall'ambiente; in locale viene caricato anche il f
 
 Il flusso del piano richiede un modello che esegua davvero le chiamate ai tool. Il client finto serve ai test del protocollo, non riproduce l'intero flusso del modello reale.
 
-## Tre gruppi di tool
+## Gruppi di tool
 
 | Gruppo | Tool | Contratto |
 | --- | --- | --- |
 | Piano | `todo_write`, `todo_set_status` | Scrivono e aggiornano `state.plan`. |
 | Skill | `load_skill` | Restituisce al modello le istruzioni Markdown della skill richiesta. |
 | Artefatti UI | `ui_table` | Produce il payload della tabella e aggiorna `state.artifacts`. |
+| Memoria | `cerca_nei_ricordi` | Cerca per significato nelle conversazioni passate. Esiste solo se il servizio di memoria e' configurato. |
 
 `todo_write(steps)` sostituisce il piano precedente. Ogni passo ha un `id` intero, `title`, `detail` e `source`; parte da `pending`. `todo_set_status(step_id, status, note)` accetta `pending`, `in_progress`, `completed` e `failed`. Per `failed` la nota deve essere non vuota. Gli aggiornamenti includono i tempi di inizio e fine e riemettono il piano intero. L'agente deve aggiornare i passi mentre lavora, per rendere visibile l'avanzamento.
 
@@ -165,3 +166,24 @@ irraggiungibile non fa fallire la conversazione: in lettura si degrada a
 l'errore — sollevare a run conclusa romperebbe una risposta già consegnata. In
 entrambi i casi la riga finisce su `demo.*`, quindi sotto gli occhi nel tab
 LOG: un'amnesia silenziosa è il difetto peggiore che questo pezzo possa avere.
+
+## Cercare nei ricordi
+
+Con il servizio di memoria configurato, l'agente ha un quarto gruppo di tool:
+`cerca_nei_ricordi(domanda)` interroga `POST /search` del servizio e riceve i
+frammenti di conversazioni passate più vicini per significato.
+
+È un tool e non un'iniezione automatica nel contesto: infilare a ogni run i
+ricordi «probabilmente pertinenti» li paga sempre e li azzecca a volte, mentre
+più roba c'è nel contesto meno il modello ne recupera con precisione. Così la
+memoria si raggiunge quando serve, e a decidere se serve è il modello, che la
+domanda ce l'ha davanti.
+
+Senza `DEMO_MEMORY_SERVICE_URL` il tool **non esiste**, invece di esistere e
+fallire: un tool che risponde sempre «non raggiungibile» insegna al modello a
+non chiamarlo più. Quando la memoria è configurata ma irraggiungibile, l'errore
+torna al modello come testo e la run continua.
+
+Verificato dal vivo: informazione detta in una conversazione, poi in un thread
+nuovo la domanda «quale alternativa avevamo scartato per il deploy?» → l'agente
+chiama `cerca_nei_ricordi` e risponde «ECS», che nel contesto non c'era.

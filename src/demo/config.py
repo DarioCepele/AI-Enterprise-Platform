@@ -8,9 +8,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
-# Il dev server di Next slitta sulla porta successiva se la 3000 e' occupata,
-# quindi il default copre anche la 3001. Sovrascrivibile con DEMO_ALLOWED_ORIGINS.
 _DEFAULT_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -18,6 +15,7 @@ _DEFAULT_ORIGINS = (
     "http://127.0.0.1:3001",
 )
 
+SINGLE_TENANT_SCOPE = "laboratorio-locale"
 
 @dataclass(frozen=True)
 class Settings:
@@ -26,17 +24,14 @@ class Settings:
     model: str
     use_fake_client: bool
     allowed_origins: tuple[str, ...]
-    # Vuoto = memoria dei thread in memoria di processo, come prima: il
-    # laboratorio deve restare avviabile senza tirare su Mongo e Redis.
-    memory_service_url: str
 
+    memory_service_url: str
 
 def _read_origins() -> tuple[str, ...]:
     raw = os.getenv("DEMO_ALLOWED_ORIGINS", "")
     if not raw.strip():
         return _DEFAULT_ORIGINS
     return tuple(part.strip() for part in raw.split(",") if part.strip())
-
 
 def get_settings() -> Settings:
     """Costruisce le Settings dall'ambiente. Nessuna cache: i test cambiano l'env."""

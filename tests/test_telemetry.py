@@ -19,7 +19,6 @@ from agent_framework._middleware import ChatMiddlewareLayer
 from demo.agents.master import build_master_agent
 from demo.telemetry import measure
 
-
 class UsageReportingClient(ChatMiddlewareLayer, BaseChatClient):
     """Risponde un testo fisso e dichiara un uso di token noto."""
 
@@ -49,8 +48,7 @@ class UsageReportingClient(ChatMiddlewareLayer, BaseChatClient):
             return _once()
 
         async def _stream():
-            # Nello streaming l'uso viaggia come content, non come campo:
-            # il finalizzatore lo somma in ChatResponse.usage_details.
+
             yield ChatResponseUpdate(
                 contents=[Content.from_text("fatto"), Content.from_usage(usage_details=self._usage)],
                 role="assistant",
@@ -58,13 +56,11 @@ class UsageReportingClient(ChatMiddlewareLayer, BaseChatClient):
 
         return ResponseStream(_stream(), finalizer=ChatResponse.from_updates)
 
-
 class SilentUsageClient(UsageReportingClient):
     """Provider che non dichiara alcun uso: capita, e non deve rompere nulla."""
 
     def __init__(self) -> None:
         super().__init__(input_tokens=0, output_tokens=0)
-
 
 def test_measure_counts_messages_and_characters():
     messages = [
@@ -76,7 +72,6 @@ def test_measure_counts_messages_and_characters():
 
     assert size["messages"] == 2
     assert size["chars"] == len("dodici caratt") + len("ok")
-
 
 def test_measure_separates_the_share_coming_from_tools():
     messages = [
@@ -92,10 +87,8 @@ def test_measure_separates_the_share_coming_from_tools():
     assert size["tool_chars"] == len("riga di tabella")
     assert size["chars"] > size["tool_chars"]
 
-
 def test_measure_survives_an_empty_context():
     assert measure([]) == {"messages": 0, "chars": 0, "tool_chars": 0}
-
 
 @pytest.mark.asyncio
 async def test_a_run_logs_size_and_tokens(caplog):
@@ -109,7 +102,6 @@ async def test_a_run_logs_size_and_tokens(caplog):
     assert "120 token in, 7 out" in lines[-1]
     assert "messaggi" in lines[-1]
 
-
 @pytest.mark.asyncio
 async def test_the_line_never_carries_the_conversation(caplog):
     agent = build_master_agent(chat_client=UsageReportingClient())
@@ -121,7 +113,6 @@ async def test_the_line_never_carries_the_conversation(caplog):
     assert lines
     assert all("parola-segreta-da-non-loggare" not in line for line in lines)
 
-
 @pytest.mark.asyncio
 async def test_a_provider_without_usage_still_logs_the_size(caplog):
     agent = build_master_agent(chat_client=SilentUsageClient())
@@ -132,7 +123,6 @@ async def test_a_provider_without_usage_still_logs_the_size(caplog):
     lines = [r.getMessage() for r in caplog.records if r.name == "demo.telemetry"]
     assert lines
     assert "token non riportati dal provider" in lines[-1]
-
 
 @pytest.mark.asyncio
 async def test_streaming_reports_the_tokens_at_the_end(caplog):

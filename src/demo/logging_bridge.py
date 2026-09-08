@@ -13,21 +13,14 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
-# Solo i logger dell'applicazione. I logger di libreria (httpx, openai)
-# scrivono URL e header di richiesta: inoltrarli al browser significa
-# pubblicare la chiave API. Il filtro e' una misura di sicurezza, non estetica.
 APP_LOGGER = "demo"
 
-# Il server e' longevo. Il buffer tiene le ultime righe e dichiara quante ne
-# ha perse, invece di crescere finche' la memoria finisce.
 MAX_LOG_EVENTS = 500
-
 
 def _timestamp(record: logging.LogRecord) -> str:
     return datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(
         timespec="milliseconds"
     )
-
 
 class _CollectingHandler(logging.Handler):
     def __init__(self, collector: LogCollector) -> None:
@@ -37,7 +30,7 @@ class _CollectingHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         message = record.getMessage()
         if record.exc_info:
-            # formatException produce il traceback senza il messaggio davanti.
+
             message = f"{message}\n{self.formatter.formatException(record.exc_info)}"
 
         self._collector.append(
@@ -48,7 +41,6 @@ class _CollectingHandler(logging.Handler):
                 "message": message,
             }
         )
-
 
 class LogCollector:
     """Buffer circolare dei log di `demo.*`, letto a cursore.
@@ -63,7 +55,7 @@ class LogCollector:
         self._handler: _CollectingHandler | None = None
         self._previous_level: int = logging.NOTSET
         self._next_seq = 1
-        # uvicorn serve le richieste su piu' thread: append e since si incrociano.
+
         self._lock = threading.Lock()
 
     def append(self, entry: dict[str, Any]) -> None:
@@ -79,12 +71,10 @@ class LogCollector:
         self._handler = _CollectingHandler(self)
         self._handler.setFormatter(logging.Formatter())
         logger = logging.getLogger(APP_LOGGER)
-        # logging.getLogger("demo") e' un oggetto globale di processo: se non
-        # salviamo il livello di partenza qui, detach() non ha modo di sapere
-        # cosa ripristinare e il livello INFO resterebbe per sempre.
+
         self._previous_level = logger.level
         logger.addHandler(self._handler)
-        # Senza questo, il livello ereditato dal root (WARNING) scarta gli INFO.
+
         logger.setLevel(logging.INFO)
 
     def detach(self) -> None:
@@ -100,7 +90,7 @@ class LogCollector:
         with self._lock:
             entries = [dict(e) for e in self._entries if e["seq"] > cursor]
             oldest_kept = self._entries[0]["seq"] if self._entries else self._next_seq
-            # Quante righe sono uscite dal buffer prima che il client le leggesse.
+
             dropped = max(0, oldest_kept - cursor - 1)
             newest = entries[-1]["seq"] if entries else cursor
             return {"entries": entries, "cursor": newest, "dropped": dropped}
