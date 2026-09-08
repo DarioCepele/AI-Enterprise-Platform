@@ -1,7 +1,7 @@
 # Laboratorio AG-UI — design
 
 **Data:** 2026-09-07
-**Stato:** tappa 2 completata e verificata nel browser
+**Stato:** tappe 1-3 completate e verificate nel browser
 **Scopo:** ricostruire in locale, a fini di studio, un'interfaccia agentica equivalente a quella del "Laboratorio AG-UI" (Mind-X): chat a sinistra, piano di lavoro ed event inspector a destra, con agente multi-step e sottoagenti invocati in parallelo.
 
 Il progetto è **esplorativo**: non ha scadenza né utenti finali. Si ottimizza per leggibilità, confini netti fra moduli e possibilità di spiegare ogni pezzo, non per velocità di consegna.
@@ -38,7 +38,8 @@ Package usati:
 
 - `agent-framework-core==1.17.0`
 - `agent-framework-ag-ui` (≥1.2.2) — endpoint AG-UI e mapping eventi
-- `agent-framework-a2a` — client e executor A2A
+- `agent-framework-a2a` — client e executor A2A. Ferma alla linea beta
+  (`1.0.0b260821`) ma dichiara `agent-framework-core>=1.15,<2`: gira con 1.17.
 - `a2a-sdk[http-server]` + `sse-starlette`
 
 **Non si scrive un mapper AG-UI a mano.** Il package Microsoft espone
@@ -78,49 +79,52 @@ Microsoft pubblica `agent-framework-devui`, ma la sua documentazione è esplicit
 
 ```
 Next.js  --POST /agui (RunAgentInput)-->  master agent (FastAPI + MAF)
-         <--SSE eventi AG-UI-----------
-                                           master --A2A message/stream--> knowledge agent
-                                                  <--update incrementali--
+         <--SSE eventi AG-UI-----------      |        |
+                                             |        +--A2A message/stream--> knowledge agent
+                                             |        <--update incrementali--
+                                             +--HTTP--> servizio di memoria --> MongoDB (durevole)
+                                                                            --> Redis (coda calda, ricordi)
 ```
 
 ```
 C:\project\demo\                    cartella di lavoro, NON un repo
 
   demo-master-agent\                 REPO 1 -- agente principale
-    Dockerfile
     src/demo/
       agents/master.py
-      tools/          ui_tools.py, poi plan_tools.py, skill_tools.py, subagent_tools.py
+      tools/          ui_tools, plan_tools, skill_tools, memory_tools, subagent_tools
       skills/         <nome>/SKILL.md
       chat_clients/   fake client per test e sviluppo offline
-      server/app.py   endpoint AG-UI
-      a2a/            client A2A (tappa 3): fetch card + factory
-      config.py
-    tests/
+      memory/         snapshot store che parla col servizio di memoria
+      server/         endpoint AG-UI e relay degli eventi dei sottoagenti
+      telemetry.py    dimensione del contesto a ogni chiamata al modello
 
-  demo-knowledge-agent\              REPO 2 -- sottoagente A2A (tappa 3)
-    Dockerfile
-    src/demo_kb/
-      agent.py, executor.py, card.py
-      server/app.py   mount A2A
+  demo-knowledge-agent\              REPO 2 -- sottoagente A2A
+    src/knowledge/
+      agent.py        agente MAF con il corpus locale
+      corpus/         i documenti della knowledge base
+      server.py       card A2A e mount delle rotte
 
   demo-frontend\                     REPO 3 -- interfaccia Next.js
-    Dockerfile
-    app/, components/{chat,plan,inspector,log}/
-    lib/agui/         client SSE + reducer
+    app/, components/, lib/agui/     client SSE + reducer
 
-  demo-infra\                        REPO 4 -- orchestrazione e documentazione
-    compose.yaml
-    .env.example
-    README.md
+  demo-memory-service\               REPO 4 -- memoria conversazionale
+    src/memory_service/
+      stores/         mongo (transcript), hot (coda calda), vectors (ricordi)
+      curation.py     cosa torna nel contesto
+      summarizer.py   riassunti e fatti duraturi
+
+  demo-infra\                        REPO 5 -- orchestrazione e documentazione
+    compose.yaml      6 servizi: master-agent, knowledge-agent, memory-service,
+                      frontend, mongo, redis
     docs/specs, docs/plans, docs/prompts
 ```
 
 **Un repo per unita' deployabile, piu' un repo infra.** E' la forma della
 piattaforma di riferimento, dove ogni agente ha repo, immagine e pipeline
 proprie, affiancati da repo di deployment e infrastruttura. Il costo e'
-duplicazione fra i due repo agente; il beneficio, oltre alla fedelta', e' che
-ogni agente si versiona e si rilascia da solo.
+duplicazione fra i repo agente; il beneficio, oltre alla fedelta', e' che ogni
+agente si versiona e si rilascia da solo.
 
 `compose.yaml` costruisce da percorsi fratelli (`../demo-master-agent`), quindi i
 repo devono stare nella stessa cartella padre.
@@ -191,9 +195,29 @@ return state_update(
 
 ### 4.3 Sottoagenti
 
-Eventi `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` / `SUBAGENT_ERROR`, già presenti nel protocollo AG-UI. Due `SUBAGENT_STARTED` senza un `FINISHED` in mezzo rappresentano le due invocazioni parallele.
+Il master invoca il knowledge agent con il tool `interroga_knowledge`, che parla
+**A2A** in streaming. Due interrogazioni nello stesso turno partono insieme:
+MAF esegue le tool call di un turno con `asyncio.gather`, ognuna in un contesto
+copiato.
 
-Il tool `call_agent_*` invoca il sottoagente via A2A in streaming e rilancia gli update nello stream del master mentre arrivano.
+Il flusso emette `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` / `SUBAGENT_ERROR`.
+Due `SUBAGENT_STARTED` senza un `FINISHED` in mezzo sono le due invocazioni
+parallele — ed è così che il frontend mostra il parallelismo mentre accade,
+invece di dedurlo alla fine.
+
+**Correzione rispetto alla prima stesura.** Questi eventi esistono nel
+protocollo (`ag_ui.core.events`) ma **l'adattatore non li emette**: zero
+occorrenze di `SUBAGENT` in `agent_framework_ag_ui`. Chi si limita a montare
+l'endpoint non li vedrà mai. Si iniettano estendendo `AgentFrameworkAgent`, il
+cui `run()` è un async generator di eventi: il generator del framework gira in
+un task che pubblica su una coda, e la stessa coda raccoglie gli eventi che i
+tool emettono. La coda viaggia in una `ContextVar` e raggiunge i tool proprio
+grazie al `contextvars.copy_context()` che rende parallele le chiamate.
+
+Conseguenza da non perdere di vista: questo è anche il punto in cui si potrebbe
+emettere qualunque altro evento applicativo sullo stream, `CUSTOM` compresi. Il
+canale separato dei log (§4.4) resta perché funziona ed è già documentato, non
+perché non ci fosse alternativa.
 
 ### 4.4 Log operativi
 
@@ -303,6 +327,49 @@ i delimitatori usano `messageId`. Il reducer aggrega i frammenti per messaggio,
 ignora le firme e rifiuta JSON malformato o payload non-array. Questa e' la forma
 misurata per quel profilo, non una garanzia per qualsiasi provider.
 
+### 5.5 I due default dello streaming A2A, rimisurati
+
+Lo spike di §5.1 e §5.2 è stato rifatto contro il knowledge agent vero, con
+`qwen/qwen3.8-27b`:
+
+| Configurazione | Risultato |
+|---|---|
+| `A2AAgent(url=...)` | **1 update**, tutto insieme a +8,62 s |
+| `A2AAgent(agent_card=card)` | **62 update**, il primo a +2,77 s, totale 4,16 s |
+
+Due interrogazioni insieme: **6,97 s** contro **13,77 s** in serie.
+
+Su una run completa attraverso il master agent, i numeri reggono anche in
+mezzo al resto del lavoro: 158 e 166 aggiornamenti, terminate a 0,9 s di
+distanza dove in serie sarebbero stati ~26 s.
+
+### 5.6 In `a2a-sdk` 1.x i tipi sono protobuf, e la versione sceglie il trasporto
+
+Trappola non prevista dalla prima stesura, costata un `MethodNotFoundError`
+senza spiegazione apparente.
+
+`AgentCard`, `AgentSkill` e `AgentCapabilities` non sono più modelli pydantic ma
+messaggi **protobuf** (`a2a_pb2`): niente `model_fields`, niente costruzione dai
+dizionari senza `ParseDict`. La card non ha più `url` e `preferred_transport` ma
+una lista `supported_interfaces`.
+
+Il campo che decide tutto è `protocol_version` dentro l'interfaccia:
+
+- `0.3.0` → il client sceglie il transport di **compatibilità v0.3**, che chiama
+  `message/stream`;
+- il server 1.x espone metodi in stile gRPC (`SendStreamingMessage`);
+- risultato: `MethodNotFoundError: Method not found`, senza che nulla indichi
+  che il problema è una versione dichiarata nella card.
+
+La card del laboratorio dichiara `1.0`.
+
+### 5.7 L'adattatore AG-UI non emette gli eventi dei sottoagenti
+
+`SUBAGENT_STARTED` / `SUBAGENT_FINISHED` / `SUBAGENT_ERROR` esistono in
+`ag_ui.core.events`, ma in `agent_framework_ag_ui` non compaiono mai: chi monta
+l'endpoint e si aspetta di vederli sullo stream non li vedrà. Vanno iniettati
+estendendo `AgentFrameworkAgent` — vedi §4.3 per il come e per la conseguenza.
+
 ## 6. Tappe
 
 Ordinate per rischio decrescente, non per area funzionale. Le due cose che possono far buttare via lavoro — contratto FE↔BE e streaming A2A — si incontrano subito.
@@ -312,7 +379,7 @@ Ordinate per rischio decrescente, non per area funzionale. Le due cose che posso
 | 0 | spike A2A streaming | risposta sì/no sullo streaming fra agenti MAF | **fatto**, vedi §5 |
 | 1 | walking skeleton | prompt → LLM → `TEXT_MESSAGE_*` + un tool → UI a tre pannelli, piu' le immagini docker e il compose. Niente piano, niente skill, niente tabelle. | **fatto** |
 | 2 | flusso del video | piano di lavoro, `SKILL.md` + `load_skill`, `ui_table`, filtri inspector, tab log | **fatto**, verificato nel browser il 2026-09-08 |
-| 3 | sottoagenti A2A | knowledge agent come processo separato, invocazione parallela, update rilanciati | da fare |
+| 3 | sottoagenti A2A | knowledge agent come processo separato, invocazione parallela, update rilanciati | **fatto**, verificato nel browser il 2026-09-08 |
 
 La tappa 1 esiste per validare che il frontend consumi correttamente ciò che il package AG-UI emette, quando cambiare idea costa poco.
 
@@ -347,3 +414,40 @@ Osservazioni raccolte guardando il codice esistente, utili come contrasto. Non s
 - La `agent.json` dichiara `"streaming": false`. Alla luce di §5, vale la pena verificare se sia una scelta o l'effetto dei due default: nella registrazione si vedono ~26 secondi di interfaccia ferma in attesa dei sottoagenti, compatibili con un salto A2A non-streaming.
 - Gli artefatti UI sono accumulati in un sink (`rc.cards`) e restituiti a fine run. È il pattern che impedisce lo streaming degli artefatti.
 - Il server MCP di riferimento pinna `fastmcp==2.10.6`. Dalla 2.11.0 FastMCP inietta la chiave `_fastmcp` in `_meta`, che viola il formato delle chiavi dello spec MCP 2025-06-18 (devono iniziare con `[A-Za-z0-9]`) e fa fallire i client conformi. FastMCP 4.0 l'ha rinominata `fastmcp`. Se la demo esporrà un MCP, userà la 4.x.
+
+## 11. Task futuri
+
+Cose emerse costruendo, non nel piano iniziale. Nessuna blocca l'uso del
+laboratorio; ognuna dice perché varrebbe la pena.
+
+**Registry degli agenti con ricerca semantica.** Oggi il master conosce un solo
+sottoagente, per URL. La documentazione A2A descrive proprio il pattern
+alternativo: un registry che tiene una collezione di agent card, interrogabile
+per skill, tag e capability — e le nostre card hanno già `skills` con
+descrizione e tag, cioè materiale da embedding. La casa naturale è il servizio
+di memoria, che ha già embedder e indice vettoriale.
+
+Due vincoli da rispettare quando si farà:
+
+- **la scoperta ordina, non autorizza.** Il registry deve essere una lista
+  chiusa di URL curati; la somiglianza serve a ordinare i candidati, mai ad
+  ammetterne di nuovi. Altrimenti un testo che entra nel contesto può sterzare
+  quale agente viene chiamato. Non a caso la spec A2A dice che un registry
+  restituisce card diverse secondo l'identità del client.
+- **serve più di un agente.** Con un candidato la scelta non esiste, e fra
+  agenti quasi identici la scoperta semantica rende il routing meno prevedibile,
+  non più: se un ingegnere umano non sa dire quale agente usare, il modello
+  nemmeno.
+
+**Decadimento dei fatti duraturi.** Un fatto vecchio e mai più confermato pesa
+quanto uno di ieri. La pratica consigliata è abbassare una forza nel tempo
+invece di cancellare, così i pattern lunghi restano e la frequenza di recupero
+scende.
+
+**Reindicizzazione dei ricordi.** L'indice vettoriale è ricostruibile dai
+transcript per costruzione, ma non c'è ancora un comando che lo faccia.
+
+**Update dei sottoagenti rilanciati nello stream.** Oggi il tool consuma lo
+stream A2A e restituisce la risposta completa; gli aggiornamenti intermedi si
+contano nei log ma non arrivano al frontend. Rilanciarli darebbe la stessa
+progressione che si vede per il testo del master.

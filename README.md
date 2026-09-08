@@ -1,7 +1,10 @@
 # Laboratorio AG-UI
 
-Demo locale di un'interfaccia agentica: chat in streaming, stato condiviso ed
-event inspector, tutti alimentati da un solo stream SSE in protocollo AG-UI.
+Demo locale di un'interfaccia agentica: chat in streaming, piano di lavoro ed
+event inspector alimentati da un solo stream SSE in protocollo AG-UI, un agente
+che interroga un **sottoagente via A2A** e una memoria conversazionale che
+sopravvive ai riavvii.
+
 Il tab LOG usa un secondo canale: `GET /logs?cursor=<int>`, interrogato durante
 la run e una volta alla fine. Il polling si ferma a riposo; cambiare tab conserva
 cronologia e cursore.
@@ -13,12 +16,28 @@ Design: [`docs/specs/2026-09-07-agui-lab-design.md`](docs/specs/2026-09-07-agui-
 | Repo | Ruolo |
 |---|---|
 | `demo-master-agent` | agente principale, endpoint AG-UI su SSE |
+| `demo-knowledge-agent` | sottoagente di knowledge base, esposto via A2A |
+| `demo-memory-service` | memoria delle conversazioni: transcript, riassunti, fatti, ricordi |
 | `demo-frontend` | interfaccia Next.js |
 | `demo-infra` | compose, documentazione (questo repo) |
-| `demo-knowledge-agent` | sottoagente A2A — tappa 3, non ancora presente |
 
 I repo devono stare nella stessa cartella padre: `compose.yaml` li costruisce da
 percorsi fratelli.
+
+## I servizi in piedi
+
+| Servizio | Porta sull'host | A cosa serve |
+|---|---|---|
+| `frontend` | 3000 | l'interfaccia |
+| `master-agent` | 8000 | AG-UI su SSE, `/logs` |
+| `memory-service` | — | memoria conversazionale, interna |
+| `knowledge-agent` | — | sottoagente A2A, interno |
+| `mongo` | loopback | transcript e fatti duraturi |
+| `redis` | loopback | coda calda e ricordi cercabili |
+
+Memoria e sottoagente **non pubblicano porte**: li raggiunge solo il master
+agent dalla rete di compose. L'unico modo serio di dire "servizio interno" è non
+esporlo.
 
 ## Avvio con Docker
 
@@ -79,6 +98,33 @@ La risposta finale e' resa come Markdown mentre arriva; il pulsante `interrompi`
 chiude la run in corso senza segnalare un errore. Nell'inspector gli eventi
 consecutivi dello stesso tipo stanno in una riga sola con il conteggio: il
 contatore in alto resta quello degli eventi, e il payload compare aprendo la riga.
+
+## Il sottoagente A2A
+
+Il master non fa tutto da solo: per le domande sui linguaggi interroga il
+[knowledge agent](../demo-knowledge-agent/README.md), un processo separato che
+parla **A2A**. Due interrogazioni chieste nello stesso turno partono insieme —
+MAF esegue le tool call di un turno con `asyncio.gather`.
+
+Provalo con:
+
+> Interroga la knowledge base su Go e su Rust riguardo alla concorrenza, poi
+> confrontali in una tabella. Fai prima un piano.
+
+Nella timeline compaiono due voci `knowledge`, e finché la prima è `in corso`
+mentre l'altra è già `concluso` stai guardando il parallelismo mentre accade.
+Nell'inspector il filtro **sottoagenti** mostra `SUBAGENT_STARTED ×2` seguito da
+`SUBAGENT_FINISHED ×2`.
+
+Misure di una run vera: 352 e 492 aggiornamenti dal sottoagente, 13,2 s e 39,1 s,
+con la prima chiusa mentre la seconda era a metà. In serie sarebbero stati
+oltre 50 s.
+
+Due default disattivano lo streaming A2A **in silenzio** — card non fetchata
+lato client, `stream=False` lato server — e una versione di protocollo
+sbagliata nella card lo rompe con un `MethodNotFoundError` che non spiega
+niente. Tutti e tre sono documentati in §5.5-5.7 della spec e nel README del
+knowledge agent.
 
 ## MongoDB
 
@@ -161,15 +207,28 @@ vettoriale è disponibile qui senza aggiungere un terzo datastore.
 ## Test
 
 ```bash
-cd ../demo-master-agent && uv run pytest -v
-cd ../demo-frontend && npm test
+cd ../demo-master-agent && uv run pytest        # 101
+cd ../demo-knowledge-agent && uv run pytest     # 8
+cd ../demo-memory-service && uv run pytest      # 91, contro Mongo e Redis veri
+cd ../demo-frontend && npm test                 # 111
 ```
+
+I test del servizio di memoria girano contro i database veri (`docker compose
+up -d mongo redis`): il modello a bucket senza transazioni si regge su garanzie
+del server che un finto non riproduce. Gli altri sono offline.
 
 `node_modules` contiene binari specifici della piattaforma: se alterni Windows e
 WSL sulla stessa cartella, rilancia `npm install` dopo ogni cambio.
 
 ## Stato
 
-Tappa 1 completata. Tappa 2 completata: piano di lavoro, skill, tabelle,
-timeline, filtri e log; flusso verificato nel browser con qwen/qwen3.8-27b.
-Tappa 3 (sottoagenti A2A) da fare.
+Tappe 1, 2 e 3 completate e verificate nel browser: walking skeleton, flusso del
+video (piano, skill, tabelle, filtri, log) e sottoagenti A2A in parallelo.
+
+Costruito oltre il piano iniziale: memoria conversazionale durevole con
+riassunti, fatti duraturi e ricerca semantica dei ricordi, piu' la telemetria
+del contesto a ogni chiamata al modello.
+
+I task futuri stanno in §11 della spec: registry degli agenti con ricerca
+semantica, decadimento dei fatti, reindicizzazione dei ricordi, update dei
+sottoagenti rilanciati nello stream.
