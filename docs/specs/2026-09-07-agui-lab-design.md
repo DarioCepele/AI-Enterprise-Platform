@@ -1,7 +1,7 @@
 # Laboratorio AG-UI — design
 
 **Data:** 2026-09-07
-**Stato:** approvato per la pianificazione
+**Stato:** tappa 2 completata e verificata nel browser
 **Scopo:** ricostruire in locale, a fini di studio, un'interfaccia agentica equivalente a quella del "Laboratorio AG-UI" (Mind-X): chat a sinistra, piano di lavoro ed event inspector a destra, con agente multi-step e sottoagenti invocati in parallelo.
 
 Il progetto è **esplorativo**: non ha scadenza né utenti finali. Si ottimizza per leggibilità, confini netti fra moduli e possibilità di spiegare ogni pezzo, non per velocità di consegna.
@@ -57,6 +57,12 @@ Un solo client OpenAI-compatible, due profili di configurazione:
 MAF legge nativamente `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_CHAT_COMPLETION_MODEL`.
 
 Su modelli locali piccoli il piano multi-step degrada. È un limite noto e accettato: LM Studio è il profilo alternativo, non il default.
+
+Profili verificati nelle prove del laboratorio: `qwen/qwen3.8-27b` su OpenRouter
+e `google/gemma-4-12b` su LM Studio. Gemma 4 12B ha chiamato `ui_table` con
+`TOOL_CALL_START/ARGS/END/RESULT` e `STATE_SNAPSHOT` completi: non c'e' un divieto
+generale di tool-calling per quel profilo. Il piano richiede comunque chiamate
+reali ai tool; la sola descrizione testuale dei passi non modifica lo stato.
 
 ### 2.4 Skill: formato standard
 
@@ -122,13 +128,17 @@ repo devono stare nella stessa cartella padre.
 In sviluppo si gira nativi (`uv run`, `npm run dev`): i container servono a
 verificare che tutto si alzi insieme, non a fare da ciclo di feedback.
 
-**Un solo canale.** Chat, piano, inspector e log sono quattro riduzioni dello stesso stream SSE. Nessuna seconda API, nessun polling. È anche il motivo per cui l'inspector è didatticamente utile: mostra esattamente ciò che alimenta gli altri tre pannelli.
+**Tre viste di uno stream, piu' un canale log.** Chat, piano e inspector derivano
+dallo stream SSE AG-UI. Il tab LOG usa una seconda API HTTP a cursore, descritta
+in §4.4; non e' una riduzione dello stream AG-UI.
 
 ## 4. Contratti
 
 ### 4.1 Piano di lavoro — stato condiviso
 
-I tool `todo_write` / `todo_set_status` non emettono testo: mutano lo stato condiviso AG-UI (`STATE_SNAPSHOT` iniziale, poi `STATE_DELTA`).
+I tool `todo_write` / `todo_set_status` aggiornano `shared.plan` tramite
+`state_update`: l'adattatore emette `STATE_SNAPSHOT`, anche per gli aggiornamenti.
+I risultati `component: "plan"` non diventano artefatti nella timeline.
 
 ```jsonc
 {
@@ -142,7 +152,8 @@ I tool `todo_write` / `todo_set_status` non emettono testo: mutano lo stato cond
         "source": "skill:knowledge-agent-request#1",
         "status": "pending",        // pending | in_progress | completed | failed
         "started_at": null,
-        "ended_at": null
+        "ended_at": null,
+        "note": null                 // obbligatoria e non vuota per failed
       }
     ]
   }
@@ -150,6 +161,9 @@ I tool `todo_write` / `todo_set_status` non emettono testo: mutano lo stato cond
 ```
 
 Il pannello "Piano di lavoro" è una funzione pura di questo oggetto. Nessuna logica di stato nel frontend.
+Il `PlanStore` appartiene all'agente singleton del processo: due schede condividono
+il piano. `plan` e `artifacts` sono chiavi separate perche' `state_update` sostituisce
+le chiavi di primo livello, senza fusione profonda.
 
 ### 4.2 Artefatti UI
 
@@ -180,6 +194,28 @@ return state_update(
 Eventi `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` / `SUBAGENT_ERROR`, già presenti nel protocollo AG-UI. Due `SUBAGENT_STARTED` senza un `FINISHED` in mezzo rappresentano le due invocazioni parallele.
 
 Il tool `call_agent_*` invoca il sottoagente via A2A in streaming e rilancia gli update nello stream del master mentre arrivano.
+
+### 4.4 Log operativi
+
+Nell'adattatore MAF AG-UI in uso gli eventi `CUSTOM` sono riservati al framework;
+il codice applicativo non dispone di un'emissione custom per i propri log.
+I log viaggiano quindi su `GET /logs?cursor=<int>`, secondo canale del sistema.
+Il principio delle tre viste di uno stream vale per chat, piano e inspector,
+non per il tab LOG.
+
+Il buffer circolare contiene al massimo 500 righe. La risposta contiene `entries`,
+`cursor` e `dropped`: le righe hanno sequenza `seq` maggiore del cursore richiesto,
+orario `ts`, `level`, `source` e `message`. `dropped` conta le righe non piu'
+disponibili rispetto a quel cursore; una pagina vuota conserva il cursore.
+
+Il collettore e' agganciato al logger `demo` e raccoglie la famiglia `demo.*`,
+escludendo i logger delle librerie: i loro diagnostici possono contenere la chiave
+API. Non e' un redattore di segreti: il codice applicativo deve evitare di loggarli.
+Il controllo operativo cerca `sk-` nella risposta senza stampare i payload.
+
+Il frontend interroga l'endpoint durante la run e una volta alla fine, conserva
+il cursore tra run e tra cambi di tab, annulla richieste obsolete e non effettua
+polling a riposo. Piano e log sono condivisi nel processo, non isolati per thread.
 
 ## 5. Vincoli verificati sperimentalmente
 
@@ -232,6 +268,17 @@ Inoltre in 1.17 i package sono sotto namespace `agent_framework.*` (`agent_frame
 
 **Conseguenza pratica:** gli esempi che si trovano online scritti per MAF 1.0–1.9 non compilano. Ogni import va verificato contro 1.17.
 
+### 5.4 Ragionamento osservato nello stream Qwen
+
+Nel flusso registrato con `qwen/qwen3.8-27b`, `REASONING_MESSAGE_CONTENT` non e'
+emesso. La sequenza e' `REASONING_START`, `REASONING_MESSAGE_START`, i delta
+`REASONING_ENCRYPTED_VALUE`, `REASONING_MESSAGE_END`, `REASONING_END`.
+`encryptedValue` contiene una stringa JSON non cifrata di frammenti
+`{"type":"reasoning.text","text":"..."}`. Nei delta l'id e' `entityId`;
+i delimitatori usano `messageId`. Il reducer aggrega i frammenti per messaggio,
+ignora le firme e rifiuta JSON malformato o payload non-array. Questa e' la forma
+misurata per quel profilo, non una garanzia per qualsiasi provider.
+
 ## 6. Tappe
 
 Ordinate per rischio decrescente, non per area funzionale. Le due cose che possono far buttare via lavoro — contratto FE↔BE e streaming A2A — si incontrano subito.
@@ -239,8 +286,8 @@ Ordinate per rischio decrescente, non per area funzionale. Le due cose che posso
 | # | Nome | Consegna | Stato |
 |---|---|---|---|
 | 0 | spike A2A streaming | risposta sì/no sullo streaming fra agenti MAF | **fatto**, vedi §5 |
-| 1 | walking skeleton | prompt → LLM → `TEXT_MESSAGE_*` + un tool → UI a tre pannelli, piu' le immagini docker e il compose. Niente piano, niente skill, niente tabelle. | in corso |
-| 2 | flusso del video | piano di lavoro, `SKILL.md` + `load_skill`, `ui_table`, filtri inspector, tab log | da fare |
+| 1 | walking skeleton | prompt → LLM → `TEXT_MESSAGE_*` + un tool → UI a tre pannelli, piu' le immagini docker e il compose. Niente piano, niente skill, niente tabelle. | **fatto** |
+| 2 | flusso del video | piano di lavoro, `SKILL.md` + `load_skill`, `ui_table`, filtri inspector, tab log | **fatto**, verificato nel browser il 2026-09-08 |
 | 3 | sottoagenti A2A | knowledge agent come processo separato, invocazione parallela, update rilanciati | da fare |
 
 La tappa 1 esiste per validare che il frontend consumi correttamente ciò che il package AG-UI emette, quando cambiare idea costa poco.
@@ -255,7 +302,11 @@ La tappa 1 esiste per validare che il frontend consumi correttamente ciò che il
 
 **Backend.** Un fake chat client che emette chunk deterministici — nessuna chiamata LLM nei test. Copertura su: tool del piano (transizioni di stato), `ui_table` (forma del payload), sequenza di eventi di una run completa (`RUN_STARTED` … terminale). Un test di integrazione A2A che asserisce l'arrivo **incrementale** degli update, così le due trappole di §5 non possono tornare inosservate.
 
-**Frontend.** Test del reducer su fixture di stream registrati. Il reducer rifiuta uno stream malformato invece di degradare in silenzio.
+**Frontend.** Test del reducer su fixture di stream registrati e test DOM dei
+componenti e dell'integrazione. Il parser del ragionamento rifiuta JSON malformato
+o payload non-array. Un tool result non JSON e' invece testo valido per il modello:
+`parseArtifact` restituisce `null`; i risultati `component: "plan"` sono esclusi
+dalla timeline e le varianti UI sconosciute o malformate hanno un fallback visibile.
 
 ## 9. Fuori scopo (v1)
 

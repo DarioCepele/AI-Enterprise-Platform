@@ -2,6 +2,9 @@
 
 Demo locale di un'interfaccia agentica: chat in streaming, stato condiviso ed
 event inspector, tutti alimentati da un solo stream SSE in protocollo AG-UI.
+Il tab LOG usa un secondo canale: `GET /logs?cursor=<int>`, interrogato durante
+la run e una volta alla fine. Il polling si ferma a riposo; cambiare tab conserva
+cronologia e cursore.
 
 Design: [`docs/specs/2026-09-07-agui-lab-design.md`](docs/specs/2026-09-07-agui-lab-design.md)
 
@@ -43,6 +46,35 @@ In questa modalità l'agente **non chiama tool**: `FakeStreamingChatClient` non
 eredita da `FunctionInvocationLayer`, quindi `ui_table` non parte mai. È atteso.
 La catena dei tool si verifica con i test o con un LLM vero.
 
+## Modelli per il piano di lavoro
+
+Serve un modello con **tool-calling reale**: scrivere nel testo che sta creando
+un piano non aggiorna `shared.plan`. Il modello deve chiamare `todo_write`, poi
+`todo_set_status`, oltre a `load_skill` e `ui_table` quando richiesti.
+
+Profili verificati nelle prove del laboratorio:
+
+| Servizio | Modello | Configurazione |
+|---|---|---|
+| OpenRouter | `qwen/qwen3.8-27b` | `OPENAI_BASE_URL=https://openrouter.ai/api/v1` |
+| LM Studio | `google/gemma-4-12b` | `OPENAI_BASE_URL=http://localhost:1234/v1` in sviluppo nativo |
+
+Nel container, per LM Studio sull'host usare `http://host.docker.internal:1234/v1`.
+Configurare `OPENAI_CHAT_COMPLETION_MODEL` con l'identificativo del modello e
+`OPENAI_API_KEY` nel proprio `.env`; non versionare le credenziali. Gemma 4 12B
+ha emesso chiamate `ui_table` complete e snapshot di stato nelle prove precedenti:
+non va considerato incapace di chiamare tool.
+
+Per provare il flusso in `http://localhost:3000`:
+
+> Confronta Python e Go su tipizzazione, concorrenza e gestione degli errori.
+> Fai prima un piano di lavoro.
+
+Il piano deve avanzare durante la run, mentre la timeline mostra ragionamento,
+tool e tabella. Nell'Inspector si filtrano gli eventi; LOG mostra orario, sorgente
+e messaggio. Il backend conserva un solo piano per processo: due schede del browser
+lo condividono. I log sono anch'essi del processo, senza isolamento per thread.
+
 ## Test
 
 ```bash
@@ -55,5 +87,6 @@ WSL sulla stessa cartella, rilancia `npm install` dopo ogni cambio.
 
 ## Stato
 
-Tappa 1 (walking skeleton) completata. Mancano il piano di lavoro, le skill e la
-tabella comparativa (tappa 2), e i sottoagenti A2A (tappa 3).
+Tappa 1 completata. Tappa 2 completata: piano di lavoro, skill, tabelle,
+timeline, filtri e log; flusso verificato nel browser con qwen/qwen3.8-27b.
+Tappa 3 (sottoagenti A2A) da fare.
