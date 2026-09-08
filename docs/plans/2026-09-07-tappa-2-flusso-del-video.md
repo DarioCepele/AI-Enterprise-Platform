@@ -3031,6 +3031,8 @@ Quello che si e' visto nella registrazione, come riferimento e non come specific
 - Modify: `demo-frontend/app/globals.css` (i token di colore)
 - Modify: `demo-frontend/app/layout.tsx` (titolo e lingua)
 - Create: `demo-frontend/components/LabHeader.tsx`
+- Modify: `demo-frontend/components/Chat.tsx` (timeline e stato vuoto)
+- Test: `demo-frontend/components/Lab.test.tsx`, `demo-frontend/components/Inspector.test.tsx`
 
 **Interfaces:**
 - Consumes: `Chat` (Task 8), `PlanPanel` (Task 9), `Inspector` (Task 10), `LogPanel` (Task 11), `withUserMessage` (Task 7)
@@ -3084,7 +3086,7 @@ E `lang="it"` al posto di `lang="en"`: la pagina e' in italiano, e lo screen rea
 Creare `demo-frontend/components/LabHeader.tsx`:
 
 ```tsx
-const BADGES = ["AG-UI", "MAF 1.17", "A2A", "Next.js"];
+const BADGES = ["AG-UI", "MAF 1.17", "Next.js"];
 
 export function LabHeader() {
   return (
@@ -3110,7 +3112,7 @@ export function LabHeader() {
 }
 ```
 
-I badge dichiarano cosa c'e' davvero sotto: `CopilotKit` e `shadcn/ui` sono nel laboratorio di riferimento ma non qui, e scriverli sarebbe una bugia sul contenuto.
+A2A e' tappa 3: non dichiararlo fra le tecnologie attive. I badge dichiarano cosa c'e' davvero sotto: `CopilotKit` e `shadcn/ui` sono nel laboratorio di riferimento ma non qui, e scriverli sarebbe una bugia sul contenuto.
 
 - [ ] **Step 4: Mettere i tab nell'inspector**
 
@@ -3123,148 +3125,151 @@ import { useState } from "react";
 import type { AGUIEvent } from "@/lib/agui/types";
 import { LogPanel } from "./LogPanel";
 
-// ... FILTERS come dal Task 10 ...
+const FILTERS = {
+  tutti: () => true,
+  ragionamento: (e: AGUIEvent) => e.type.startsWith("REASONING"),
+  tool: (e: AGUIEvent) => e.type.startsWith("TOOL_CALL"),
+  stato: (e: AGUIEvent) => e.type.startsWith("STATE") || e.type.startsWith("RUN"),
+  testo: (e: AGUIEvent) => e.type.startsWith("TEXT_MESSAGE"),
+} as const;
 
-export function Inspector({
-  events,
-  running,
-}: {
-  events: AGUIEvent[];
-  running: boolean;
-}) {
+export function Inspector({ events, running }: { events: AGUIEvent[]; running: boolean }) {
   const [tab, setTab] = useState<"eventi" | "log">("eventi");
   const [filter, setFilter] = useState<keyof typeof FILTERS>("tutti");
   const shown = events.filter(FILTERS[filter]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
-      <div className="mb-2 flex items-center gap-3">
+    <section aria-label="Inspector" className="inspector flex min-h-0 flex-1 flex-col p-4">
+      <nav aria-label="Vista inspector" className="inspector-tabs mb-3 flex gap-4">
         <button
+          type="button"
           onClick={() => setTab("eventi")}
-          className={`font-mono text-[11px] uppercase tracking-wide ${
-            tab === "eventi" ? "" : "text-[var(--muted)]"
-          }`}
+          aria-pressed={tab === "eventi"}
+          className="font-mono text-[11px] uppercase tracking-wide"
         >
           Event inspector <span className="tabular-nums">{events.length}</span>
         </button>
         <button
+          type="button"
           onClick={() => setTab("log")}
-          className={`font-mono text-[11px] uppercase tracking-wide ${
-            tab === "log" ? "" : "text-[var(--muted)]"
-          }`}
+          aria-pressed={tab === "log"}
+          className="font-mono text-[11px] uppercase tracking-wide"
         >
           Log
         </button>
+      </nav>
+
+      <div hidden={tab !== "eventi"} className={tab === "eventi" ? "flex min-h-0 flex-1 flex-col" : undefined}>
+        <div className="mb-2 flex flex-wrap gap-1">
+          {(Object.keys(FILTERS) as (keyof typeof FILTERS)[]).map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => setFilter(name)}
+              aria-pressed={filter === name}
+              className={`rounded-full px-2 py-0.5 text-xs ${
+                filter === name
+                  ? "bg-[var(--foreground)] text-[var(--background)]"
+                  : "bg-[var(--surface)] text-[var(--muted)]"
+              }`}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto font-mono text-xs">
+          {shown.map((e, i) => (
+            <details key={i} role="group" className="border-b border-[var(--border)] py-1">
+              <summary className="cursor-pointer text-[var(--foreground)]">{e.type}</summary>
+              <pre className="overflow-x-auto pt-1 text-[var(--muted)]">
+                {JSON.stringify(e, null, 2)}
+              </pre>
+            </details>
+          ))}
+        </div>
       </div>
-
-      {tab === "log" ? (
+      {/* Il polling segue la run anche quando si guardano gli eventi. */}
+      <div hidden={tab !== "log"} className={tab === "log" ? "flex min-h-0 flex-1 flex-col" : undefined}>
         <LogPanel running={running} />
-      ) : (
-        <>
-          <div className="mb-2 flex flex-wrap gap-1">
-            {(Object.keys(FILTERS) as (keyof typeof FILTERS)[]).map((name) => (
-              <button
-                key={name}
-                onClick={() => setFilter(name)}
-                className={`rounded-full px-2 py-0.5 text-xs ${
-                  filter === name
-                    ? "bg-[var(--foreground)] text-[var(--background)]"
-                    : "bg-[var(--surface)] text-[var(--muted)]"
-                }`}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto font-mono text-xs">
-            {shown.map((e, i) => (
-              <details
-                key={i}
-                role="group"
-                className="border-b border-[var(--border)] py-1"
-              >
-                <summary className="cursor-pointer text-amber-700">{e.type}</summary>
-                <pre className="overflow-x-auto pt-1 text-[var(--muted)]">
-                  {JSON.stringify(e, null, 2)}
-                </pre>
-              </details>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+      </div>
+    </section>
   );
 }
 ```
 
-Il test del Task 10 passa `events` e non `running`: aggiungere `running={false}` alle sue quattro `render(...)`.
+Aggiornare tutti i render e rerender dei test Inspector con `running`. Tenere LogPanel montato nella vista nascosta: smontarlo al cambio tab perderebbe cursore e storico. Verificare polling nella vista eventi, cambio tab e coda finale.
 
 - [ ] **Step 5: Ricomporre `Lab.tsx`**
 
 ```tsx
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { runAgent } from "@/lib/agui/client";
 import { initialState, reduce, withUserMessage, type LabState } from "@/lib/agui/reducer";
 import { Chat } from "./Chat";
 import { Inspector } from "./Inspector";
-import { LabHeader } from "./LabHeader";
 import { PlanPanel } from "./PlanPanel";
+import { LabHeader } from "./LabHeader";
 
 export function Lab() {
   const [state, setState] = useState<LabState>(initialState);
   const [threadId] = useState(() => crypto.randomUUID());
+  const inFlight = useRef(false);
 
   const send = useCallback(
     async (text: string) => {
-      const id = crypto.randomUUID();
+      if (inFlight.current) return;
+      inFlight.current = true;
+      const userMessage = { id: crypto.randomUUID(), role: "user", content: text };
       // Il messaggio utente lo aggiunge il client: il server non lo rimanda indietro.
-      setState((s) => withUserMessage(s, id, text));
+      setState((s) => ({ ...withUserMessage(s, userMessage.id, text), running: true }));
 
       try {
         await runAgent(
           {
             threadId,
             runId: crypto.randomUUID(),
-            messages: [{ id, role: "user", content: text }],
+            messages: [userMessage],
             state: {},
             tools: [],
             context: [],
             forwardedProps: {},
           },
-          (event) => setState((s) => reduce(s, event)),
+          // Il trasporto puo' restare aperto dopo l'evento terminale.
+          // Il modulo si sblocca soltanto quando runAgent termina.
+          (event) => setState((s) => ({ ...reduce(s, event), running: true })),
         );
       } catch (err) {
         setState((s) => ({ ...s, running: false, error: String(err) }));
+      } finally {
+        inFlight.current = false;
+        setState((s) => ({ ...s, running: false }));
       }
     },
     [threadId],
   );
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="lab-shell flex flex-col">
       <LabHeader />
-
-      <div className="grid min-h-0 flex-1 grid-cols-[1fr_420px]">
-        <main className="flex min-h-0 min-w-0 flex-col border-r border-[var(--border)]">
-          <Chat
-            entries={state.entries}
-            running={state.running}
-            error={state.error}
-            onSend={send}
-          />
-        </main>
-
-        <aside className="flex min-h-0 flex-col">
-          <PlanPanel shared={state.shared} />
-          <Inspector events={state.events} running={state.running} />
-        </aside>
+      <div className="lab-grid min-h-0 flex-1">
+      <main className="flex min-h-0 min-w-0 flex-col border-r border-[var(--border)]" aria-label="Conversazione">
+        <Chat
+          entries={state.entries}
+          running={state.running}
+          error={state.error}
+          onSend={send}
+        />
+      </main>
+      <aside className="lab-aside flex min-h-0 min-w-0 flex-col" aria-label="Piano e attività dell'agente">
+        <PlanPanel shared={state.shared} />
+        <Inspector events={state.events} running={state.running} />
+      </aside>
       </div>
-
-      <footer className="border-t border-[var(--border)] px-6 py-2 text-center text-[11px] text-[var(--muted)]">
-        Laboratorio: l&apos;agente puo&apos; sbagliare. Il flusso grezzo e&apos; nell&apos;inspector a destra.
+      <footer className="border-t border-[var(--border)] px-6 py-2 font-mono text-[10px] text-[var(--muted)]">
+        Esercizio di laboratorio · L&apos;agente può sbagliare. Segui il piano e ispeziona gli eventi.
       </footer>
     </div>
   );
