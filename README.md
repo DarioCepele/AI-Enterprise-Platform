@@ -204,13 +204,27 @@ nella distribuzione open source (AGPLv3) e redis-stack non è più mantenuta.
 Verificato sull'istanza: `FT.CREATE` e `VADD` rispondono, quindi la ricerca
 vettoriale è disponibile qui senza aggiungere un terzo datastore.
 
+## Contratti fra i repo
+
+`contracts/` tiene i campioni versionati di cio' che passa da un repo all'altro:
+l'artefatto A2A del sottoagente, lo stato condiviso AG-UI, le risposte dell'API
+di memoria. Ogni repo li carica dai propri test invece di tenerne una copia che
+diverge, e quando un campione non torna il fallimento nomina il contratto, la
+differenza e **chi lo consuma**.
+
+Esiste per una rottura vera: rinominare l'artefatto da `scheda` a `briefing` ha
+toccato tre repo, ed e' passata liscia solo perche' erano aperti nella stessa
+sessione. In un fork non lo sono.
+
+Dettagli e regole di modifica in `contracts/README.md`.
+
 ## Test
 
 ```bash
-cd ../demo-master-agent && uv run pytest        # 101
-cd ../demo-knowledge-agent && uv run pytest     # 8
-cd ../demo-memory-service && uv run pytest      # 91, contro Mongo e Redis veri
-cd ../demo-frontend && npm test                 # 111
+cd ../demo-master-agent && uv run pytest        # 140
+cd ../demo-knowledge-agent && uv run pytest     # 39
+cd ../demo-memory-service && uv run pytest      # 97, contro Mongo e Redis veri
+cd ../demo-frontend && npm test                 # 121
 ```
 
 I test del servizio di memoria girano contro i database veri (`docker compose

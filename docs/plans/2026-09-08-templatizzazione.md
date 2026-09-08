@@ -269,9 +269,9 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 **Perche':** la rinomina dell'artefatto (`scheda` -> `briefing`, con i suoi campi) ha toccato tre repo. E' passata perche' erano aperti insieme nella stessa sessione. In un fork, chi cambia il produttore non vede il consumatore.
 
-- [ ] **Step 1:** portare in `demo-infra/contracts/` i campioni JSON gia' esistenti come fixture versionate: artefatto A2A, stato AG-UI (`plan`, `artifacts`, `subagent_pending`), risposte dell'API di memoria.
-- [ ] **Step 2:** ogni repo carica le fixture e verifica di saperle produrre o consumare; il frontend le carica in vitest.
-- [ ] **Step 3:** un numero di versione dentro le fixture, e un test che fallisce con un messaggio che dice *quale* contratto e' cambiato e *chi* lo consuma.
+- [x] **Step 1:** portare in `demo-infra/contracts/` i campioni JSON gia' esistenti come fixture versionate: artefatto A2A, stato AG-UI (`plan`, `artifacts`, `subagent_pending`), risposte dell'API di memoria.
+- [x] **Step 2:** ogni repo carica le fixture e verifica di saperle produrre o consumare; il frontend le carica in vitest.
+- [x] **Step 3:** un numero di versione dentro le fixture, e un test che fallisce con un messaggio che dice *quale* contratto e' cambiato e *chi* lo consuma.
 
 **Fatto quando:** rinominare un campo dell'artefatto fa fallire il test nel repo che lo ha rinominato, con il nome del consumatore nel messaggio.
 

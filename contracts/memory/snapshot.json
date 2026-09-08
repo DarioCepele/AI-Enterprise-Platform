@@ -1,0 +1,41 @@
+{
+  "contract": "memory/snapshot",
+  "version": 1,
+  "produced_by": [
+    "demo-memory-service"
+  ],
+  "consumed_by": [
+    "demo-master-agent"
+  ],
+  "description": "GET /threads/{id}/snapshot. The context the agent restarts from, already pruned, plus the report of what pruning removed. The service stores state, interrupt and session_state without reading them: their shape is not this contract's business, and null here means opaque.",
+  "sample": {
+    "messages": [
+      {
+        "id": "m1",
+        "role": "user",
+        "content": "how does Go do typing?"
+      },
+      {
+        "id": "m2",
+        "role": "assistant",
+        "content": "Static, checked by the compiler."
+      }
+    ],
+    "state": null,
+    "interrupt": null,
+    "session_state": null,
+    "curation": {
+      "kept": 2,
+      "reasoning_removed": 4,
+      "results_emptied": 1,
+      "messages_dropped": 0,
+      "summarized": 1,
+      "facts": 0
+    }
+  },
+  "opaque_fields": {
+    "state": "agui/shared-state",
+    "interrupt": "owned by the AG-UI adapter",
+    "session_state": "owned by the AG-UI adapter"
+  }
+}

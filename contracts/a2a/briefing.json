@@ -1,0 +1,13 @@
+{
+  "contract": "a2a/briefing",
+  "version": 1,
+  "produced_by": ["demo-knowledge-agent"],
+  "consumed_by": ["demo-master-agent"],
+  "description": "The data part of the A2A artifact the knowledge agent attaches when it completes a task. The text part carries the same answer as prose; this is what a consumer reads to render it structured.",
+  "sample": {
+    "component": "briefing",
+    "question": "How does Go do typing?",
+    "documents": ["go"],
+    "summary": "Static typing checked by the compiler; local inference with :=."
+  }
+}

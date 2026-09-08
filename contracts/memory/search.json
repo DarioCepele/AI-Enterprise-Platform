@@ -1,0 +1,13 @@
+{
+  "contract": "memory/search",
+  "version": 1,
+  "produced_by": ["demo-memory-service"],
+  "consumed_by": ["demo-master-agent"],
+  "description": "POST /search. What the search_memories tool reads back and hands to the model.",
+  "sample": {
+    "memories": [
+      { "thread_id": "t9", "seq": 4, "text": "the contact is Marta", "similarity": 0.83 },
+      { "thread_id": "t9", "seq": 7, "text": "budget 18k", "similarity": 0.61 }
+    ]
+  }
+}
