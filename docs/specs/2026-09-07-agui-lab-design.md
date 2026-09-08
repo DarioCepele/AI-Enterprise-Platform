@@ -165,8 +165,10 @@ I risultati `component: "plan"` non diventano artefatti nella timeline.
 ```
 
 Il pannello "Piano di lavoro" è una funzione pura di questo oggetto. Nessuna logica di stato nel frontend.
-Il `PlanStore` appartiene all'agente singleton del processo: due schede condividono
-il piano. `plan` e `artifacts` sono chiavi separate perche' `state_update` sostituisce
+Il piano appartiene al **thread**: a ogni run viene idratato dallo snapshot e vive
+in una `ContextVar`, cosi' il processo non ne conserva copia e due repliche non si
+contraddicono. Idratarlo dallo stato della richiesta non basta: quello salvato
+viene fuso dal framework dopo, quindi la fonte e' lo snapshot store. `plan` e `artifacts` sono chiavi separate perche' `state_update` sostituisce
 le chiavi di primo livello, senza fusione profonda.
 
 ### 4.2 Artefatti UI

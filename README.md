@@ -91,8 +91,8 @@ Per provare il flusso in `http://localhost:3000`:
 
 Il piano deve avanzare durante la run, mentre la timeline mostra ragionamento,
 tool e tabella. Nell'Inspector si filtrano gli eventi; LOG mostra orario, sorgente
-e messaggio. Il backend conserva un solo piano per processo: due schede del browser
-lo condividono. I log sono anch'essi del processo, senza isolamento per thread.
+e messaggio. Il piano appartiene al thread e sopravvive al riavvio dell'agente;
+i log invece sono ancora del processo, senza isolamento per thread.
 
 La risposta finale e' resa come Markdown mentre arriva; il pulsante `interrompi`
 chiude la run in corso senza segnalare un errore. Nell'inspector gli eventi
