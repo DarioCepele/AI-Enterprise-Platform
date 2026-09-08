@@ -128,3 +128,27 @@ async def test_clearing_a_scope_hits_that_scope_only():
 
     assert seen[0].url.path == "/scope"
     assert seen[0].headers["X-Memory-Scope"] == "tenant-a"
+
+
+@pytest.mark.asyncio
+async def test_the_pruning_done_by_the_memory_shows_up_in_the_logs(caplog):
+    payload = {
+        "messages": SNAPSHOT.messages,
+        "state": None,
+        "interrupt": None,
+        "session_state": None,
+        "curation": {
+            "conservati": 1,
+            "ragionamenti_tolti": 4,
+            "risultati_svuotati": 2,
+            "messaggi_scartati": 0,
+        },
+    }
+    store, _ = store_talking_to(lambda _: httpx.Response(200, json=payload))
+
+    with caplog.at_level(logging.INFO, logger="demo.memory.remote_store"):
+        await store.get(scope="tenant-a", thread_id="t1")
+
+    # Una potatura silenziosa e' indistinguibile da una perdita di memoria.
+    assert "4 ragionamenti tolti" in caplog.text
+    assert "2 risultati svuotati" in caplog.text

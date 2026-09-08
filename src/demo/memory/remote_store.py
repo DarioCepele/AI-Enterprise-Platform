@@ -91,8 +91,25 @@ class MemoryServiceSnapshotStore:
             )
             return None
 
+        messages = payload.get("messages") or []
+        curation = payload.get("curation")
+        if curation:
+            # La potatura la decide il servizio di memoria, ma chi ne subisce
+            # l'effetto e' questo contesto: la riga va scritta qui, dove si
+            # vede nel tab LOG insieme al resto della run.
+            logger.info(
+                "Contesto dalla memoria: %d messaggi (%d ragionamenti tolti, "
+                "%d risultati svuotati, %d scartati).",
+                len(messages),
+                curation.get("ragionamenti_tolti", 0),
+                curation.get("risultati_svuotati", 0),
+                curation.get("messaggi_scartati", 0),
+            )
+        else:
+            logger.info("Contesto dalla memoria: %d messaggi, senza potatura.", len(messages))
+
         return AGUIThreadSnapshot(
-            messages=payload.get("messages") or [],
+            messages=messages,
             state=payload.get("state"),
             interrupt=payload.get("interrupt"),
             session_state=payload.get("session_state"),

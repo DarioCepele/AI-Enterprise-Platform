@@ -149,6 +149,12 @@ in memoria di processo, e il laboratorio resta avviabile senza Mongo e Redis.
 Quale dei due sia attivo si legge nel tab LOG all'avvio — la differenza si
 noterebbe altrimenti solo quando è troppo tardi.
 
+Il contesto che torna dalla memoria e' **potato** dal servizio: fuori il
+ragionamento dei turni passati, svuotati i risultati di tool piu' vecchi. Il
+conto di cio' che manca arriva insieme allo snapshot e finisce nel tab LOG
+(`Contesto dalla memoria: 28 messaggi (12 ragionamenti tolti, ...)`), perche'
+una potatura silenziosa e' indistinguibile da una perdita di memoria.
+
 L'agente non conosce Mongo né Redis: implementa il protocollo
 `AGUIThreadSnapshotStore` chiamando il servizio in HTTP, e lo scope del
 resolver diventa l'header `X-Memory-Scope` della chiamata.
