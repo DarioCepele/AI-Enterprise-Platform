@@ -1,21 +1,25 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { runAgent } from "@/lib/agui/client";
-import { initialState, reduce, type LabState } from "@/lib/agui/reducer";
+import { initialState, reduce, withUserMessage, type LabState } from "@/lib/agui/reducer";
 import { Chat } from "./Chat";
 import { Inspector } from "./Inspector";
-import { StatePanel } from "./StatePanel";
+import { PlanPanel } from "./PlanPanel";
+import { LabHeader } from "./LabHeader";
 
 export function Lab() {
   const [state, setState] = useState<LabState>(initialState);
   const [threadId] = useState(() => crypto.randomUUID());
+  const inFlight = useRef(false);
 
   const send = useCallback(
     async (text: string) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
       const userMessage = { id: crypto.randomUUID(), role: "user", content: text };
       // Il messaggio utente lo aggiunge il client: il server non lo rimanda indietro.
-      setState((s) => ({ ...s, messages: [...s.messages, userMessage], error: null }));
+      setState((s) => ({ ...withUserMessage(s, userMessage.id, text), running: true }));
 
       try {
         await runAgent(
@@ -28,29 +32,40 @@ export function Lab() {
             context: [],
             forwardedProps: {},
           },
-          (event) => setState((s) => reduce(s, event)),
+          // Il trasporto puo' restare aperto dopo l'evento terminale.
+          // Il modulo si sblocca soltanto quando runAgent termina.
+          (event) => setState((s) => ({ ...reduce(s, event), running: true })),
         );
       } catch (err) {
         setState((s) => ({ ...s, running: false, error: String(err) }));
+      } finally {
+        inFlight.current = false;
+        setState((s) => ({ ...s, running: false }));
       }
     },
     [threadId],
   );
 
   return (
-    <div className="grid h-screen grid-cols-[1fr_420px]">
-      <main className="min-w-0 border-r">
+    <div className="lab-shell flex flex-col">
+      <LabHeader />
+      <div className="lab-grid min-h-0 flex-1">
+      <main className="flex min-h-0 min-w-0 flex-col border-r border-[var(--border)]" aria-label="Conversazione">
         <Chat
-          messages={state.messages}
+          entries={state.entries}
           running={state.running}
           error={state.error}
           onSend={send}
         />
       </main>
-      <aside className="flex min-h-0 flex-col">
-        <StatePanel shared={state.shared} />
-        <Inspector events={state.events} />
+      <aside className="lab-aside flex min-h-0 min-w-0 flex-col" aria-label="Piano e attività dell'agente">
+        <PlanPanel shared={state.shared} />
+        <Inspector events={state.events} running={state.running} />
       </aside>
+      </div>
+      <footer className="border-t border-[var(--border)] px-6 py-2 font-mono text-[10px] text-[var(--muted)]">
+        Esercizio di laboratorio · L&apos;agente può sbagliare. Segui il piano e ispeziona gli eventi.
+      </footer>
     </div>
   );
 }

@@ -14,9 +14,20 @@ export function Chat({ entries, running, error, onSend }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-6">
-        {entries.map((entry) => (
-          <EntryView key={entry.id} entry={entry} />
-        ))}
+        {entries.length === 0 && (
+          <div className="mx-auto max-w-lg py-12">
+            <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[var(--accent)]">Dalla richiesta al risultato</p>
+            <h2 className="text-3xl font-medium leading-tight tracking-tight">Un agente al lavoro.<br />Ogni passaggio, visibile.</h2>
+            <p className="mt-4 max-w-sm text-sm leading-relaxed text-[var(--muted)]">Chiedi un confronto: segui il ragionamento, i tool e la tabella finale. Il piano mostra a che punto siamo.</p>
+          </div>
+        )}
+        <div>
+          {entries.map((entry) => (
+            <div key={entry.id} className="timeline-entry" data-kind={entry.kind}>
+              <EntryView entry={entry} />
+            </div>
+          ))}
+        </div>
         {running && (
           <p role="status" className="font-mono text-[11px] uppercase tracking-wide text-[var(--muted)]">
             Sto lavorando…

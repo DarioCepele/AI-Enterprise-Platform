@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --background: #fcfcfa;
+  --foreground: #202720;
+  --surface: #f2f4f0;
+  --surface-accent: #eaf0e7;
+  --border: #dce2d8;
+  --muted: #65705f;
+  --accent: #456c39;
 }
 
 @theme inline {
@@ -14,13 +20,53 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
+    --background: #111510;
+    --foreground: #e6ece1;
+    --surface: #1a2018;
+    --surface-accent: #263121;
+    --border: #354030;
+    --muted: #acb8a4;
+    --accent: #acd196;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), sans-serif;
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: wait; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+::selection { background: var(--surface-accent); }
+.lab-shell { height: 100dvh; }
+.lab-grid { display: grid; grid-template-columns: minmax(0, 1fr) 420px; }
+.lab-aside > section:first-child { max-height: 42%; overflow-y: auto; flex-shrink: 0; }
+.inspector-tabs { border-bottom: 1px solid var(--border); }
+.inspector-tabs button { padding-bottom: 10px; color: var(--muted); border-bottom: 2px solid transparent; }
+.inspector-tabs button[aria-pressed="true"] { color: var(--foreground); border-bottom-color: var(--accent); }
+.inspector summary { padding: 4px 0; overflow-wrap: anywhere; }
+.inspector summary:hover { color: var(--accent); }
+.timeline-entry { position: relative; padding: 0 0 1.4rem 1.5rem; border-left: 1px solid var(--border); }
+.timeline-entry::before {
+  content: ""; position: absolute; left: -4px; top: 7px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted); box-shadow: 0 0 0 4px var(--background);
+}
+.timeline-entry[data-kind="user"]::before { background: var(--accent); }
+.timeline-entry:last-child { border-color: transparent; padding-bottom: 0; }
+.timeline-entry { overflow-wrap: anywhere; }
+.lab-shell .text-amber-700 { color: #93600c; }
+@media (prefers-color-scheme: dark) {
+  .lab-shell .text-amber-700, .lab-shell .text-amber-600 { color: #e6b660; }
+  .lab-shell .text-red-600 { color: #fb9393; }
+  .lab-shell .text-emerald-600 { color: #86d8ab; }
+}
+@media (max-width: 800px) {
+  .lab-shell { height: auto; min-height: 100dvh; }
+  .lab-grid { grid-template-columns: minmax(0, 1fr); }
+  .lab-grid > main { height: 65dvh; min-height: 380px; border-right: 0; }
+  .lab-aside { height: 65dvh; min-height: 380px; border-top: 1px solid var(--border); }
 }
