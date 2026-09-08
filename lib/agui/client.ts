@@ -5,15 +5,20 @@ const ENDPOINT = process.env.NEXT_PUBLIC_AGUI_URL ?? "http://127.0.0.1:8000/agui
 /**
  * Esegue una run e invoca onEvent per ogni evento SSE ricevuto.
  * Il parsing e' manuale perche' EventSource non supporta POST.
+ *
+ * Il `signal` interrompe la run: senza, una risposta lunga si puo' solo
+ * aspettare, e chiudere la scheda lascia il backend a generare nel vuoto.
  */
 export async function runAgent(
   input: RunInput,
   onEvent: (event: AGUIEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await fetch(ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify(input),
+    signal,
   });
 
   if (!response.ok || !response.body) {

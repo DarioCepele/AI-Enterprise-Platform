@@ -50,10 +50,46 @@ describe("runAgent", () => {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify(input),
+        signal: undefined,
       },
     );
     expect(events).toEqual(expected);
     expect(body.locked).toBe(false);
+  });
+
+  it("passa il segnale di interruzione alla richiesta", async () => {
+    const { fetchMock } = mockStream([encoder.encode("")]);
+    const controller = new AbortController();
+
+    await runAgent(input, () => {}, controller.signal);
+
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
+  });
+
+  it("propaga l'interruzione di una run gia' avviata", async () => {
+    const controller = new AbortController();
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(encoder.encode('data: {"type":"RUN_STARTED","threadId":"t1","runId":"r1"}\n\n'));
+      },
+      // Il fetch reale rifiuta la lettura in corso quando il segnale scatta.
+      cancel() {},
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body)));
+    const events: AGUIEvent[] = [];
+
+    const run = runAgent(
+      input,
+      (event) => {
+        events.push(event);
+        controller.abort();
+        throw new DOMException("interrotta", "AbortError");
+      },
+      controller.signal,
+    );
+
+    await expect(run).rejects.toThrow("interrotta");
+    expect(events).toHaveLength(1);
   });
 
   it.each(["\n", "\r\n", "\r"])("gestisce terminatori %j e UTF-8 divisi byte per byte", async (eol) => {

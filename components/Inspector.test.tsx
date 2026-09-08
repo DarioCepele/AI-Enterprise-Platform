@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { groupEvents } from "@/lib/agui/groups";
 import { loadFixture } from "@/lib/agui/fixtures/load";
 import { fetchLogs } from "@/lib/agui/logs";
 import type { AGUIEvent } from "@/lib/agui/types";
@@ -27,15 +28,54 @@ describe("Inspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "ragionamento" }));
 
     const rows = screen.getAllByRole("group");
-    expect(rows).toHaveLength(EVENTS.filter((e) => e.type.startsWith("REASONING")).length);
+    const reasoning = EVENTS.filter((e) => e.type.startsWith("REASONING"));
+    expect(rows).toHaveLength(groupEvents(reasoning).length);
     expect(screen.getByRole("button", { name: "ragionamento" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(String(EVENTS.length))).toBeInTheDocument();
     for (const row of rows) {
       expect(row.textContent).toMatch(/^REASONING_/);
     }
-    // La fixture completa rende oltre 400 details: le query di accessibilita'
-    // in jsdom possono superare il timeout standard su Windows.
-  }, 15_000);
+  });
+
+  it("i delta consecutivi diventano una riga sola col conteggio", () => {
+    // 408 righe identiche rendevano l'inspector illeggibile: ora una riga per
+    // gruppo, con il numero di eventi accorpati.
+    render(<Inspector events={EVENTS} running={false} />);
+    const deltas = EVENTS.filter((e) => e.type === "REASONING_ENCRYPTED_VALUE").length;
+    const badges = screen
+      .getAllByRole("group")
+      .filter((row) => row.textContent?.startsWith("REASONING_ENCRYPTED_VALUE"))
+      .map((row) => Number(row.textContent!.match(/×(\d+)/)![1]));
+
+    expect(screen.getAllByRole("group").length).toBeLessThan(EVENTS.length);
+    expect(badges.reduce((a, b) => a + b, 0)).toBe(deltas);
+  });
+
+  it("il payload compare solo quando la riga viene aperta", () => {
+    const events: AGUIEvent[] = [{ type: "RUN_STARTED", threadId: "t", runId: "r" }];
+    const { container } = render(<Inspector events={events} running={false} />);
+
+    expect(container.querySelector("pre")).toBeNull();
+    fireEvent.click(screen.getByText("RUN_STARTED"));
+    expect(container.querySelector("pre")?.textContent).toBe(JSON.stringify(events[0], null, 2));
+  });
+
+  it("un gruppo aperto mostra l'array dei payload, troncato e dichiarato", () => {
+    const delta = (i: number): AGUIEvent => ({
+      type: "REASONING_ENCRYPTED_VALUE",
+      subtype: "reasoning",
+      entityId: `e${i}`,
+      encryptedValue: "[]",
+    });
+    const events = Array.from({ length: 60 }, (_, i) => delta(i));
+    const { container } = render(<Inspector events={events} running={false} />);
+    fireEvent.click(screen.getByText("REASONING_ENCRYPTED_VALUE"));
+
+    const payload = JSON.parse(container.querySelector("pre")!.textContent!);
+    expect(Array.isArray(payload)).toBe(true);
+    expect(payload).toHaveLength(50);
+    expect(screen.getByText(/primi 50 di 60 eventi/)).toBeInTheDocument();
+  });
 
   it("il filtro tool mostra solo i TOOL_CALL_*", () => {
     render(<Inspector events={EVENTS} running={false} />);
@@ -50,7 +90,8 @@ describe("Inspector", () => {
     // Non si nasconde nulla dal flusso grezzo: e' il punto dell'inspector.
     render(<Inspector events={EVENTS} running={false} />);
 
-    expect(screen.getAllByRole("group").length).toBe(EVENTS.length);
+    expect(screen.getAllByRole("group").length).toBe(groupEvents(EVENTS).length);
+    expect(screen.getAllByRole("group").some((r) => r.textContent?.startsWith("REASONING_"))).toBe(true);
   });
 
   it("filtra testo e stato e conserva eventi sconosciuti e payload nel filtro tutti", () => {
@@ -70,9 +111,12 @@ describe("Inspector", () => {
       expect(row.textContent).toMatch(/^(RUN_|STATE_)/);
     }
     fireEvent.click(screen.getByRole("button", { name: "tutti" }));
-    expect(screen.getAllByRole("group")).toHaveLength(events.length);
-    expect(screen.getAllByRole("group").map((row) => row.querySelector("pre")?.textContent))
-      .toEqual(events.map((event) => JSON.stringify(event, null, 2)));
+    const rows = screen.getAllByRole("group");
+    expect(rows).toHaveLength(events.length);
+    for (const [i, row] of rows.entries()) {
+      fireEvent.click(row.querySelector("summary")!);
+      expect(row.querySelector("pre")?.textContent).toBe(JSON.stringify(events[i], null, 2));
+    }
   });
 
   it("mantiene il filtro quando arrivano eventi e gestisce lo stream vuoto", () => {

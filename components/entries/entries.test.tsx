@@ -6,10 +6,42 @@ import type { Entry } from "@/lib/agui/entries";
 import { EntryView } from "./index";
 
 describe("EntryView", () => {
-  it("rende la risposta dell'assistente come testo, senza interpretare HTML", () => {
-    const { container } = render(<EntryView entry={{ kind: "assistant", id: "a", text: "<b>risposta</b>" }} />);
-    expect(screen.getByText("<b>risposta</b>")).toBeInTheDocument();
-    expect(container.querySelector("b")).toBeNull();
+  it("blocca script e URL pericolosi nella risposta del modello", () => {
+    // Il renderer accetta il markup inerte e neutralizza il resto: quello che
+    // scrive il modello non deve poter eseguire nulla nella pagina.
+    const text = '<script>alert(1)</script><a href="javascript:alert(1)">click</a>';
+    const { container } = render(<EntryView entry={{ kind: "assistant", id: "a", text }} />);
+
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).not.toContain("alert(1)");
+  });
+
+  it("rende il Markdown della risposta: enfasi, elenco, codice e tabella", () => {
+    const text = [
+      "Confronto **netto**:",
+      "",
+      "- Python usa `try/except`",
+      "- Go restituisce `err`",
+      "",
+      "| Tema | Go |",
+      "| --- | --- |",
+      "| tipi | statici |",
+    ].join("\n");
+    const { container } = render(<EntryView entry={{ kind: "assistant", id: "a", text }} />);
+
+    expect(container.querySelector('[data-streamdown="strong"]')?.textContent).toBe("netto");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelectorAll("code")[0]?.textContent).toBe("try/except");
+    expect(container.querySelector("table")).not.toBeNull();
+  });
+
+  it("non mostra la sintassi ancora aperta durante lo streaming", () => {
+    // Un token alla volta: senza completamento si vedrebbero gli asterischi.
+    const { container } = render(<EntryView entry={{ kind: "assistant", id: "a", text: "Confronto **net" }} />);
+
+    expect(container.textContent).not.toContain("**");
+    expect(container.querySelector('[data-streamdown="strong"]')?.textContent).toBe("net");
   });
   it("rende il messaggio dell'utente", () => {
     const entry: Entry = { kind: "user", id: "1", text: "ciao" };
@@ -28,7 +60,7 @@ describe("EntryView", () => {
     expect(screen.getByText("Ragionamento")).toBeInTheDocument();
   });
 
-  it("mostra il nome del tool, non i suoi argomenti grezzi", () => {
+  it("mostra il nome del tool e tiene chiusi gli argomenti", () => {
     const entry: Entry = {
       kind: "tool",
       id: "3",
@@ -36,10 +68,28 @@ describe("EntryView", () => {
       args: '{"name":"comparison"}',
       done: true,
     };
-    render(<EntryView entry={entry} />);
+    const { container } = render(<EntryView entry={entry} />);
 
     expect(screen.getByText("load_skill")).toBeInTheDocument();
-    expect(screen.queryByText(/"name":"comparison"/)).toBeNull();
+    // Gli argomenti ci sono ma stanno chiusi: il chip resta una riga sola.
+    expect(container.querySelector("details")?.open).toBe(false);
+    expect(container.querySelector("pre")?.textContent).toBe(
+      JSON.stringify({ name: "comparison" }, null, 2),
+    );
+  });
+
+  it("mostra gli argomenti grezzi quando non sono JSON completo", () => {
+    const entry: Entry = { kind: "tool", id: "3b", name: "ui_table", args: '{"title":"Conf', done: false };
+    const { container } = render(<EntryView entry={entry} />);
+
+    expect(container.querySelector("pre")?.textContent).toBe('{"title":"Conf');
+  });
+
+  it("dichiara i tool senza argomenti invece di mostrare un riquadro vuoto", () => {
+    const entry: Entry = { kind: "tool", id: "3c", name: "list_skills", args: "", done: true };
+    render(<EntryView entry={entry} />);
+
+    expect(screen.getByText("nessun argomento")).toBeInTheDocument();
   });
 
   it("rende una ui-table come tabella vera", () => {
@@ -104,6 +154,37 @@ describe("Chat", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Sto lavorando");
     fireEvent.submit(container.querySelector("form")!);
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("permette di interrompere la run mentre e' in corso", () => {
+    const onStop = vi.fn();
+    const { rerender } = render(
+      <Chat entries={[]} running={false} error={null} onSend={vi.fn()} onStop={onStop} />,
+    );
+    expect(screen.queryByRole("button", { name: "interrompi" })).toBeNull();
+    rerender(<Chat entries={[]} running error={null} onSend={vi.fn()} onStop={onStop} />);
+    fireEvent.click(screen.getByRole("button", { name: "interrompi" }));
+
+    expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("segue lo stream in fondo, ma non se si sta rileggendo piu' su", () => {
+    const entry = (i: number): Entry => ({ kind: "assistant", id: `a${i}`, text: `riga ${i}` });
+    const { container, rerender } = render(
+      <Chat entries={[entry(1)]} running error={null} onSend={vi.fn()} />,
+    );
+    const scroller = container.querySelector(".overflow-y-auto") as HTMLDivElement;
+    Object.defineProperty(scroller, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 200, configurable: true });
+
+    rerender(<Chat entries={[entry(1), entry(2)]} running error={null} onSend={vi.fn()} />);
+    expect(scroller.scrollTop).toBe(1000);
+
+    // L'utente scorre indietro: da qui in poi la timeline non lo insegue piu'.
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
+    rerender(<Chat entries={[entry(1), entry(2), entry(3)]} running error={null} onSend={vi.fn()} />);
+    expect(scroller.scrollTop).toBe(100);
   });
 
   it("espone l'errore della run", () => {
