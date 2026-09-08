@@ -32,19 +32,6 @@ http-server = [
 ]
 
 [[package]]
-name = "agent-framework-a2a"
-version = "1.0.0b260821"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "a2a-sdk" },
-    { name = "agent-framework-core" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/81/cc/f083ab6fed4235dab1bb0821e8c09c1aa2e3e850f2486bc9dbef36ce5b15/agent_framework_a2a-1.0.0b260821.tar.gz", hash = "sha256:15bbfb5b0621e7b1307bf73db5938c99edce1423178a7bd40f3f56383f65e563", size = 19263, upload-time = "2026-08-21T23:22:44.734Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/3c/5edd3ead885188a2086619c1a095c643fd9190b22152cede0d6d907f2302/agent_framework_a2a-1.0.0b260821-py3-none-any.whl", hash = "sha256:50e35e096d8904b5bd0b9191538121a3c78f97aa07424e7c20540fb74beb1863", size = 19671, upload-time = "2026-08-21T23:22:29.648Z" },
-]
-
-[[package]]
 name = "agent-framework-core"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -430,7 +417,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk", extra = ["http-server"] },
-    { name = "agent-framework-a2a" },
     { name = "agent-framework-core" },
     { name = "agent-framework-openai" },
     { name = "fastapi" },
@@ -449,7 +435,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "a2a-sdk", extras = ["http-server"] },
-    { name = "agent-framework-a2a" },
     { name = "agent-framework-core", specifier = "==1.17.0" },
     { name = "agent-framework-openai" },
     { name = "fastapi", specifier = ">=0.120" },

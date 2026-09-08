@@ -57,3 +57,47 @@ uv run pytest
 Offline: verificano la carta d'identità (streaming dichiarato, versione non
 legacy, url coerente) e il tool di lettura del corpus. La verifica dello
 streaming vero richiede un modello e sta nei numeri qui sopra.
+
+## L'executor è nostro, e l'artefatto ha un nome
+
+`agent-framework-a2a` non è più una dipendenza: l'executor sta in
+`knowledge/executor.py`, scritto contro l'SDK stabile. Due guadagni in un colpo
+solo — via un pacchetto beta dal percorso portante, e il controllo su **cosa**
+il sottoagente restituisce.
+
+Prima ogni chunk di testo partiva come artefatto anonimo: 205 artefatti per una
+risposta, nessuno con un nome, nessun dato. Ora il testo scorre come messaggio
+di stato mentre il task è `WORKING`, e alla fine parte **un** artefatto
+`scheda`, con una parte testo per il modello e una parte dati per l'interfaccia:
+
+```json
+{"component": "scheda", "domanda": "...", "documenti": ["go"], "estratto": "..."}
+```
+
+Il master lo rende come artefatto in timeline, con le fonti sotto — non come
+testo indistinguibile dal resto.
+
+### Tre cose che solo il campo ha detto
+
+**Il Task va messo in coda prima di tutto.** `TaskUpdater.submit()` non basta:
+senza `new_task_from_user_message()` enqueued per primo, il client riceve
+`InvalidAgentResponseError: Agent should enqueue Task before TaskStatusUpdateEvent`.
+
+**Gli argomenti di una tool call arrivano a delta.** Il primo pezzo porta il
+*nome* del tool e argomenti vuoti; i pezzi dopo portano gli *argomenti* e
+nessun nome:
+
+```
+name='leggi_documento' call_id='ee79b6' args=''
+name=''                call_id='ee79b6' args='{"nome": "'
+name=''                call_id='ee79b6' args='go'
+name=''                call_id='ee79b6' args='"}'
+```
+
+Chi filtra per nome a ogni pezzo scarta proprio quelli che contengono la
+risposta. Si tiene traccia dei `call_id` che ci interessano e si accumulano gli
+argomenti finché non diventano JSON valido.
+
+**Un task fallito è meglio di un task vuoto.** Se l'agente non produce testo, il
+task va in `FAILED` invece di completarsi senza artefatto: chi lo ha chiesto
+deve poter distinguere "non ho trovato nulla" da "è andato tutto bene".

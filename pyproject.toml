@@ -5,7 +5,6 @@ description = "Sottoagente di knowledge base esposto via A2A"
 requires-python = ">=3.12"
 dependencies = [
     "agent-framework-core==1.17.0",
-    "agent-framework-a2a",
     "agent-framework-openai",
     "a2a-sdk[http-server]",
     "sse-starlette",

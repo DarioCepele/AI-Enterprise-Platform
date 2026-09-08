@@ -14,7 +14,7 @@ from a2a.server.routes import (
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 from agent_framework import Agent
-from agent_framework.a2a import A2AExecutor
+from .executor import KnowledgeExecutor
 from fastapi import FastAPI
 
 from .agent import build_knowledge_agent, catalogue
@@ -50,7 +50,7 @@ def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastA
 
     url = base_url or os.getenv("KNOWLEDGE_BASE_URL", "http://localhost:8200/")
     card = build_agent_card(url)
-    executor = A2AExecutor(agent=agent or build_knowledge_agent(), stream=True)
+    executor = KnowledgeExecutor(agent or build_knowledge_agent())
     handler = DefaultRequestHandler(
         agent_executor=executor,
         task_store=InMemoryTaskStore(),
