@@ -53,6 +53,12 @@ def create_app(
     snapshot_store: AGUIThreadSnapshotStore | None = None,
 ) -> FastAPI:
     """Costruisce l'app. `agent`, `collector` e lo store vanno passati nei test."""
+    if not logging.getLogger().handlers:
+        # Uvicorn configura solo i propri logger: senza questo, `demo.*` finisce
+        # nell'handler di ultima istanza, che stampa solo dai WARNING in su e
+        # lascia il container muto proprio quando serve leggerlo.
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
     log_collector = collector if collector is not None else LogCollector()
     log_collector.attach()
 
@@ -171,13 +177,12 @@ def create_app(
 
     store = snapshot_store or _default_snapshot_store()
 
-    async def plan_of_thread(thread_id: str) -> dict | None:
+    async def stato_del_thread(thread_id: str) -> dict | None:
         snapshot = await store.get(scope=SINGLE_TENANT_SCOPE, thread_id=thread_id)
-        stato = getattr(snapshot, "state", None) or {}
-        piano = stato.get("plan")
-        return piano if isinstance(piano, dict) else None
+        stato = getattr(snapshot, "state", None)
+        return stato if isinstance(stato, dict) else None
 
-    runner = LabRunner(agent=agent or build_master_agent(), plan_loader=plan_of_thread)
+    runner = LabRunner(agent=agent or build_master_agent(), state_loader=stato_del_thread)
     add_agent_framework_fastapi_endpoint(
         app,
         runner,

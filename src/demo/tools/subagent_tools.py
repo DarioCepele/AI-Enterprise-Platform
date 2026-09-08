@@ -16,7 +16,7 @@ import asyncio
 from ..a2a.client import A2AClient, Avanzamento, fetch_agent_card
 from ..a2a.push import token_per, url_webhook
 from ..config import SINGLE_TENANT_SCOPE, get_settings
-from ..server.run_context import subagent_run, thread_of_run
+from ..server.run_context import pending_of_run, subagent_run, thread_of_run
 
 logger = logging.getLogger(__name__)
 
@@ -127,9 +127,25 @@ def build_subagent_tools(
             )
 
         if domanda_del_sottoagente:
-            return Content.from_text(
-                f"Il knowledge agent si e' fermato e chiede: {domanda_del_sottoagente}\n"
-                "Riferiscilo all'utente invece di rispondere al posto suo."
+            logger.info(
+                "Il task %s attende un chiarimento: %s",
+                task_id[:8] or "?",
+                domanda_del_sottoagente,
+            )
+            return state_update(
+                text=(
+                    f"Il knowledge agent si e' fermato e chiede: {domanda_del_sottoagente}\n"
+                    "Rigira la domanda all'utente invece di rispondere al posto suo. "
+                    "Quando l'utente risponde, usa 'rispondi_al_sottoagente'."
+                ),
+                state={
+                    "subagent_pending": {
+                        "task_id": task_id,
+                        "agente": "knowledge",
+                        "domanda": domanda_del_sottoagente,
+                        "richiesta": domanda,
+                    }
+                },
             )
         if not risposta:
             return Content.from_text(
@@ -156,4 +172,46 @@ def build_subagent_tools(
             },
         )
 
-    return [interroga_knowledge]
+    @tool
+    async def rispondi_al_sottoagente(
+        risposta: Annotated[str, "La risposta dell'utente al chiarimento chiesto dal sottoagente"],
+    ) -> Content:
+        """Riprende il sottoagente che aveva chiesto un chiarimento.
+
+        Usalo quando l'utente risponde a una domanda che ti aveva girato il
+        knowledge agent: la conversazione col sottoagente riprende dallo stesso
+        task, non da capo.
+        """
+        in_attesa = pending_of_run()
+        if not in_attesa or not in_attesa.get("task_id"):
+            return Content.from_text(
+                "Nessun sottoagente sta aspettando una risposta: se serve, interrogalo da capo."
+            )
+
+        task_id = str(in_attesa["task_id"])
+        pezzi: list[str] = []
+        schede: list = []
+        try:
+            remoto = await client()
+            async with subagent_run("knowledge", risposta):
+                async for avanzamento in remoto.chiedi(risposta, task_id=task_id):
+                    if avanzamento.testo:
+                        pezzi.append(avanzamento.testo)
+                    if avanzamento.artefatto:
+                        schede.append(avanzamento.artefatto)
+                        if avanzamento.artefatto.testo:
+                            pezzi.append(avanzamento.artefatto.testo)
+        except Exception:
+            logger.error("Ripresa del task %s fallita.", task_id[:8], exc_info=True)
+            return Content.from_text(
+                "Non sono riuscito a riprendere il sottoagente: dillo all'utente."
+            )
+
+        testo = "".join(pezzi).strip()
+        logger.info("Task %s ripreso: %d caratteri.", task_id[:8], len(testo))
+        return state_update(
+            text=testo or "Il sottoagente non ha aggiunto nulla dopo il chiarimento.",
+            state={"subagent_pending": {}},
+        )
+
+    return [interroga_knowledge, rispondi_al_sottoagente]

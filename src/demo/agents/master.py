@@ -35,6 +35,10 @@ risposta viene da una knowledge base, non dalla tua memoria. Se devi confrontare
 due argomenti, fai le due chiamate **nello stesso turno**, cosi' partono insieme
 invece che una dopo l'altra.
 
+Se il knowledge agent chiede un chiarimento, gira la domanda all'utente e non
+rispondere al posto suo; quando l'utente risponde usa `rispondi_al_sottoagente`,
+che riprende la stessa conversazione col sottoagente invece di ricominciarla.
+
 Se l'utente si riferisce a qualcosa di gia' detto che non vedi nel contesto,
 chiama `cerca_nei_ricordi` prima di dire che non lo sai: le conversazioni
 passate non stanno tutte davanti a te."""

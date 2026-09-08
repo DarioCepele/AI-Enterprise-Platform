@@ -190,3 +190,75 @@ async def test_a_subagent_that_asks_is_reported_not_answered_for():
 
     assert "si e' fermato e chiede" in risposta.text
     assert "Su quale versione di Go?" in risposta.text
+
+
+class RemoteCheRiprende(FakeRemote):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.ripresi: list[str | None] = []
+
+    async def chiedi(self, testo, task_id=None, context_id=None, webhook=None):
+        self.ripresi.append(task_id)
+        self.domande.append(testo)
+        yield avanzamento("Con Go: goroutine e channel.", stato="concluso", grezzo=3)
+
+
+def strumenti(remote):
+    async def load():
+        return card()
+
+    return build_subagent_tools(
+        "http://kb:8200/", card_loader=load, client_factory=lambda _card: remote
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_asking_subagent_is_remembered_in_the_thread_state():
+    strumento = tool_with(RemoteCheChiede([]))
+
+    risultato = await strumento.func(domanda="come funziona la concorrenza?")
+
+    stato = risultato.additional_properties["__ag_ui_tool_result_state__"]
+    assert stato["subagent_pending"]["task_id"] == "t-1"
+    assert "Su quale versione di Go?" in stato["subagent_pending"]["domanda"]
+
+
+@pytest.mark.asyncio
+async def test_the_answer_resumes_the_same_task():
+    from demo.server.run_context import current_pending
+
+    remote = RemoteCheRiprende()
+    rispondi = strumenti(remote)[1]
+    token = current_pending.set({"task_id": "t-99", "agente": "knowledge", "domanda": "quale?"})
+    try:
+        risultato = await rispondi.func(risposta="Go")
+    finally:
+        current_pending.reset(token)
+
+    # Lo stesso task, non uno nuovo: e' questo che rende la risposta dell'utente
+    # una continuazione e non un'altra conversazione.
+    assert remote.ripresi == ["t-99"]
+    assert "goroutine" in risultato.text
+
+
+@pytest.mark.asyncio
+async def test_resuming_clears_the_pending_state():
+    from demo.server.run_context import current_pending
+
+    rispondi = strumenti(RemoteCheRiprende())[1]
+    token = current_pending.set({"task_id": "t-99"})
+    try:
+        risultato = await rispondi.func(risposta="Go")
+    finally:
+        current_pending.reset(token)
+
+    assert risultato.additional_properties["__ag_ui_tool_result_state__"]["subagent_pending"] == {}
+
+
+@pytest.mark.asyncio
+async def test_answering_with_nobody_waiting_says_so():
+    rispondi = strumenti(RemoteCheRiprende())[1]
+
+    risultato = await rispondi.func(risposta="Go")
+
+    assert "Nessun sottoagente" in risultato.text

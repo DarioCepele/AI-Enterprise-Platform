@@ -28,8 +28,17 @@ current_plan: contextvars.ContextVar[PlanStore | None] = contextvars.ContextVar(
     "current_plan", default=None
 )
 current_thread: contextvars.ContextVar[str] = contextvars.ContextVar("current_thread", default="")
+current_pending: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "current_pending", default=None
+)
 
-PlanLoader = Callable[[str], Awaitable[dict[str, Any] | None]]
+StateLoader = Callable[[str], Awaitable[dict[str, Any] | None]]
+
+
+def _pending_da(input_data: dict[str, Any]) -> dict[str, Any] | None:
+    stato = input_data.get("state") or {}
+    attesa = stato.get("subagent_pending") if isinstance(stato, dict) else None
+    return attesa if isinstance(attesa, dict) and attesa else None
 
 _FINE = object()
 
@@ -40,6 +49,11 @@ def plan_of_run() -> PlanStore | None:
 
 def thread_of_run() -> str:
     return current_thread.get()
+
+
+def pending_of_run() -> dict[str, Any] | None:
+    """Il sottoagente che sta aspettando una risposta, se ce ne e' uno."""
+    return current_pending.get()
 
 
 @asynccontextmanager
@@ -91,22 +105,22 @@ class LabRunner(AgentFrameworkAgent):
     Gli eventi dei sottoagenti si intrecciano a quelli del framework.
     """
 
-    def __init__(self, *args: Any, plan_loader: PlanLoader | None = None, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, state_loader: StateLoader | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._plan_loader = plan_loader
+        self._state_loader = state_loader
 
     def _framework_events(self, input_data: dict[str, Any]) -> AsyncGenerator[BaseEvent, None]:
         return super().run(input_data)
 
-    async def _stored_plan(self, input_data: dict[str, Any]) -> dict[str, Any] | None:
+    async def _stato_salvato(self, input_data: dict[str, Any]) -> dict[str, Any] | None:
         thread_id = input_data.get("thread_id") or input_data.get("threadId")
-        if self._plan_loader is None or not thread_id:
+        if self._state_loader is None or not thread_id:
             return None
         try:
-            return await self._plan_loader(str(thread_id))
+            return await self._state_loader(str(thread_id))
         except Exception:
             logger.error(
-                "Piano del thread %s non recuperato: la run riparte senza.",
+                "Stato del thread %s non recuperato: la run riparte senza.",
                 thread_id,
                 exc_info=True,
             )
@@ -114,7 +128,9 @@ class LabRunner(AgentFrameworkAgent):
 
     async def run(self, input_data: dict[str, Any]) -> AsyncGenerator[BaseEvent, None]:
         queue: asyncio.Queue = asyncio.Queue()
-        plan = plan_from_state(input_data, await self._stored_plan(input_data))
+        stato_salvato = await self._stato_salvato(input_data)
+        plan = plan_from_state(input_data, (stato_salvato or {}).get("plan"))
+        pending = (stato_salvato or {}).get("subagent_pending") or _pending_da(input_data)
 
         async def pompa() -> None:
             eventi = current_run_events.set(queue)
@@ -122,6 +138,7 @@ class LabRunner(AgentFrameworkAgent):
             thread = current_thread.set(
                 str(input_data.get("thread_id") or input_data.get("threadId") or "")
             )
+            attesa = current_pending.set(pending)
             try:
                 async for event in self._framework_events(input_data):
                     await queue.put(event)
@@ -131,6 +148,7 @@ class LabRunner(AgentFrameworkAgent):
                 current_run_events.reset(eventi)
                 current_plan.reset(piano)
                 current_thread.reset(thread)
+                current_pending.reset(attesa)
                 await queue.put(_FINE)
 
         task = asyncio.create_task(pompa())

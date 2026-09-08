@@ -58,7 +58,7 @@ def test_the_hydrated_plan_is_a_copy_not_a_live_reference():
 
 class Runner(LabRunner):
     def __init__(self, visto: list) -> None:
-        super().__init__(agent=None, plan_loader=None)
+        super().__init__(agent=None, state_loader=None)
         self._visto = visto
 
     async def _framework_events(self, input_data):

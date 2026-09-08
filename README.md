@@ -255,8 +255,7 @@ grezzi.
 
 Il client espone anche ciò che serve ai passi successivi: il `task_id` per
 riprendere un task, e `attende_risposta` quando il sottoagente si ferma in
-`TASK_STATE_INPUT_REQUIRED`. Oggi il tool riferisce la domanda all'utente invece
-di rispondere al posto suo; la ripresa vera dello stesso task è il pezzo dopo.
+`TASK_STATE_INPUT_REQUIRED`.
 
 La scheda del sottoagente arriva in timeline come **artefatto**, con le fonti
 che ha letto — non come testo indistinguibile dal resto della risposta. Nessuno
@@ -294,3 +293,49 @@ Verificato dal vivo con l'attesa a 8 secondi: il tool si stacca, l'agente
 risponde «l'esito arriverà come notifica», e poco dopo nei log compare
 `Il sottoagente ha concluso il task 3f236f2f (TASK_STATE_COMPLETED)` con 916
 caratteri scritti nella memoria del thread.
+
+## Human-in-the-loop attraverso gli agenti
+
+Il sottoagente può fermarsi e chiedere. Quando lo fa, il task va in
+`INPUT_REQUIRED` e resta **aperto**: `interroga_knowledge` non inventa una
+risposta, riferisce la domanda al modello e scrive nello stato del thread chi
+sta aspettando.
+
+```json
+{"subagent_pending": {"task_id": "39f05819", "agente": "knowledge",
+                      "domanda": "Di quale linguaggio parli: Go, Python o Rust?",
+                      "richiesta": "come funziona la concorrenza?"}}
+```
+
+Al turno dopo, quando l'utente risponde, `rispondi_al_sottoagente` legge quello
+stato e manda la risposta con lo **stesso** `task_id`: il sottoagente riprende
+da dove si era fermato, con la sua domanda ancora in contesto, invece di
+ricominciare da un task nuovo che avrebbe perso tutto.
+
+**Perché nello stato del thread e non in un dizionario del processo.** Il turno
+in cui il sottoagente chiede e quello in cui l'utente risponde sono due
+richieste HTTP distinte, che con più repliche finiscono su processi distinti.
+Lo stato del thread è già condiviso e già durevole: metterci il pending non
+costa nulla e toglie l'unico posto in cui la memoria sarebbe stata locale.
+
+Il tool legge il pending da una `ContextVar` popolata a inizio run da
+`LabRunner`, che a sua volta lo prende dallo snapshot store — non dallo stato
+della richiesta, perché il framework fonde lo stato salvato *dopo* quel punto e
+un riavvio avrebbe perso l'aggancio.
+
+Verificato dal vivo: «come funziona la concorrenza?» → il sottoagente chiede il
+linguaggio → il master gira la domanda → «Rust» →
+`Task 39f05819 ripreso: 1200 caratteri`, stesso task.
+
+## Due note operative
+
+**Il container era muto.** Uvicorn configura solo i propri logger: senza un
+`basicConfig`, `demo.*` finisce nell'handler di ultima istanza di Python, che
+stampa solo dai WARNING in su. Il tab LOG del frontend li vedeva (ci arriva per
+un'altra strada, `LogCollector`), `docker compose logs` no — cioè proprio dove
+si guarda quando qualcosa non va.
+
+**Le notifiche push erano 196 per due domande.** Il default dell'SDK notifica
+ogni evento della coda; il filtro sta ora dalla parte di chi le manda
+(`NotificheEssenziali` nel knowledge agent), non solo di chi le scarta. Stesso
+ciclo, 2 POST.
