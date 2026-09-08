@@ -27,6 +27,7 @@ class Settings:
 
     memory_service_url: str
     knowledge_agent_url: str
+    knowledge_service_token: str
     public_url: str
     subagent_wait_seconds: float
 
@@ -46,6 +47,7 @@ def get_settings() -> Settings:
         allowed_origins=_read_origins(),
         memory_service_url=os.getenv("DEMO_MEMORY_SERVICE_URL", "").strip(),
         knowledge_agent_url=os.getenv("DEMO_KNOWLEDGE_AGENT_URL", "").strip(),
+        knowledge_service_token=os.getenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "").strip(),
         public_url=os.getenv("DEMO_PUBLIC_URL", "").strip(),
         subagent_wait_seconds=float(os.getenv("DEMO_SUBAGENT_WAIT_SECONDS", "60")),
     )

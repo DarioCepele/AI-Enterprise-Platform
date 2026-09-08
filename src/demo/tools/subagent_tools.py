@@ -20,6 +20,13 @@ from ..server.run_context import pending_of_run, subagent_run, thread_of_run
 
 logger = logging.getLogger(__name__)
 
+DESCRIZIONE = """Interroga l'agente di knowledge base su un argomento.
+
+Ogni chiamata e' indipendente: il sottoagente non vede la conversazione,
+quindi la domanda deve bastare a se stessa. Per confrontare due
+argomenti chiamalo due volte nello stesso turno, cosi' le due
+interrogazioni partono insieme invece che una dopo l'altra."""
+
 
 def build_subagent_tools(
     url: str,
@@ -38,19 +45,35 @@ def build_subagent_tools(
                     "La card di %s non dichiara streaming: le risposte arriveranno intere.", url
                 )
             cached["client"] = make_client(card)
+            await _catalogo_dalla_card_estesa(cached["client"], card)
         return cached["client"]
+
+    async def _catalogo_dalla_card_estesa(remoto: Any, card: AgentCard) -> None:
+        """Chiede la vista estesa e mette il catalogo nella descrizione del tool.
+
+        La card pubblica dice cosa l'agente sa fare; quali documenti abbia
+        indicizzato lo dice solo a chi si autentica. Il modello ne trae la
+        differenza fra chiedere alla cieca e sapere cosa c'e' da chiedere.
+        """
+        token = get_settings().knowledge_service_token
+        if not token or not card.capabilities.extended_agent_card:
+            return
+        estesa = await remoto.card_estesa(token)
+        if estesa is None:
+            return
+        catalogo = next((s.description for s in estesa.skills if s.id == "catalogo"), "")
+        if not catalogo:
+            return
+        logger.info("Card estesa del knowledge agent: %s", catalogo)
+        interroga_knowledge.description = f"""{DESCRIZIONE}
+
+{catalogo}"""
 
     @tool
     async def interroga_knowledge(
         domanda: Annotated[str, "La domanda da girare al knowledge agent, autosufficiente"],
     ) -> Content:
-        """Interroga l'agente di knowledge base su un argomento.
-
-        Ogni chiamata e' indipendente: il sottoagente non vede la conversazione,
-        quindi la domanda deve bastare a se stessa. Per confrontare due
-        argomenti chiamalo due volte nello stesso turno, cosi' le due
-        interrogazioni partono insieme invece che una dopo l'altra.
-        """
+        """Interroga l'agente di knowledge base su un argomento."""
         start = time.monotonic()
         impostazioni = get_settings()
         thread_id = thread_of_run()
@@ -214,4 +237,5 @@ def build_subagent_tools(
             state={"subagent_pending": {}},
         )
 
+    interroga_knowledge.description = DESCRIZIONE
     return [interroga_knowledge, rispondi_al_sottoagente]

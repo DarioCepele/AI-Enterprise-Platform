@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pytest
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface
+from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
 from demo.tools.subagent_tools import build_subagent_tools
 
@@ -262,3 +262,73 @@ async def test_answering_with_nobody_waiting_says_so():
     risultato = await rispondi.func(risposta="Go")
 
     assert "Nessun sottoagente" in risultato.text
+
+
+class RemotoConCardEstesa(FakeRemote):
+    def __init__(self, skills: list[AgentSkill] | None = None) -> None:
+        super().__init__(["ok"])
+        self.token_ricevuto = ""
+        self._skills = skills
+
+    async def card_estesa(self, token: str) -> AgentCard | None:
+        self.token_ricevuto = token
+        if self._skills is None:
+            return None
+        return AgentCard(name="knowledge", skills=self._skills)
+
+
+CATALOGO = AgentSkill(
+    id="catalogo",
+    name="Catalogo dei documenti",
+    description="Elenca i documenti indicizzati: go, python, rust",
+)
+
+
+def strumento_con_card(remote, token: str, estesa: bool = True):
+    async def load():
+        return AgentCard(
+            name="knowledge",
+            capabilities=AgentCapabilities(streaming=True, extended_agent_card=estesa),
+        )
+
+    return build_subagent_tools(
+        "http://kb:8200/", card_loader=load, client_factory=lambda _card: remote
+    )[0]
+
+
+@pytest.mark.asyncio
+async def test_the_catalogue_reaches_the_tool_description(monkeypatch):
+    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "segreto")
+    remote = RemotoConCardEstesa([CATALOGO])
+    strumento = strumento_con_card(remote, "segreto")
+
+    await strumento.func(domanda="qualsiasi")
+
+    # Il modello sa cosa c'e' da chiedere solo perche' il master si e' autenticato.
+    assert remote.token_ricevuto == "segreto"
+    assert "go, python, rust" in strumento.description
+
+
+@pytest.mark.asyncio
+async def test_without_a_token_the_description_stays_generic(monkeypatch):
+    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "")
+    remote = RemotoConCardEstesa([CATALOGO])
+    strumento = strumento_con_card(remote, "")
+
+    await strumento.func(domanda="qualsiasi")
+
+    assert remote.token_ricevuto == ""
+    assert "catalogo" not in strumento.description.lower()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_extended_card_does_not_stop_the_tool(monkeypatch):
+    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "sbagliato")
+    remote = RemotoConCardEstesa(None)
+    strumento = strumento_con_card(remote, "sbagliato")
+
+    risposta = await strumento.func(domanda="qualsiasi")
+
+    # Non poter vedere la vista estesa non e' un motivo per non interrogare l'agente.
+    assert "ok" in risposta.text
+    assert strumento.description.startswith("Interroga")

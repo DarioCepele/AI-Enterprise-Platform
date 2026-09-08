@@ -339,3 +339,28 @@ si guarda quando qualcosa non va.
 ogni evento della coda; il filtro sta ora dalla parte di chi le manda
 (`NotificheEssenziali` nel knowledge agent), non solo di chi le scarta. Stesso
 ciclo, 2 POST.
+
+## Chiedere la card estesa, e farci qualcosa
+
+Il master chiede la vista estesa del knowledge agent con
+`get_extended_agent_card`, passando il token di servizio come parametro della
+chiamata. Se la ottiene, il catalogo dei documenti finisce nella **descrizione
+del tool**:
+
+```
+Interroga l'agente di knowledge base su un argomento.
+…
+Elenca i documenti indicizzati e permette di citarli per nome: go, python, rust
+```
+
+È la differenza fra chiedere alla cieca e sapere cosa c'è da chiedere — e il
+modello ce l'ha solo perché il master si è autenticato.
+
+La descrizione si aggiorna al primo uso del tool, quando la card viene
+caricata: dal turno successivo il modello vede il catalogo. Anticiparlo
+all'avvio significherebbe fare rete nel costruttore dell'agente, e un
+sottoagente non ancora pronto renderebbe il master non avviabile.
+
+Se la card estesa viene negata non succede niente di grave: si prosegue con
+quella pubblica e la descrizione resta generica. Non poter vedere la vista
+estesa non è un motivo per non interrogare l'agente.

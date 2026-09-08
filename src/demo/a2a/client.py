@@ -8,9 +8,10 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-from a2a.client import Client, ClientConfig, ClientFactory
+from a2a.client import Client, ClientCallContext, ClientConfig, ClientFactory
 from a2a.types import (
     AgentCard,
+    GetExtendedAgentCardRequest,
     Message,
     Part,
     Role,
@@ -201,6 +202,23 @@ class A2AClient:
                     stato_grezzo=TaskState.TASK_STATE_COMPLETED,
                     testo=_testo_di(response.message.parts),
                 )
+
+    async def card_estesa(self, token: str) -> AgentCard | None:
+        """La card che l'agente serve solo a chi si autentica.
+
+        Il token viaggia come parametro della chiamata e non come requisito
+        della card: l'agente e' pubblico, e' la vista estesa a non esserlo.
+        Chi non ha diritto riceve un errore, e in quel caso si prosegue con la
+        card pubblica invece di fermarsi.
+        """
+        contesto = ClientCallContext(service_parameters={"Authorization": f"Bearer {token}"})
+        try:
+            return await self._client.get_extended_agent_card(
+                GetExtendedAgentCardRequest(), context=contesto
+            )
+        except Exception:
+            logger.warning("Card estesa non ottenuta: si prosegue con quella pubblica.")
+            return None
 
     async def esito(self, task_id: str) -> Esito:
         """Rilegge un task concluso.
