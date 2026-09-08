@@ -1,10 +1,11 @@
-"""Il tool con cui l'agente cerca nella propria memoria.
+"""The tool the agent uses to search its own memory.
 
-Perche' un tool e non un'iniezione automatica nel contesto: infilare a ogni run
-i ricordi "probabilmente pertinenti" li paga sempre e li azzecca a volte, e piu'
-roba c'e' nel contesto meno il modello ne recupera con precisione. Con un tool
-la memoria si raggiunge **quando serve**, e chi decide se serve e' il modello,
-che la domanda ce l'ha davanti.
+Why a tool and not an automatic injection into the context: pushing the
+"probably relevant" memories into every run pays for them always and gets them
+right sometimes, and the more there is in the context the less precisely the
+model retrieves from it. With a tool, memory is reached **when needed**, and
+the one deciding whether it is needed is the model, which has the question in
+front of it.
 """
 from __future__ import annotations
 
@@ -23,50 +24,50 @@ def build_memory_tools(
     client: httpx.AsyncClient | None = None,
     timeout: float = 10.0,
 ) -> list[FunctionTool]:
-    """Il tool `cerca_nei_ricordi`, legato a un servizio di memoria."""
+    """The `search_memories` tool, bound to a memory service."""
     http = client or httpx.AsyncClient(base_url=base_url, timeout=timeout)
 
     @tool
-    async def cerca_nei_ricordi(
-        domanda: Annotated[
-            str, "Cosa cercare, formulato come lo diresti a voce: si cerca per significato"
+    async def search_memories(
+        query: Annotated[
+            str, "What to look for, phrased as you would say it: the search is by meaning"
         ],
     ) -> Content:
-        """Cerca nelle conversazioni passate con questo utente.
+        """Searches past conversations with this user.
 
-        Chiamalo quando l'utente si riferisce a qualcosa di gia' detto che non
-        vedi nel contesto -- "come avevamo deciso", "quel progetto di cui ti
-        parlavo" -- oppure quando ti serve un dettaglio che dovresti sapere e
-        non trovi. La ricerca e' per significato, non per parole esatte.
+        Call it when the user refers to something already said that you cannot
+        see in the context -- "as we decided", "that project I told you about"
+        -- or when you need a detail you should know and cannot find. The
+        search is by meaning, not by exact words.
         """
         try:
             response = await http.post(
                 "/search",
-                json={"query": domanda, "limit": 5},
+                json={"query": query, "limit": 5},
                 headers={"X-Memory-Scope": scope},
             )
             response.raise_for_status()
-            ricordi = response.json().get("ricordi", [])
+            memories = response.json().get("memories", [])
         except Exception:
-            logger.error("Ricerca nei ricordi fallita per '%s'.", domanda, exc_info=True)
+            logger.error("Memory search failed for '%s'.", query, exc_info=True)
             return Content.from_text(
-                "La memoria non e' raggiungibile in questo momento: rispondi con quello che sai."
+                "Memory is unreachable right now: answer with what you know."
             )
 
-        if not ricordi:
-            logger.info("Nessun ricordo per '%s'.", domanda)
+        if not memories:
+            logger.info("No memory for '%s'.", query)
             return Content.from_text(
-                f"Nessun ricordo trovato su '{domanda}'. Non dare per scontato che sia stato detto."
+                f"No memory found about '{query}'. Do not assume it was ever said."
             )
 
-        logger.info("Ricordi trovati per '%s': %d.", domanda, len(ricordi))
-        righe = "\n".join(
-            f"- (somiglianza {ricordo['somiglianza']:.2f}) {ricordo['testo']}"
-            for ricordo in ricordi
+        logger.info("Memories found for '%s': %d.", query, len(memories))
+        lines = "\n".join(
+            f"- (similarity {memory['similarity']:.2f}) {memory['text']}"
+            for memory in memories
         )
         return Content.from_text(
-            f"Ricordi pertinenti a '{domanda}':\n{righe}\n"
-            "Sono frammenti di conversazioni passate, non certezze: se contano, verificali."
+            f"Memories relevant to '{query}':\n{lines}\n"
+            "These are fragments of past conversations, not certainties: verify them if they matter."
         )
 
-    return [cerca_nei_ricordi]
+    return [search_memories]

@@ -1,4 +1,4 @@
-"""Il piano di lavoro: stato di dominio, non dettaglio dei tool."""
+"""The work plan: domain state, not a tool detail."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -12,16 +12,15 @@ def _now() -> str:
 
 
 class PlanStore:
-    """Tiene il piano corrente.
+    """Holds the current plan.
 
-    Serve perche' `state_update` sostituisce le chiavi di primo livello dello
-    stato invece di fonderle: per cambiare un passo bisogna riemettere il piano
-    intero, quindi bisogna poterlo rileggere. I tool MAF non ricevono lo stato
-    condiviso, quindi lo teniamo qui.
+    It exists because `state_update` replaces top-level state keys instead of
+    merging them: changing one step means re-emitting the whole plan, so the
+    plan has to be readable back. MAF tools do not receive the shared state,
+    so it is kept here.
 
-    Un solo piano per istanza: la demo costruisce un agente solo, quindi due
-    schede del browser condividono lo stesso piano. Limite accettato, scritto
-    nel README.
+    One plan per instance: the demo builds a single agent, so two browser tabs
+    share the same plan. Accepted limitation, written down in the README.
     """
 
     def __init__(self, plan: dict[str, Any] | None = None) -> None:
@@ -40,14 +39,14 @@ class PlanStore:
         }
 
     def snapshot(self) -> dict[str, Any]:
-        """Copia del piano. Copia e non riferimento: chi la riceve la serializza dopo."""
+        """A copy of the plan. A copy and not a reference: the caller serializes it later."""
         return {
             "status": self._plan["status"],
             "steps": [dict(step) for step in self._plan["steps"]],
         }
 
     def write(self, steps: list[dict[str, Any]]) -> dict[str, Any]:
-        """Sostituisce il piano. Ogni passo parte da `pending`."""
+        """Replaces the plan. Every step starts as `pending`."""
         self._plan = {
             "status": "in_progress",
             "steps": [
@@ -69,20 +68,20 @@ class PlanStore:
     def set_status(
         self, step_id: int, status: str, note: str | None
     ) -> dict[str, Any]:
-        """Cambia lo stato di un passo e ricalcola quello del piano."""
+        """Changes a step's status and recomputes the plan's own."""
         if status not in STEP_STATUSES:
             raise ValueError(
-                f"stato '{status}' sconosciuto: attesi {', '.join(STEP_STATUSES)}"
+                f"unknown status '{status}': expected {', '.join(STEP_STATUSES)}"
             )
 
         step = next((s for s in self._plan["steps"] if s["id"] == step_id), None)
         if step is None:
-            known = ", ".join(str(s["id"]) for s in self._plan["steps"]) or "nessuno"
-            raise ValueError(f"passo {step_id} non esiste: passi noti {known}")
+            known = ", ".join(str(s["id"]) for s in self._plan["steps"]) or "none"
+            raise ValueError(f"step {step_id} does not exist: known steps {known}")
 
         if status == "failed" and (not note or not note.strip()):
             raise ValueError(
-                f"stato 'failed' richiede un motivo (note): passare un messaggio non vuoto"
+                "status 'failed' requires a reason (note): pass a non-empty message"
             )
 
         step["status"] = status

@@ -1,4 +1,4 @@
-"""Client A2A scritto contro l'SDK stabile."""
+"""A2A client written against the stable SDK."""
 from __future__ import annotations
 
 import logging
@@ -27,19 +27,19 @@ logger = logging.getLogger(__name__)
 
 CARD_PATH = ".well-known/agent-card.json"
 
-STATI = {
-    TaskState.TASK_STATE_SUBMITTED: "accettato",
-    TaskState.TASK_STATE_WORKING: "al lavoro",
-    TaskState.TASK_STATE_COMPLETED: "concluso",
-    TaskState.TASK_STATE_FAILED: "fallito",
-    TaskState.TASK_STATE_CANCELED: "annullato",
-    TaskState.TASK_STATE_INPUT_REQUIRED: "attende una risposta",
-    TaskState.TASK_STATE_REJECTED: "rifiutato",
-    TaskState.TASK_STATE_AUTH_REQUIRED: "richiede autenticazione",
+STATES = {
+    TaskState.TASK_STATE_SUBMITTED: "accepted",
+    TaskState.TASK_STATE_WORKING: "working",
+    TaskState.TASK_STATE_COMPLETED: "completed",
+    TaskState.TASK_STATE_FAILED: "failed",
+    TaskState.TASK_STATE_CANCELED: "canceled",
+    TaskState.TASK_STATE_INPUT_REQUIRED: "waiting for an answer",
+    TaskState.TASK_STATE_REJECTED: "rejected",
+    TaskState.TASK_STATE_AUTH_REQUIRED: "needs authentication",
 }
 
-APERTI = {TaskState.TASK_STATE_SUBMITTED, TaskState.TASK_STATE_WORKING}
-CHIUSI = {
+OPEN = {TaskState.TASK_STATE_SUBMITTED, TaskState.TASK_STATE_WORKING}
+CLOSED = {
     TaskState.TASK_STATE_COMPLETED,
     TaskState.TASK_STATE_FAILED,
     TaskState.TASK_STATE_CANCELED,
@@ -48,49 +48,49 @@ CHIUSI = {
 
 
 @dataclass
-class Artefatto:
-    """Un output strutturato del sottoagente."""
+class Artifact:
+    """A structured output of the subagent."""
 
     artifact_id: str
     name: str
     description: str
-    testo: str
-    dati: dict[str, Any] | None = None
+    text: str
+    data: dict[str, Any] | None = None
 
 
 @dataclass
-class Avanzamento:
-    """Un passo del task, come lo vede chi lo ha chiesto."""
+class Progress:
+    """One step of the task, as seen by whoever asked for it."""
 
     task_id: str
-    stato: str
-    stato_grezzo: int
-    testo: str = ""
-    artefatto: Artefatto | None = None
-    domanda: str = ""
+    state: str
+    raw_state: int
+    text: str = ""
+    artifact: Artifact | None = None
+    question: str = ""
 
     @property
-    def chiuso(self) -> bool:
-        return self.stato_grezzo in CHIUSI
+    def closed(self) -> bool:
+        return self.raw_state in CLOSED
 
     @property
-    def attende_risposta(self) -> bool:
-        return self.stato_grezzo == TaskState.TASK_STATE_INPUT_REQUIRED
+    def waiting_for_an_answer(self) -> bool:
+        return self.raw_state == TaskState.TASK_STATE_INPUT_REQUIRED
 
 
 @dataclass
-class Esito:
-    """Come e' finito un task."""
+class Outcome:
+    """How a task ended."""
 
     task_id: str
-    stato: str
-    testo: str
-    artefatti: list[Artefatto] = field(default_factory=list)
-    domanda: str = ""
+    state: str
+    text: str
+    artifacts: list[Artifact] = field(default_factory=list)
+    question: str = ""
 
     @property
-    def riuscito(self) -> bool:
-        return self.stato == STATI[TaskState.TASK_STATE_COMPLETED]
+    def succeeded(self) -> bool:
+        return self.state == STATES[TaskState.TASK_STATE_COMPLETED]
 
 
 async def fetch_agent_card(url: str, timeout: float = 10.0) -> AgentCard:
@@ -100,29 +100,29 @@ async def fetch_agent_card(url: str, timeout: float = 10.0) -> AgentCard:
         return ParseDict(response.json(), AgentCard(), ignore_unknown_fields=True)
 
 
-def _testo_di(parts) -> str:
+def _text_of(parts) -> str:
     return "".join(part.text for part in parts if part.text)
 
 
-def _artefatto_di(artifact) -> Artefatto:
-    dati = None
+def _artifact_of(artifact) -> Artifact:
+    data = None
     for part in artifact.parts:
         if part.HasField("data"):
             from google.protobuf.json_format import MessageToDict
 
-            dati = MessageToDict(part.data)
+            data = MessageToDict(part.data)
             break
-    return Artefatto(
+    return Artifact(
         artifact_id=artifact.artifact_id,
         name=artifact.name,
         description=artifact.description,
-        testo=_testo_di(artifact.parts),
-        dati=dati,
+        text=_text_of(artifact.parts),
+        data=data,
     )
 
 
 class A2AClient:
-    """Parla con un agente remoto vedendo il ciclo di vita del task."""
+    """Talks to a remote agent while seeing the task's lifecycle."""
 
     def __init__(self, card: AgentCard, http_client: httpx.AsyncClient | None = None) -> None:
         self._http = http_client or httpx.AsyncClient(timeout=120.0)
@@ -130,111 +130,111 @@ class A2AClient:
             ClientConfig(httpx_client=self._http, streaming=True)
         ).create(card)
 
-    async def chiedi(
+    async def ask(
         self,
-        testo: str,
+        text: str,
         task_id: str | None = None,
         context_id: str | None = None,
         webhook: tuple[str, str] | None = None,
-    ) -> AsyncIterator[Avanzamento]:
-        """Manda un messaggio e restituisce gli avanzamenti del task.
+    ) -> AsyncIterator[Progress]:
+        """Sends a message and yields the task's progress.
 
-        Con `task_id` il messaggio riprende un task che aspettava una risposta,
-        invece di aprirne uno nuovo.
+        With `task_id` the message resumes a task that was waiting for an
+        answer, instead of opening a new one.
         """
         message = Message(
             message_id=uuid4().hex,
             role=Role.ROLE_USER,
-            parts=[Part(text=testo)],
+            parts=[Part(text=text)],
         )
         if task_id:
             message.task_id = task_id
         if context_id:
             message.context_id = context_id
 
-        richiesta = SendMessageRequest(message=message)
+        request = SendMessageRequest(message=message)
         if webhook:
             url, token = webhook
-            richiesta.configuration.CopyFrom(
+            request.configuration.CopyFrom(
                 SendMessageConfiguration(
                     task_push_notification_config=TaskPushNotificationConfig(url=url, token=token)
                 )
             )
 
-        corrente = task_id or ""
-        async for response in self._client.send_message(richiesta):
+        current = task_id or ""
+        async for response in self._client.send_message(request):
             if response.HasField("task"):
                 task = response.task
-                corrente = task.id
-                yield Avanzamento(
+                current = task.id
+                yield Progress(
                     task_id=task.id,
-                    stato=STATI.get(task.status.state, "sconosciuto"),
-                    stato_grezzo=task.status.state,
-                    testo=_testo_di(task.status.message.parts) if task.status.message.parts else "",
+                    state=STATES.get(task.status.state, "unknown"),
+                    raw_state=task.status.state,
+                    text=_text_of(task.status.message.parts) if task.status.message.parts else "",
                 )
             elif response.HasField("status_update"):
-                aggiornamento = response.status_update
-                corrente = aggiornamento.task_id or corrente
-                messaggio = aggiornamento.status.message
-                testo = _testo_di(messaggio.parts) if messaggio.parts else ""
-                yield Avanzamento(
-                    task_id=corrente,
-                    stato=STATI.get(aggiornamento.status.state, "sconosciuto"),
-                    stato_grezzo=aggiornamento.status.state,
-                    testo=testo,
-                    domanda=testo
-                    if aggiornamento.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+                update = response.status_update
+                current = update.task_id or current
+                update_message = update.status.message
+                update_text = _text_of(update_message.parts) if update_message.parts else ""
+                yield Progress(
+                    task_id=current,
+                    state=STATES.get(update.status.state, "unknown"),
+                    raw_state=update.status.state,
+                    text=update_text,
+                    question=update_text
+                    if update.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
                     else "",
                 )
             elif response.HasField("artifact_update"):
-                aggiornamento = response.artifact_update
-                corrente = aggiornamento.task_id or corrente
-                yield Avanzamento(
-                    task_id=corrente,
-                    stato=STATI[TaskState.TASK_STATE_WORKING],
-                    stato_grezzo=TaskState.TASK_STATE_WORKING,
-                    artefatto=_artefatto_di(aggiornamento.artifact),
+                update = response.artifact_update
+                current = update.task_id or current
+                yield Progress(
+                    task_id=current,
+                    state=STATES[TaskState.TASK_STATE_WORKING],
+                    raw_state=TaskState.TASK_STATE_WORKING,
+                    artifact=_artifact_of(update.artifact),
                 )
             elif response.HasField("message"):
-                yield Avanzamento(
-                    task_id=corrente,
-                    stato=STATI[TaskState.TASK_STATE_COMPLETED],
-                    stato_grezzo=TaskState.TASK_STATE_COMPLETED,
-                    testo=_testo_di(response.message.parts),
+                yield Progress(
+                    task_id=current,
+                    state=STATES[TaskState.TASK_STATE_COMPLETED],
+                    raw_state=TaskState.TASK_STATE_COMPLETED,
+                    text=_text_of(response.message.parts),
                 )
 
-    async def card_estesa(self, token: str) -> AgentCard | None:
-        """La card che l'agente serve solo a chi si autentica.
+    async def extended_card(self, token: str) -> AgentCard | None:
+        """The card the agent serves only to callers that authenticate.
 
-        Il token viaggia come parametro della chiamata e non come requisito
-        della card: l'agente e' pubblico, e' la vista estesa a non esserlo.
-        Chi non ha diritto riceve un errore, e in quel caso si prosegue con la
-        card pubblica invece di fermarsi.
+        The token travels as a parameter of the call and not as a requirement
+        of the card: the agent is public, it is the extended view that is not.
+        A caller without the right receives an error, and in that case we go on
+        with the public card instead of stopping.
         """
-        contesto = ClientCallContext(service_parameters={"Authorization": f"Bearer {token}"})
+        context = ClientCallContext(service_parameters={"Authorization": f"Bearer {token}"})
         try:
             return await self._client.get_extended_agent_card(
-                GetExtendedAgentCardRequest(), context=contesto
+                GetExtendedAgentCardRequest(), context=context
             )
         except Exception:
-            logger.warning("Card estesa non ottenuta: si prosegue con quella pubblica.")
+            logger.warning("Extended card not obtained: going on with the public one.")
             return None
 
-    async def esito(self, task_id: str) -> Esito:
-        """Rilegge un task concluso.
+    async def outcome(self, task_id: str) -> Outcome:
+        """Re-reads a finished task.
 
-        La notifica push dice che il task e' finito, non cosa ha prodotto: il
-        risultato si va a prendere, invece di ricostruirlo accumulando le
-        notifiche -- che sarebbe stato di processo.
+        The push notification says the task is done, not what it produced: the
+        result is fetched, instead of being rebuilt by accumulating
+        notifications -- which would be process state.
         """
         task = await self._client.get_task(GetTaskRequest(id=task_id))
-        artefatti = [_artefatto_di(a) for a in task.artifacts]
-        testo = "\n".join(a.testo for a in artefatti if a.testo).strip()
-        return Esito(
+        artifacts = [_artifact_of(a) for a in task.artifacts]
+        text = "\n".join(a.text for a in artifacts if a.text).strip()
+        return Outcome(
             task_id=task.id,
-            stato=STATI.get(task.status.state, "sconosciuto"),
-            testo=testo,
-            artefatti=artefatti,
+            state=STATES.get(task.status.state, "unknown"),
+            text=text,
+            artifacts=artifacts,
         )
 
     async def aclose(self) -> None:

@@ -1,19 +1,19 @@
 ---
 name: comparison
-description: Confronta piu' elementi lungo dimensioni comuni e rende il risultato in tabella.
+description: Compares several items along common dimensions and renders the result as a table.
 ---
 
-# Confronto strutturato
+# Structured comparison
 
-Quando l'utente chiede di confrontare due o piu' cose:
+When the user asks to compare two or more things:
 
-1. Individua le **dimensioni** del confronto. Se l'utente le ha nominate, usa
-   quelle e non aggiungerne. Se non le ha nominate, scegline tre o quattro che
-   distinguano davvero gli elementi.
-2. Chiama `ui_table` con una colonna per la dimensione e una colonna per
-   ciascun elemento confrontato.
-3. Dopo la tabella scrivi due o tre righe che dicano **cosa cambia davvero**,
-   non che ripetano le celle.
+1. Identify the **dimensions** of the comparison. If the user named them, use
+   those and add none. If they did not, pick three or four that really tell the
+   items apart.
+2. Call `ui_table` with one column for the dimension and one column for each
+   compared item.
+3. After the table write two or three lines saying **what actually differs**,
+   not repeating the cells.
 
-Non descrivere il confronto a parole prima di aver chiamato `ui_table`:
-l'utente vede la tabella comparire, e ripeterla nel testo la rende rumore.
+Do not describe the comparison in words before calling `ui_table`: the user
+watches the table appear, and repeating it in prose turns it into noise.

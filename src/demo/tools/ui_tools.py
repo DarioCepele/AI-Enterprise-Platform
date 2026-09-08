@@ -1,4 +1,4 @@
-"""Tool che producono artefatti renderizzati dal frontend."""
+"""Tools that produce artifacts rendered by the frontend."""
 from __future__ import annotations
 
 import logging
@@ -16,18 +16,18 @@ DISPLAY_KEY = "__ag_ui_tool_result_display__"
 
 @tool
 def ui_table(
-    title: Annotated[str, "Titolo della tabella"],
-    columns: Annotated[list[str], "Intestazioni di colonna"],
-    rows: Annotated[list[list[str]], "Righe, ognuna lunga quanto columns"],
+    title: Annotated[str, "Table title"],
+    columns: Annotated[list[str], "Column headers"],
+    rows: Annotated[list[list[str]], "Rows, each as long as columns"],
 ) -> Content:
-    """Mostra una tabella all'utente.
+    """Shows a table to the user.
 
-    Usa questo tool quando devi confrontare piu' elementi lungo dimensioni comuni.
+    Use this tool when you have to compare several items along common dimensions.
     """
     artifact_id = f"art_{uuid4().hex[:8]}"
-    logger.info("Tabella '%s' prodotta: %d colonne, %d righe.", title, len(columns), len(rows))
+    logger.info("Table '%s' produced: %d columns, %d rows.", title, len(columns), len(rows))
     return state_update(
-        text=f"Ho mostrato la tabella '{title}' con {len(rows)} righe.",
+        text=f"I showed the table '{title}' with {len(rows)} entries.",
         tool_result={
             "component": "ui-table",
             "id": artifact_id,
@@ -44,5 +44,5 @@ def ui_table(
     )
 
 def get_tools() -> list[FunctionTool]:
-    """I tool nativi disponibili al master agent."""
+    """The native tools available to the master agent."""
     return [ui_table]

@@ -8,25 +8,25 @@ from demo.tools.plan_tools import PlanStore
 
 @pytest.fixture
 def app():
-    """App con un client che emette solo testo."""
+    """App with a client that emits text only."""
     agent = build_master_agent(
-        chat_client=FakeStreamingChatClient(chunks=["ciao ", "mondo"])
+        chat_client=FakeStreamingChatClient(chunks=["hello ", "world"])
     )
     return create_app(agent=agent)
 
 
 @pytest.fixture
 def tool_app():
-    """App con un client che al primo giro chiama ui_table."""
+    """App with a client that calls ui_table on the first round."""
     agent = build_master_agent(
         chat_client=ToolCallingFakeClient(
             tool_name="ui_table",
             tool_args={
-                "title": "Confronto",
-                "columns": ["Tema", "A", "B"],
-                "rows": [["Copertura", "vuoto", "pieno"]],
+                "title": "Comparison",
+                "columns": ["Topic", "A", "B"],
+                "rows": [["Coverage", "empty", "full"]],
             },
-            final_text="Ecco il confronto.",
+            final_text="Here is the comparison.",
         )
     )
     return create_app(agent=agent)
@@ -34,7 +34,7 @@ def tool_app():
 
 @pytest.fixture
 def plan_app():
-    """App con un client che al primo giro scrive un piano."""
+    """App with a client that writes a plan on the first round."""
     agent = build_master_agent(
         chat_client=ToolCallingFakeClient(
             tool_name="todo_write",
@@ -42,13 +42,13 @@ def plan_app():
                 "steps": [
                     {
                         "id": 1,
-                        "title": "Primo passo",
-                        "detail": "dettaglio",
+                        "title": "First step",
+                        "detail": "detail",
                         "source": "ui_table",
                     }
                 ]
             },
-            final_text="Piano pronto.",
+            final_text="Plan ready.",
         ),
         plan_store=PlanStore(),
     )

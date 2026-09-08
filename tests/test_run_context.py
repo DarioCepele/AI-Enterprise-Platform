@@ -1,4 +1,4 @@
-"""Il piano segue il thread, non il processo."""
+"""The plan follows the thread, not the process."""
 from __future__ import annotations
 
 import json
@@ -12,12 +12,12 @@ from demo.plan import PlanStore
 from demo.server.app import create_app
 from demo.server.run_context import LabRunner, current_plan, plan_from_state
 
-PIANO = {
+PLAN = {
     "status": "in_progress",
     "steps": [
         {
             "id": 1,
-            "title": "Primo passo",
+            "title": "First step",
             "detail": "",
             "source": "",
             "status": "pending",
@@ -30,9 +30,9 @@ PIANO = {
 
 
 def test_the_plan_is_hydrated_from_the_shared_state():
-    store = plan_from_state({"state": {"plan": PIANO}})
+    store = plan_from_state({"state": {"plan": PLAN}})
 
-    assert store.snapshot()["steps"][0]["title"] == "Primo passo"
+    assert store.snapshot()["steps"][0]["title"] == "First step"
     assert store.snapshot()["status"] == "in_progress"
 
 
@@ -42,42 +42,42 @@ def test_a_request_without_a_plan_starts_from_an_empty_one():
 
 
 def test_a_malformed_plan_does_not_crash_the_run():
-    store = plan_from_state({"state": {"plan": {"status": 3, "steps": "non una lista"}}})
+    store = plan_from_state({"state": {"plan": {"status": 3, "steps": "not a list"}}})
 
     assert store.snapshot()["steps"] == []
 
 
 def test_the_hydrated_plan_is_a_copy_not_a_live_reference():
-    originale = json.loads(json.dumps(PIANO))
-    store = plan_from_state({"state": {"plan": originale}})
+    original = json.loads(json.dumps(PLAN))
+    store = plan_from_state({"state": {"plan": original}})
 
     store.set_status(1, "completed", None)
 
-    assert originale["steps"][0]["status"] == "pending"
+    assert original["steps"][0]["status"] == "pending"
 
 
 class Runner(LabRunner):
-    def __init__(self, visto: list) -> None:
+    def __init__(self, seen: list) -> None:
         super().__init__(agent=None, state_loader=None)
-        self._visto = visto
+        self._seen = seen
 
     async def _framework_events(self, input_data):
-        self._visto.append(current_plan.get())
+        self._seen.append(current_plan.get())
         return
         yield
 
 
 @pytest.mark.asyncio
 async def test_every_run_sees_its_own_plan():
-    visto: list = []
-    runner = Runner(visto)
+    seen: list = []
+    runner = Runner(seen)
 
-    async for _ in runner.run({"state": {"plan": PIANO}}):
+    async for _ in runner.run({"state": {"plan": PLAN}}):
         pass
     async for _ in runner.run({"state": {}}):
         pass
 
-    assert [len(p.snapshot()["steps"]) for p in visto] == [1, 0]
+    assert [len(p.snapshot()["steps"]) for p in seen] == [1, 0]
 
 
 @pytest.mark.asyncio
@@ -91,7 +91,7 @@ async def test_a_second_run_does_not_inherit_the_first_plan():
         app = create_app(
             agent=build_master_agent(
                 chat_client=ToolCallingFakeClient(
-                    tool_name=tool_name, tool_args=tool_args, final_text="fatto"
+                    tool_name=tool_name, tool_args=tool_args, final_text="done"
                 )
             )
         )
@@ -99,7 +99,7 @@ async def test_a_second_run_does_not_inherit_the_first_plan():
             "threadId": thread_id,
             "runId": f"r-{thread_id}",
             "state": {},
-            "messages": [{"id": f"m-{thread_id}", "role": "user", "content": "lavora"}],
+            "messages": [{"id": f"m-{thread_id}", "role": "user", "content": "work"}],
             "tools": [],
             "context": [],
             "forwardedProps": {},
@@ -116,49 +116,49 @@ async def test_a_second_run_does_not_inherit_the_first_plan():
                 ]
 
     await run_once(
-        "t1", "todo_write", {"steps": [{"id": 1, "title": "Passo", "detail": "", "source": ""}]}
+        "t1", "todo_write", {"steps": [{"id": 1, "title": "Step", "detail": "", "source": ""}]}
     )
-    eventi = await run_once("t2", "todo_set_status", {"step_id": 1, "status": "completed"})
+    events = await run_once("t2", "todo_set_status", {"step_id": 1, "status": "completed"})
 
-    piani = [
+    plans = [
         e["snapshot"]["plan"]
-        for e in eventi
+        for e in events
         if e["type"] == "STATE_SNAPSHOT" and "plan" in e.get("snapshot", {})
     ]
-    completati = [
-        passo
-        for piano in piani
-        for passo in piano["steps"]
-        if passo["status"] == "completed"
+    completed = [
+        step
+        for plan in plans
+        for step in plan["steps"]
+        if step["status"] == "completed"
     ]
-    assert completati == [], "il piano del primo thread e' sopravvissuto nel processo"
+    assert completed == [], "the first thread's plan survived in the process"
 
 
 def test_the_store_still_works_standalone():
     store = PlanStore()
-    store.write([{"id": 1, "title": "Passo", "detail": "", "source": ""}])
+    store.write([{"id": 1, "title": "Step", "detail": "", "source": ""}])
 
     assert store.snapshot()["steps"][0]["status"] == "pending"
 
 
 @pytest.mark.asyncio
 async def test_a_shared_store_does_leak_which_is_why_it_is_not_the_default():
-    condiviso = PlanStore()
+    shared = PlanStore()
 
     async def run_once(thread_id: str, tool_name: str, tool_args: dict) -> list[dict]:
         app = create_app(
             agent=build_master_agent(
                 chat_client=ToolCallingFakeClient(
-                    tool_name=tool_name, tool_args=tool_args, final_text="fatto"
+                    tool_name=tool_name, tool_args=tool_args, final_text="done"
                 ),
-                plan_store=condiviso,
+                plan_store=shared,
             )
         )
         request = {
             "threadId": thread_id,
             "runId": f"r-{thread_id}",
             "state": {},
-            "messages": [{"id": f"m-{thread_id}", "role": "user", "content": "lavora"}],
+            "messages": [{"id": f"m-{thread_id}", "role": "user", "content": "work"}],
             "tools": [],
             "context": [],
             "forwardedProps": {},
@@ -175,15 +175,15 @@ async def test_a_shared_store_does_leak_which_is_why_it_is_not_the_default():
                 ]
 
     await run_once(
-        "t1", "todo_write", {"steps": [{"id": 1, "title": "Passo", "detail": "", "source": ""}]}
+        "t1", "todo_write", {"steps": [{"id": 1, "title": "Step", "detail": "", "source": ""}]}
     )
-    eventi = await run_once("t2", "todo_set_status", {"step_id": 1, "status": "completed"})
+    events = await run_once("t2", "todo_set_status", {"step_id": 1, "status": "completed"})
 
-    completati = [
-        passo
-        for e in eventi
+    completed = [
+        step
+        for e in events
         if e["type"] == "STATE_SNAPSHOT" and "plan" in e.get("snapshot", {})
-        for passo in e["snapshot"]["plan"]["steps"]
-        if passo["status"] == "completed"
+        for step in e["snapshot"]["plan"]["steps"]
+        if step["status"] == "completed"
     ]
-    assert completati, "senza store condiviso questo test non dimostrerebbe nulla"
+    assert completed, "without a shared store this test would prove nothing"

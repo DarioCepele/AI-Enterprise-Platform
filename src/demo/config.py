@@ -1,4 +1,4 @@
-"""Lettura della configurazione da variabili d'ambiente."""
+"""Configuration read from environment variables."""
 from __future__ import annotations
 
 import os
@@ -15,7 +15,7 @@ _DEFAULT_ORIGINS = (
     "http://127.0.0.1:3001",
 )
 
-SINGLE_TENANT_SCOPE = "laboratorio-locale"
+SINGLE_TENANT_SCOPE = "local-laboratory"
 
 @dataclass(frozen=True)
 class Settings:
@@ -38,7 +38,7 @@ def _read_origins() -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 def get_settings() -> Settings:
-    """Costruisce le Settings dall'ambiente. Nessuna cache: i test cambiano l'env."""
+    """Builds the Settings from the environment. No cache: tests change the env."""
     return Settings(
         base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
         api_key=os.getenv("OPENAI_API_KEY", ""),

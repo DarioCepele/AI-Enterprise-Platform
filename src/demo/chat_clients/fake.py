@@ -1,6 +1,7 @@
-"""Chat client finto: emette chunk deterministici, senza rete.
+"""Fake chat client: emits deterministic chunks, without network.
 
-Serve ai test e allo sviluppo offline. Isola il resto del sistema dall'LLM.
+It serves the tests and offline development. It isolates the rest of the system
+from the LLM.
 """
 from __future__ import annotations
 
@@ -19,15 +20,15 @@ from agent_framework import (
 from agent_framework._middleware import ChatMiddlewareLayer
 from agent_framework._tools import FunctionInvocationLayer
 
-DEFAULT_CHUNKS = ["Sto ", "elaborando ", "la ", "risposta."]
+DEFAULT_CHUNKS = ["I am ", "working ", "on the ", "answer."]
 
 
 class FakeStreamingChatClient(ChatMiddlewareLayer, BaseChatClient):
-    """Emette `chunks` uno alla volta, con `delay` secondi di distanza.
+    """Emits `chunks` one at a time, `delay` seconds apart.
 
-    Eredita da ChatMiddlewareLayer come il client OpenAI vero: senza quel
-    livello il middleware montato sull'agente non verrebbe eseguito nei test,
-    e la telemetria risulterebbe verde qui e assente in produzione.
+    It inherits from ChatMiddlewareLayer like the real OpenAI client: without
+    that layer the middleware mounted on the agent would not run in the tests,
+    and telemetry would look green here and be absent in production.
     """
 
     def __init__(self, chunks: list[str] | None = None, delay: float = 0.0) -> None:
@@ -69,11 +70,12 @@ class FakeStreamingChatClient(ChatMiddlewareLayer, BaseChatClient):
 
 
 class ToolCallingFakeClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
-    """Primo giro: chiama `tool_name` con `tool_args`. Giri successivi: testo.
+    """First round: calls `tool_name` with `tool_args`. Later rounds: text.
 
-    Eredita da FunctionInvocationLayer, senza il quale Agent non esegue i tool,
-    e da ChatMiddlewareLayer: stesso ordine di livelli del client OpenAI vero.
-    Serve a testare offline la catena TOOL_CALL_* -> STATE_SNAPSHOT.
+    It inherits from FunctionInvocationLayer, without which Agent does not run
+    tools, and from ChatMiddlewareLayer: the same layer order as the real
+    OpenAI client. It exists to test the TOOL_CALL_* -> STATE_SNAPSHOT chain
+    offline.
     """
 
     def __init__(

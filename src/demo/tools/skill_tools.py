@@ -1,7 +1,7 @@
-"""Skill in formato Agent Skills: una cartella, un SKILL.md, frontmatter YAML.
+"""Skills in the Agent Skills format: one folder, one SKILL.md, YAML frontmatter.
 
-Il formato e' quello aperto adottato dall'ecosistema, non un registry nostro:
-una skill scritta qui si porta altrove senza riscriverla.
+The format is the open one the ecosystem adopted, not a registry of our own:
+a skill written here travels elsewhere without being rewritten.
 """
 from __future__ import annotations
 
@@ -21,11 +21,11 @@ _FRONTMATTER = re.compile(r"\A---\s*\n(?P<meta>.*?)\n---\s*\n(?P<body>.*)\Z", re
 _FIELD = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*):\s*(?P<value>.*)$")
 
 def parse_skill(text: str) -> dict[str, str]:
-    """Divide un SKILL.md in metadati e corpo. Solleva se la forma non torna."""
+    """Splits a SKILL.md into metadata and body. Raises if the shape is wrong."""
     match = _FRONTMATTER.match(text)
     if match is None:
         raise ValueError(
-            "SKILL.md senza frontmatter: serve un blocco --- in cima al file"
+            "SKILL.md without frontmatter: a --- block is required at the top of the file"
         )
 
     meta: dict[str, str] = {}
@@ -34,13 +34,13 @@ def parse_skill(text: str) -> dict[str, str]:
             continue
         field = _FIELD.match(line.strip())
         if field is None:
-            raise ValueError(f"riga di frontmatter non interpretabile: {line!r}")
+            raise ValueError(f"unreadable frontmatter line: {line!r}")
         meta[field.group("key")] = field.group("value").strip()
 
     if "name" not in meta:
-        raise ValueError("frontmatter senza campo name")
+        raise ValueError("frontmatter without a name field")
     if "description" not in meta:
-        raise ValueError(f"skill '{meta['name']}' senza campo description")
+        raise ValueError(f"skill '{meta['name']}' without a description field")
 
     return {
         "name": meta["name"],
@@ -49,7 +49,7 @@ def parse_skill(text: str) -> dict[str, str]:
     }
 
 def list_skills(root: Path = SKILLS_DIR) -> list[dict[str, Any]]:
-    """Le skill disponibili, ordinate per nome. Una skill rotta solleva subito."""
+    """The available skills, sorted by name. A broken skill raises right away."""
     found = []
     for skill_file in sorted(root.glob("*/SKILL.md")):
         parsed = parse_skill(skill_file.read_text(encoding="utf-8"))
@@ -57,32 +57,32 @@ def list_skills(root: Path = SKILLS_DIR) -> list[dict[str, Any]]:
     return found
 
 def build_skill_tools(root: Path = SKILLS_DIR) -> list[FunctionTool]:
-    """Il tool load_skill, legato a una cartella di skill.
+    """The load_skill tool, bound to a folder of skills.
 
-    `root` e' un parametro perche' i test caricano da una tmp_path invece che
-    dalle skill vere del repo.
+    `root` is a parameter because the tests load from a tmp_path instead of
+    the repository's real skills.
     """
     catalogue = list_skills(root)
     listing = "\n".join(f"- {s['name']}: {s['description']}" for s in catalogue)
 
     @tool
     def load_skill(
-        name: Annotated[str, "Il nome della skill, come compare nel catalogo"],
+        name: Annotated[str, "The skill name, as it appears in the catalogue"],
     ) -> Content:
-        """Carica le istruzioni operative di una skill.
+        """Loads the operating instructions of a skill.
 
-        Chiamalo quando la richiesta ricade in un dominio coperto dal catalogo,
-        prima di iniziare a lavorare. Le skill disponibili sono:
+        Call it when the request falls into a domain the catalogue covers,
+        before starting to work. The available skills are:
         """
         wanted = next((s for s in catalogue if s["name"] == name), None)
         if wanted is None:
-            logger.warning("Skill '%s' non trovata.", name)
-            known = ", ".join(s["name"] for s in catalogue) or "nessuna"
+            logger.warning("Skill '%s' not found.", name)
+            known = ", ".join(s["name"] for s in catalogue) or "none"
 
             return Content.from_text(
-                f"La skill '{name}' non esiste. Skill disponibili: {known}."
+                f"The skill '{name}' does not exist. Available skills: {known}."
             )
-        logger.info("Skill '%s' caricata.", name)
+        logger.info("Skill '%s' loaded.", name)
         return Content.from_text(wanted["body"])
 
     load_skill.description = f"{load_skill.description}\n{listing}"

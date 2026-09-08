@@ -1,14 +1,14 @@
-"""Snapshot store che vive nel servizio di memoria, non in questo processo.
+"""A snapshot store that lives in the memory service, not in this process.
 
-Implementa il protocollo `AGUIThreadSnapshotStore` dell'adattatore AG-UI
-parlando HTTP con `demo-memory-service`. L'agente non conosce Mongo ne' Redis:
-conosce un servizio, e quel servizio decide come e dove ricordare.
+It implements the AG-UI adapter's `AGUIThreadSnapshotStore` protocol by
+speaking HTTP with `demo-memory-service`. The agent knows neither Mongo nor
+Redis: it knows a service, and that service decides how and where to remember.
 
-**Politica di guasto, dichiarata perche' non e' ovvia.** Un servizio di memoria
-irraggiungibile non deve far fallire la conversazione: in lettura si degrada a
-"thread sconosciuto" e l'agente riparte senza storia, in scrittura si registra
-l'errore. In entrambi i casi la riga finisce su `demo.*`, quindi nel tab LOG:
-un'amnesia silenziosa e' il difetto peggiore che possa avere questo pezzo.
+**Failure policy, stated because it is not obvious.** An unreachable memory
+service must not fail the conversation: on reads it degrades to "unknown
+thread" and the agent starts without history, on writes the error is logged.
+In both cases the line ends up on `demo.*`, hence in the LOG tab: silent
+amnesia is the worst defect this piece could have.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 SCOPE_HEADER = "X-Memory-Scope"
 
 class MemoryServiceSnapshotStore:
-    """La memoria dei thread, tenuta dal servizio di memoria."""
+    """The threads' memory, held by the memory service."""
 
     def __init__(
         self,
@@ -59,12 +59,12 @@ class MemoryServiceSnapshotStore:
             response.raise_for_status()
         except Exception:
 
-            logger.error("Memoria NON salvata per il thread %s.", thread_id, exc_info=True)
+            logger.error("Memory NOT saved for thread %s.", thread_id, exc_info=True)
             return
         logger.info(
-            "Memoria del thread %s aggiornata: %s turni nuovi.",
+            "Memory of thread %s updated: %s new turns.",
             thread_id,
-            response.json().get("turni_nuovi", "?"),
+            response.json().get("new_turns", "?"),
         )
 
     async def get(self, *, scope: str, thread_id: str) -> AGUIThreadSnapshot | None:
@@ -79,7 +79,7 @@ class MemoryServiceSnapshotStore:
         except Exception:
 
             logger.error(
-                "Memoria del thread %s non leggibile: si riparte senza storia.",
+                "Memory of thread %s unreadable: starting without history.",
                 thread_id,
                 exc_info=True,
             )
@@ -90,15 +90,15 @@ class MemoryServiceSnapshotStore:
         if curation:
 
             logger.info(
-                "Contesto dalla memoria: %d messaggi (%d ragionamenti tolti, "
-                "%d risultati svuotati, %d scartati).",
+                "Context from memory: %d messages (%d reasonings removed, "
+                "%d results emptied, %d dropped).",
                 len(messages),
-                curation.get("ragionamenti_tolti", 0),
-                curation.get("risultati_svuotati", 0),
-                curation.get("messaggi_scartati", 0),
+                curation.get("reasoning_removed", 0),
+                curation.get("results_emptied", 0),
+                curation.get("messages_dropped", 0),
             )
         else:
-            logger.info("Contesto dalla memoria: %d messaggi, senza potatura.", len(messages))
+            logger.info("Context from memory: %d messages, no pruning.", len(messages))
 
         return AGUIThreadSnapshot(
             messages=messages,
@@ -112,17 +112,17 @@ class MemoryServiceSnapshotStore:
             f"/threads/{thread_id}", headers=self._headers(scope)
         )
         response.raise_for_status()
-        return bool(response.json().get("buckets_rimossi", 0))
+        return bool(response.json().get("buckets_removed", 0))
 
     async def clear(self, *, scope: str | None = None) -> None:
-        """Svuota uno scope intero.
+        """Empties a whole scope.
 
-        Senza scope non si fa: cancellare "tutto" attraverso un confine di
-        autorizzazione e' esattamente l'operazione che quel confine esiste per
-        impedire.
+        Without a scope it does not happen: deleting "everything" across an
+        authorization boundary is exactly the operation that boundary exists to
+        prevent.
         """
         if scope is None:
-            raise ValueError("clear() senza scope non e' supportato dal servizio di memoria")
+            raise ValueError("clear() without a scope is not supported by the memory service")
         response = await self._client.delete("/scope", headers=self._headers(scope))
         response.raise_for_status()
 

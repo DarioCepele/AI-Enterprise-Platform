@@ -1,7 +1,7 @@
-"""Memoria del thread: la storia la possiede il server, non il client.
+"""Thread memory: the history is owned by the server, not by the client.
 
-Il client AG-UI manda solo il turno nuovo. Senza memoria lato server ogni run
-riparte da zero, e il modello non sa cosa e' stato detto un momento prima.
+The AG-UI client sends only the new turn. Without server-side memory every run
+starts from scratch, and the model does not know what was said a moment ago.
 """
 import json
 from collections.abc import Awaitable, Mapping, Sequence
@@ -22,7 +22,7 @@ from demo.agents.master import build_master_agent
 from demo.server.app import create_app
 
 class RecordingChatClient(BaseChatClient):
-    """Registra i messaggi ricevuti a ogni chiamata, poi risponde un testo fisso."""
+    """Records the messages received on each call, then answers a fixed text."""
 
     def __init__(self, reply: str = "ok") -> None:
         super().__init__()
@@ -60,7 +60,7 @@ def all_texts(messages: Sequence[Message]) -> str:
     return "\n".join(m.text or "" for m in messages)
 
 async def run_turn(app, *, thread_id: str, message_id: str, text: str) -> list[dict]:
-    """Un turno come lo manda il frontend: solo il messaggio nuovo."""
+    """One turn as the frontend sends it: only the new message."""
     request = {
         "threadId": thread_id,
         "runId": f"run-{message_id}",
@@ -92,35 +92,35 @@ def memory_app(recording: RecordingChatClient):
 
 @pytest.mark.asyncio
 async def test_second_turn_sees_the_first(memory_app, recording):
-    await run_turn(memory_app, thread_id="t1", message_id="m1", text="ricorda il numero 4271")
-    await run_turn(memory_app, thread_id="t1", message_id="m2", text="che numero?")
+    await run_turn(memory_app, thread_id="t1", message_id="m1", text="remember the number 4271")
+    await run_turn(memory_app, thread_id="t1", message_id="m2", text="which number?")
 
     second_turn = recording.seen[-1]
-    assert user_texts(second_turn) == ["ricorda il numero 4271", "che numero?"]
+    assert user_texts(second_turn) == ["remember the number 4271", "which number?"]
 
 @pytest.mark.asyncio
 async def test_the_answer_given_stays_in_the_history(memory_app, recording):
-    await run_turn(memory_app, thread_id="t1", message_id="m1", text="ciao")
-    await run_turn(memory_app, thread_id="t1", message_id="m2", text="ancora")
+    await run_turn(memory_app, thread_id="t1", message_id="m1", text="hello")
+    await run_turn(memory_app, thread_id="t1", message_id="m2", text="again")
 
     assert "ok" in all_texts(recording.seen[-1])
 
 @pytest.mark.asyncio
 async def test_threads_do_not_leak_into_each_other(memory_app, recording):
-    await run_turn(memory_app, thread_id="t1", message_id="m1", text="segreto di t1")
-    await run_turn(memory_app, thread_id="t2", message_id="m2", text="qui e' t2")
+    await run_turn(memory_app, thread_id="t1", message_id="m1", text="secret of t1")
+    await run_turn(memory_app, thread_id="t2", message_id="m2", text="this is t2")
 
-    assert user_texts(recording.seen[-1]) == ["qui e' t2"]
+    assert user_texts(recording.seen[-1]) == ["this is t2"]
 
 @pytest.mark.asyncio
 async def test_the_first_turn_carries_only_the_new_message(memory_app, recording):
-    await run_turn(memory_app, thread_id="fresco", message_id="m1", text="primo")
+    await run_turn(memory_app, thread_id="fresh", message_id="m1", text="first")
 
-    assert user_texts(recording.seen[-1]) == ["primo"]
+    assert user_texts(recording.seen[-1]) == ["first"]
 
 @pytest.mark.asyncio
 async def test_history_survives_a_third_turn(memory_app, recording):
-    for i, text in enumerate(["uno", "due", "tre"], start=1):
-        await run_turn(memory_app, thread_id="lungo", message_id=f"m{i}", text=text)
+    for i, text in enumerate(["one", "two", "three"], start=1):
+        await run_turn(memory_app, thread_id="long", message_id=f"m{i}", text=text)
 
-    assert user_texts(recording.seen[-1]) == ["uno", "due", "tre"]
+    assert user_texts(recording.seen[-1]) == ["one", "two", "three"]

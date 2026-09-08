@@ -1,4 +1,4 @@
-"""Il tool che interroga il knowledge agent via A2A."""
+"""The tool that queries the knowledge agent over A2A."""
 from __future__ import annotations
 
 import asyncio
@@ -20,27 +20,27 @@ def card(streaming: bool = True) -> AgentCard:
     )
 
 
-from demo.a2a.client import Avanzamento
+from demo.a2a.client import Progress
 
 
-def avanzamento(testo: str = "", stato: str = "al lavoro", grezzo: int = 2) -> Avanzamento:
-    return Avanzamento(task_id="t-1", stato=stato, stato_grezzo=grezzo, testo=testo)
+def a_progress(text: str = "", state: str = "working", raw: int = 2) -> Progress:
+    return Progress(task_id="t-1", state=state, raw_state=raw, text=text)
 
 
 class FakeRemote:
-    def __init__(self, pezzi: list[str], ritardo: float = 0.0) -> None:
-        self.pezzi = pezzi
-        self.ritardo = ritardo
-        self.domande: list[str] = []
+    def __init__(self, pieces: list[str], delay: float = 0.0) -> None:
+        self.pieces = pieces
+        self.delay = delay
+        self.questions: list[str] = []
 
-    async def chiedi(self, testo: str, task_id=None, context_id=None, webhook=None):
-        self.domande.append(testo)
-        yield avanzamento(stato="accettato", grezzo=1)
-        for pezzo in self.pezzi:
-            if self.ritardo:
-                await asyncio.sleep(self.ritardo)
-            yield avanzamento(pezzo)
-        yield avanzamento(stato="concluso", grezzo=3)
+    async def ask(self, text: str, task_id=None, context_id=None, webhook=None):
+        self.questions.append(text)
+        yield a_progress(state="accepted", raw=1)
+        for piece in self.pieces:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            yield a_progress(piece)
+        yield a_progress(state="completed", raw=3)
 
 
 def tool_with(remote: FakeRemote, streaming: bool = True, loader=None):
@@ -54,156 +54,156 @@ def tool_with(remote: FakeRemote, streaming: bool = True, loader=None):
 
 @pytest.mark.asyncio
 async def test_the_streamed_pieces_become_one_answer():
-    remote = FakeRemote(["Le gorou", "tine sono ", "leggere."])
-    strumento = tool_with(remote)
+    remote = FakeRemote(["Gorout", "ines are ", "lightweight."])
+    the_tool = tool_with(remote)
 
-    risposta = await strumento.func(domanda="Come funziona la concorrenza in Go?")
+    answer = await the_tool.func(question="How does concurrency work in Go?")
 
-    assert risposta.text == "Le goroutine sono leggere."
-    assert remote.domande == ["Come funziona la concorrenza in Go?"]
+    assert answer.text == "Goroutines are lightweight."
+    assert remote.questions == ["How does concurrency work in Go?"]
 
 
 @pytest.mark.asyncio
 async def test_the_card_is_fetched_once_and_reused():
-    chiamate = []
+    calls = []
 
     async def load():
-        chiamate.append(1)
+        calls.append(1)
         return card()
 
-    strumento = tool_with(FakeRemote(["ok"]), loader=load)
+    the_tool = tool_with(FakeRemote(["ok"]), loader=load)
 
-    await strumento.func(domanda="prima")
-    await strumento.func(domanda="seconda")
+    await the_tool.func(question="first")
+    await the_tool.func(question="second")
 
-    assert len(chiamate) == 1
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_a_card_without_streaming_is_reported(caplog):
-    strumento = tool_with(FakeRemote(["ok"]), streaming=False)
+    the_tool = tool_with(FakeRemote(["ok"]), streaming=False)
 
     with caplog.at_level(logging.WARNING, logger="demo.tools.subagent_tools"):
-        await strumento.func(domanda="qualcosa")
+        await the_tool.func(question="something")
 
-    assert "non dichiara streaming" in caplog.text
+    assert "does not declare streaming" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_two_questions_in_the_same_turn_run_together():
-    remote = FakeRemote(["a", "b", "c"], ritardo=0.15)
-    strumento = tool_with(remote)
+    remote = FakeRemote(["a", "b", "c"], delay=0.15)
+    the_tool = tool_with(remote)
 
     start = asyncio.get_running_loop().time()
     await asyncio.gather(
-        strumento.func(domanda="tipizzazione"),
-        strumento.func(domanda="concorrenza"),
+        the_tool.func(question="typing"),
+        the_tool.func(question="concurrency"),
     )
-    insieme = asyncio.get_running_loop().time() - start
+    together = asyncio.get_running_loop().time() - start
 
     start = asyncio.get_running_loop().time()
-    await strumento.func(domanda="tipizzazione")
-    await strumento.func(domanda="concorrenza")
-    in_fila = asyncio.get_running_loop().time() - start
+    await the_tool.func(question="typing")
+    await the_tool.func(question="concurrency")
+    queued = asyncio.get_running_loop().time() - start
 
-    assert insieme < in_fila * 0.7
+    assert together < queued * 0.7
 
 
 @pytest.mark.asyncio
 async def test_an_unreachable_subagent_does_not_kill_the_run(caplog):
-    class Rotto:
-        async def chiedi(self, testo, task_id=None, context_id=None, webhook=None):
-            raise ConnectionError("knowledge agent giu'")
+    class Broken:
+        async def ask(self, text, task_id=None, context_id=None, webhook=None):
+            raise ConnectionError("knowledge agent down")
             yield
 
     async def load():
         return card()
 
-    strumento = build_subagent_tools(
-        "http://kb:8200/", card_loader=load, client_factory=lambda _card: Rotto()
+    the_tool = build_subagent_tools(
+        "http://kb:8200/", card_loader=load, client_factory=lambda _card: Broken()
     )[0]
 
     with caplog.at_level(logging.ERROR, logger="demo.tools.subagent_tools"):
-        risposta = await strumento.func(domanda="qualsiasi")
+        answer = await the_tool.func(question="anything")
 
-    assert "non ha risposto" in risposta.text
-    assert "non e' verificata" in risposta.text
-    assert "non raggiungibile" in caplog.text
+    assert "did not answer" in answer.text
+    assert "not verified" in answer.text
+    assert "unreachable" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_an_empty_answer_is_declared_not_faked():
-    strumento = tool_with(FakeRemote([]))
+    the_tool = tool_with(FakeRemote([]))
 
-    risposta = await strumento.func(domanda="il nulla")
+    answer = await the_tool.func(question="nothing at all")
 
-    assert "non ha prodotto una risposta" in risposta.text
+    assert "produced no answer" in answer.text
 
 
-class RemoteConArtefatti(FakeRemote):
-    async def chiedi(self, testo, task_id=None, context_id=None, webhook=None):
-        from demo.a2a.client import Artefatto
+class RemoteWithArtifacts(FakeRemote):
+    async def ask(self, text, task_id=None, context_id=None, webhook=None):
+        from demo.a2a.client import Artifact
 
-        self.domande.append(testo)
-        yield avanzamento(stato="accettato", grezzo=1)
-        a = avanzamento()
-        a.artefatto = Artefatto(
-            artifact_id="a1", name="scheda", description="", testo="dal documento"
+        self.questions.append(text)
+        yield a_progress(state="accepted", raw=1)
+        a = a_progress()
+        a.artifact = Artifact(
+            artifact_id="a1", name="briefing", description="", text="from the document"
         )
         yield a
-        yield avanzamento(stato="concluso", grezzo=3)
+        yield a_progress(state="completed", raw=3)
 
 
-class RemoteCheChiede(FakeRemote):
-    async def chiedi(self, testo, task_id=None, context_id=None, webhook=None):
-        self.domande.append(testo)
-        a = avanzamento(stato="attende una risposta", grezzo=6)
-        a.domanda = "Su quale versione di Go?"
+class RemoteThatAsks(FakeRemote):
+    async def ask(self, text, task_id=None, context_id=None, webhook=None):
+        self.questions.append(text)
+        a = a_progress(state="waiting for an answer", raw=6)
+        a.question = "Which version of Go?"
         yield a
 
 
 @pytest.mark.asyncio
 async def test_the_text_that_arrives_as_an_artifact_is_not_lost():
-    strumento = tool_with(RemoteConArtefatti([]))
+    the_tool = tool_with(RemoteWithArtifacts([]))
 
-    risposta = await strumento.func(domanda="qualcosa")
+    answer = await the_tool.func(question="something")
 
-    assert "dal documento" in risposta.text
+    assert "from the document" in answer.text
 
 
 @pytest.mark.asyncio
 async def test_the_task_lifecycle_ends_up_in_the_logs(caplog):
-    strumento = tool_with(FakeRemote(["ok"]))
+    the_tool = tool_with(FakeRemote(["ok"]))
 
     with caplog.at_level(logging.INFO, logger="demo.tools.subagent_tools"):
-        await strumento.func(domanda="qualcosa")
+        await the_tool.func(question="something")
 
-    assert "accettato -> al lavoro -> concluso" in caplog.text
+    assert "accepted -> working -> completed" in caplog.text
     assert "task t-1" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_a_subagent_that_asks_is_reported_not_answered_for():
-    strumento = tool_with(RemoteCheChiede([]))
+    the_tool = tool_with(RemoteThatAsks([]))
 
-    risposta = await strumento.func(domanda="qualcosa")
+    answer = await the_tool.func(question="something")
 
-    assert "si e' fermato e chiede" in risposta.text
-    assert "Su quale versione di Go?" in risposta.text
+    assert "stopped and asks" in answer.text
+    assert "Which version of Go?" in answer.text
 
 
-class RemoteCheRiprende(FakeRemote):
+class RemoteThatResumes(FakeRemote):
     def __init__(self) -> None:
         super().__init__([])
-        self.ripresi: list[str | None] = []
+        self.resumed: list[str | None] = []
 
-    async def chiedi(self, testo, task_id=None, context_id=None, webhook=None):
-        self.ripresi.append(task_id)
-        self.domande.append(testo)
-        yield avanzamento("Con Go: goroutine e channel.", stato="concluso", grezzo=3)
+    async def ask(self, text, task_id=None, context_id=None, webhook=None):
+        self.resumed.append(task_id)
+        self.questions.append(text)
+        yield a_progress("With Go: goroutines and channels.", state="completed", raw=3)
 
 
-def strumenti(remote):
+def tools_with(remote):
     async def load():
         return card()
 
@@ -214,81 +214,81 @@ def strumenti(remote):
 
 @pytest.mark.asyncio
 async def test_an_asking_subagent_is_remembered_in_the_thread_state():
-    strumento = tool_with(RemoteCheChiede([]))
+    the_tool = tool_with(RemoteThatAsks([]))
 
-    risultato = await strumento.func(domanda="come funziona la concorrenza?")
+    result = await the_tool.func(question="how does concurrency work?")
 
-    stato = risultato.additional_properties["__ag_ui_tool_result_state__"]
-    assert stato["subagent_pending"]["task_id"] == "t-1"
-    assert "Su quale versione di Go?" in stato["subagent_pending"]["domanda"]
+    state = result.additional_properties["__ag_ui_tool_result_state__"]
+    assert state["subagent_pending"]["task_id"] == "t-1"
+    assert "Which version of Go?" in state["subagent_pending"]["question"]
 
 
 @pytest.mark.asyncio
 async def test_the_answer_resumes_the_same_task():
     from demo.server.run_context import current_pending
 
-    remote = RemoteCheRiprende()
-    rispondi = strumenti(remote)[1]
-    token = current_pending.set({"task_id": "t-99", "agente": "knowledge", "domanda": "quale?"})
+    remote = RemoteThatResumes()
+    answer_tool = tools_with(remote)[1]
+    token = current_pending.set({"task_id": "t-99", "agent": "knowledge", "question": "which?"})
     try:
-        risultato = await rispondi.func(risposta="Go")
+        result = await answer_tool.func(answer="Go")
     finally:
         current_pending.reset(token)
 
-    # Lo stesso task, non uno nuovo: e' questo che rende la risposta dell'utente
-    # una continuazione e non un'altra conversazione.
-    assert remote.ripresi == ["t-99"]
-    assert "goroutine" in risultato.text
+    # The same task, not a new one: that is what makes the user's answer a
+    # continuation and not another conversation.
+    assert remote.resumed == ["t-99"]
+    assert "goroutines" in result.text
 
 
 @pytest.mark.asyncio
 async def test_resuming_clears_the_pending_state():
     from demo.server.run_context import current_pending
 
-    rispondi = strumenti(RemoteCheRiprende())[1]
+    answer_tool = tools_with(RemoteThatResumes())[1]
     token = current_pending.set({"task_id": "t-99"})
     try:
-        risultato = await rispondi.func(risposta="Go")
+        result = await answer_tool.func(answer="Go")
     finally:
         current_pending.reset(token)
 
-    assert risultato.additional_properties["__ag_ui_tool_result_state__"]["subagent_pending"] == {}
+    assert result.additional_properties["__ag_ui_tool_result_state__"]["subagent_pending"] == {}
 
 
 @pytest.mark.asyncio
 async def test_answering_with_nobody_waiting_says_so():
-    rispondi = strumenti(RemoteCheRiprende())[1]
+    answer_tool = tools_with(RemoteThatResumes())[1]
 
-    risultato = await rispondi.func(risposta="Go")
+    result = await answer_tool.func(answer="Go")
 
-    assert "Nessun sottoagente" in risultato.text
+    assert "No subagent is waiting" in result.text
 
 
-class RemotoConCardEstesa(FakeRemote):
+class RemoteWithExtendedCard(FakeRemote):
     def __init__(self, skills: list[AgentSkill] | None = None) -> None:
         super().__init__(["ok"])
-        self.token_ricevuto = ""
+        self.received_token = ""
         self._skills = skills
 
-    async def card_estesa(self, token: str) -> AgentCard | None:
-        self.token_ricevuto = token
+    async def extended_card(self, token: str) -> AgentCard | None:
+        self.received_token = token
         if self._skills is None:
             return None
         return AgentCard(name="knowledge", skills=self._skills)
 
 
-CATALOGO = AgentSkill(
-    id="catalogo",
-    name="Catalogo dei documenti",
-    description="Elenca i documenti indicizzati: go, python, rust",
+CATALOGUE = AgentSkill(
+    id="catalogue",
+    name="Document catalogue",
+    description="Lists the indexed documents: go, python, rust",
 )
 
 
-def strumento_con_card(remote, token: str, estesa: bool = True):
+def tool_with_card(remote, token: str, extended: bool = True):
     async def load():
         return AgentCard(
             name="knowledge",
-            capabilities=AgentCapabilities(streaming=True, extended_agent_card=estesa),
+            capabilities=AgentCapabilities(streaming=True, extended_agent_card=extended),
         )
 
     return build_subagent_tools(
@@ -298,37 +298,37 @@ def strumento_con_card(remote, token: str, estesa: bool = True):
 
 @pytest.mark.asyncio
 async def test_the_catalogue_reaches_the_tool_description(monkeypatch):
-    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "segreto")
-    remote = RemotoConCardEstesa([CATALOGO])
-    strumento = strumento_con_card(remote, "segreto")
+    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "secret")
+    remote = RemoteWithExtendedCard([CATALOGUE])
+    the_tool = tool_with_card(remote, "secret")
 
-    await strumento.func(domanda="qualsiasi")
+    await the_tool.func(question="anything")
 
-    # Il modello sa cosa c'e' da chiedere solo perche' il master si e' autenticato.
-    assert remote.token_ricevuto == "segreto"
-    assert "go, python, rust" in strumento.description
+    # The model knows what there is to ask for only because the master authenticated.
+    assert remote.received_token == "secret"
+    assert "go, python, rust" in the_tool.description
 
 
 @pytest.mark.asyncio
 async def test_without_a_token_the_description_stays_generic(monkeypatch):
     monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "")
-    remote = RemotoConCardEstesa([CATALOGO])
-    strumento = strumento_con_card(remote, "")
+    remote = RemoteWithExtendedCard([CATALOGUE])
+    the_tool = tool_with_card(remote, "")
 
-    await strumento.func(domanda="qualsiasi")
+    await the_tool.func(question="anything")
 
-    assert remote.token_ricevuto == ""
-    assert "catalogo" not in strumento.description.lower()
+    assert remote.received_token == ""
+    assert "catalogue" not in the_tool.description.lower()
 
 
 @pytest.mark.asyncio
 async def test_a_refused_extended_card_does_not_stop_the_tool(monkeypatch):
-    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "sbagliato")
-    remote = RemotoConCardEstesa(None)
-    strumento = strumento_con_card(remote, "sbagliato")
+    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "wrong")
+    remote = RemoteWithExtendedCard(None)
+    the_tool = tool_with_card(remote, "wrong")
 
-    risposta = await strumento.func(domanda="qualsiasi")
+    answer = await the_tool.func(question="anything")
 
-    # Non poter vedere la vista estesa non e' un motivo per non interrogare l'agente.
-    assert "ok" in risposta.text
-    assert strumento.description.startswith("Interroga")
+    # Not being able to see the extended view is no reason not to query the agent.
+    assert "ok" in answer.text
+    assert the_tool.description.startswith("Queries")

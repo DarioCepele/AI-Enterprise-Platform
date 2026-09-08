@@ -23,7 +23,7 @@ def test_fake_client_defaults_to_false(monkeypatch):
 
 
 def test_allowed_origins_default_covers_next_fallback_port(monkeypatch):
-    """Next slitta su 3001 se la 3000 e' occupata: entrambe devono passare il CORS."""
+    """Next slides to 3001 when 3000 is taken: both must pass CORS."""
     monkeypatch.delenv("DEMO_ALLOWED_ORIGINS", raising=False)
 
     origins = get_settings().allowed_origins

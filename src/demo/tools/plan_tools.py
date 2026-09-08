@@ -1,7 +1,7 @@
-"""Il piano di lavoro come stato condiviso.
+"""The work plan as shared state.
 
-I tool non emettono testo per l'utente: mutano `state.plan`, e il pannello
-"Piano di lavoro" e' una funzione pura di quell'oggetto.
+The tools emit no text for the user: they mutate `state.plan`, and the
+work-plan panel is a pure function of that object.
 """
 from __future__ import annotations
 
@@ -22,61 +22,62 @@ logger = logging.getLogger(__name__)
 
 
 def build_plan_tools(store: PlanStore | None = None) -> list[FunctionTool]:
-    """I tool del piano.
+    """The plan tools.
 
-    Senza `store` i tool usano il piano della run in corso, idratato dallo
-    stato condiviso: il processo non ne conserva copia e due repliche non si
-    contraddicono. Con `store` esplicito lavorano su quello -- lo usano i test.
+    Without `store` the tools use the plan of the current run, hydrated from
+    the shared state: the process keeps no copy and two replicas cannot
+    contradict each other. With an explicit `store` they work on that one --
+    the tests do.
     """
 
-    def piano() -> PlanStore:
+    def plan_store() -> PlanStore:
         if store is not None:
             return store
-        corrente = plan_of_run()
-        if corrente is None:
-            raise RuntimeError("nessun piano: i tool del piano vanno usati dentro una run")
-        return corrente
+        current = plan_of_run()
+        if current is None:
+            raise RuntimeError("no plan: the plan tools must be used inside a run")
+        return current
 
     @tool
     def todo_write(
         steps: Annotated[
             list[dict],
-            "I passi del piano. Ogni passo: id (intero, da 1), title, detail, source.",
+            "The steps of the plan. Each step: id (integer, from 1), title, detail, source.",
         ],
     ) -> Content:
-        """Scrive il piano di lavoro, sostituendo quello precedente.
+        """Writes the work plan, replacing the previous one.
 
-        Usalo una volta sola all'inizio, quando la richiesta dell'utente
-        richiede piu' passi. Non usarlo per richieste da un passo solo.
+        Use it once at the beginning, when the user's request needs more than
+        one step. Do not use it for single-step requests.
         """
-        plan = piano().write(steps)
-        logger.info("Piano scritto: %d passi.", len(plan["steps"]))
+        plan = plan_store().write(steps)
+        logger.info("Plan written: %d steps.", len(plan["steps"]))
         return state_update(
-            text=f"Piano scritto: {len(plan['steps'])} passi.",
+            text=f"Plan written: {len(plan['steps'])} steps.",
             tool_result={"component": "plan", "steps": len(plan["steps"])},
             state={"plan": plan},
         )
 
     @tool
     def todo_set_status(
-        step_id: Annotated[int, "L'id del passo da aggiornare"],
-        status: Annotated[str, "Uno fra: pending, in_progress, completed, failed"],
+        step_id: Annotated[int, "The id of the step to update"],
+        status: Annotated[str, "One of: pending, in_progress, completed, failed"],
         note: Annotated[
-            str | None, "Motivo, obbligatorio quando status e' failed"
+            str | None, "Reason, required when status is failed"
         ] = None,
     ) -> Content:
-        """Aggiorna lo stato di un passo del piano.
+        """Updates the status of one step of the plan.
 
-        Marca un passo `in_progress` prima di lavorarci e `completed` appena
-        finito, cosi' l'utente vede il piano avanzare mentre lavori.
+        Mark a step `in_progress` before working on it and `completed` as soon
+        as it is done, so the user sees the plan advance while you work.
         """
-        plan = piano().set_status(step_id, status, note)
+        plan = plan_store().set_status(step_id, status, note)
         if status == "failed":
-            logger.error("Passo %d: failed. Motivo: %s", step_id, note)
+            logger.error("Step %d: failed. Reason: %s", step_id, note)
         else:
-            logger.info("Passo %d: %s.", step_id, status)
+            logger.info("Step %d: %s.", step_id, status)
         return state_update(
-            text=f"Passo {step_id}: {status}.",
+            text=f"Step {step_id}: {status}.",
             tool_result={"component": "plan", "step_id": step_id, "status": status},
             state={"plan": plan},
         )

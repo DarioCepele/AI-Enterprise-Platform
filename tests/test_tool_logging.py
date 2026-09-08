@@ -4,8 +4,8 @@ from demo.tools.skill_tools import build_skill_tools
 from demo.tools.ui_tools import ui_table
 
 STEPS = [
-    {"id": 1, "title": "Primo", "detail": "d", "source": "ui_table"},
-    {"id": 2, "title": "Secondo", "detail": "d", "source": "ui_table"},
+    {"id": 1, "title": "First", "detail": "d", "source": "ui_table"},
+    {"id": 2, "title": "Second", "detail": "d", "source": "ui_table"},
 ]
 
 
@@ -44,11 +44,11 @@ def test_a_failed_step_is_logged_as_an_error_with_its_reason():
     todo_write.func(steps=STEPS)
 
     with LogCollector() as collector:
-        todo_set_status.func(step_id=1, status="failed", note="il tool non risponde")
+        todo_set_status.func(step_id=1, status="failed", note="the tool does not answer")
 
     entry = collector.since(0)["entries"][0]
     assert entry["level"] == "ERROR"
-    assert "il tool non risponde" in entry["message"]
+    assert "the tool does not answer" in entry["message"]
 
 
 def test_loading_a_skill_is_logged_with_its_name():
@@ -66,33 +66,33 @@ def test_asking_for_an_unknown_skill_is_logged_as_a_warning():
     (load_skill,) = build_skill_tools()
 
     with LogCollector() as collector:
-        load_skill.func(name="inesistente")
+        load_skill.func(name="missing")
 
     entry = collector.since(0)["entries"][0]
     assert entry["level"] == "WARNING"
-    assert "inesistente" in entry["message"]
+    assert "missing" in entry["message"]
 
 
 def test_producing_a_table_is_logged_with_its_shape():
     with LogCollector() as collector:
-        ui_table.func(title="Confronto", columns=["A", "B"], rows=[["1", "2"]])
+        ui_table.func(title="Comparison", columns=["A", "B"], rows=[["1", "2"]])
 
     entry = collector.since(0)["entries"][0]
     assert entry["source"] == "tools.ui_tools"
-    assert "Confronto" in entry["message"]
-    assert "2 colonne" in entry["message"]
-    assert "1 righe" in entry["message"]
+    assert "Comparison" in entry["message"]
+    assert "2 columns" in entry["message"]
+    assert "1 rows" in entry["message"]
 
 
 def test_tool_logs_never_carry_the_whole_payload():
     with LogCollector() as collector:
         ui_table.func(
-            title="Confronto",
+            title="Comparison",
             columns=["A", "B"],
-            rows=[["testo molto lungo " * 20, "altro testo lungo " * 20]],
+            rows=[["very long text " * 20, "other long text " * 20]],
         )
 
     entry = collector.since(0)["entries"][0]
     assert len(entry["message"]) < 200
-    assert "testo molto lungo" not in entry["message"]
-    assert "altro testo lungo" not in entry["message"]
+    assert "very long text" not in entry["message"]
+    assert "other long text" not in entry["message"]

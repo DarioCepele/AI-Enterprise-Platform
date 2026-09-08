@@ -1,4 +1,4 @@
-"""Verifica la sequenza di eventi AG-UI prodotta da una run."""
+"""Checks the sequence of AG-UI events produced by a run."""
 import json
 
 import httpx
@@ -8,7 +8,7 @@ REQUEST = {
     "threadId": "t1",
     "runId": "r1",
     "state": {},
-    "messages": [{"id": "m1", "role": "user", "content": "ciao"}],
+    "messages": [{"id": "m1", "role": "user", "content": "hello"}],
     "tools": [],
     "context": [],
     "forwardedProps": {},
@@ -42,7 +42,7 @@ async def test_text_is_streamed_in_deltas(app):
     events = await collect_events(app)
 
     deltas = [e["delta"] for e in events if e["type"] == "TEXT_MESSAGE_CONTENT"]
-    assert deltas == ["ciao ", "mondo"]
+    assert deltas == ["hello ", "world"]
 
 @pytest.mark.asyncio
 async def test_every_text_message_start_has_an_end(app):
@@ -62,7 +62,7 @@ async def test_run_id_is_echoed_back(app):
 
 @pytest.mark.asyncio
 async def test_tool_call_emits_result_then_state_snapshot(tool_app):
-    """La catena completa di una tool call, senza LLM."""
+    """The full chain of a tool call, without an LLM."""
     events = await collect_events(tool_app)
     types = [e["type"] for e in events]
 
@@ -79,10 +79,10 @@ async def test_tool_call_emits_result_then_state_snapshot(tool_app):
 
 @pytest.mark.asyncio
 async def test_tool_snapshot_preserves_calls_and_nonempty_text(tool_app):
-    """Lo snapshot conserva toolCalls senza testo e la risposta finale non vuota.
+    """The snapshot keeps toolCalls without text and the non-empty final answer.
 
-    La voce assistant con sole toolCalls e' parte del protocollo AG-UI.
-    Il reducer deve evitare di renderizzarla come una bolla di testo vuota.
+    The assistant entry carrying only toolCalls is part of the AG-UI protocol.
+    The reducer must avoid rendering it as an empty text bubble.
     """
     events = await collect_events(tool_app)
 
@@ -90,7 +90,7 @@ async def test_tool_snapshot_preserves_calls_and_nonempty_text(tool_app):
     assistant = [m for m in snapshot["messages"] if m.get("role") == "assistant"]
     assert all(m.get("content") or m.get("toolCalls") for m in assistant)
     text_messages = [m for m in assistant if not m.get("toolCalls")]
-    assert [m["content"] for m in text_messages] == ["Ecco il confronto."]
+    assert [m["content"] for m in text_messages] == ["Here is the comparison."]
 
     calls = [call for m in assistant for call in m.get("toolCalls", [])]
     result = next(e for e in events if e["type"] == "TOOL_CALL_RESULT")
@@ -122,17 +122,17 @@ async def test_plan_tool_reaches_the_shared_state(plan_app):
     events = await collect_events(plan_app)
 
     snapshots = [e for e in events if e["type"] == "STATE_SNAPSHOT"]
-    assert snapshots, "nessuno STATE_SNAPSHOT: il tool del piano non ha girato"
+    assert snapshots, "no STATE_SNAPSHOT: the plan tool did not run"
 
     plan = snapshots[-1]["snapshot"]["plan"]
     assert plan["status"] == "in_progress"
-    assert plan["steps"][0]["title"] == "Primo passo"
+    assert plan["steps"][0]["title"] == "First step"
 
     assert "artifacts" in snapshots[-1]["snapshot"]
 
 @pytest.mark.asyncio
 async def test_cors_preflight_allows_next_fallback_port(app):
-    """Se la 3000 e' occupata Next slitta sulla 3001: il CORS deve seguirlo."""
+    """When 3000 is taken Next slides to 3001: CORS has to follow."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.options(

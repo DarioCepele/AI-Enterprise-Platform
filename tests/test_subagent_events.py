@@ -1,4 +1,4 @@
-"""Gli eventi dei sottoagenti, intrecciati allo stream della run."""
+"""The subagent events, interleaved with the run's stream."""
 from __future__ import annotations
 
 import asyncio
@@ -10,18 +10,18 @@ from demo.server.run_context import LabRunner, subagent_run
 
 
 class Relay(LabRunner):
-    """La classe vera, con al posto del framework una sequenza controllata."""
+    """The real class, with a controlled sequence in place of the framework."""
 
-    def __init__(self, passi) -> None:
+    def __init__(self, steps) -> None:
         super().__init__(agent=None, state_loader=None)
-        self._passi = passi
+        self._steps = steps
 
     async def _framework_events(self, input_data):
-        for passo in self._passi:
-            if callable(passo):
-                await passo()
+        for step in self._steps:
+            if callable(step):
+                await step()
             else:
-                yield passo
+                yield step
 
 
 def run_started() -> BaseEvent:
@@ -32,26 +32,26 @@ def run_finished() -> BaseEvent:
     return RunFinishedEvent(thread_id="t", run_id="r")
 
 
-async def raccogli(relay, input_data=None) -> list[BaseEvent]:
+async def collect(relay, input_data=None) -> list[BaseEvent]:
     return [event async for event in relay.run(input_data or {})]
 
 
 @pytest.mark.asyncio
 async def test_without_subagents_the_stream_is_untouched():
-    eventi = await raccogli(Relay([run_started(), run_finished()]))
+    events = await collect(Relay([run_started(), run_finished()]))
 
-    assert [e.type for e in eventi] == [EventType.RUN_STARTED, EventType.RUN_FINISHED]
+    assert [e.type for e in events] == [EventType.RUN_STARTED, EventType.RUN_FINISHED]
 
 
 @pytest.mark.asyncio
 async def test_a_subagent_adds_its_start_and_finish():
-    async def lavora():
-        async with subagent_run("knowledge", "domanda"):
+    async def work():
+        async with subagent_run("knowledge", "a question"):
             await asyncio.sleep(0)
 
-    eventi = await raccogli(Relay([run_started(), lavora, run_finished()]))
+    events = await collect(Relay([run_started(), work, run_finished()]))
 
-    assert [e.type for e in eventi] == [
+    assert [e.type for e in events] == [
         EventType.RUN_STARTED,
         EventType.SUBAGENT_STARTED,
         EventType.SUBAGENT_FINISHED,
@@ -61,61 +61,61 @@ async def test_a_subagent_adds_its_start_and_finish():
 
 @pytest.mark.asyncio
 async def test_the_start_carries_the_name_and_the_pair_shares_the_id():
-    async def lavora():
-        async with subagent_run("knowledge", "come tipizza Go?", parent_tool_call_id="c1"):
+    async def work():
+        async with subagent_run("knowledge", "how does Go do typing?", parent_tool_call_id="c1"):
             await asyncio.sleep(0)
 
-    eventi = await raccogli(Relay([lavora]))
+    events = await collect(Relay([work]))
 
-    inizio, fine = eventi
-    assert inizio.name == "knowledge"
-    assert inizio.description == "come tipizza Go?"
-    assert inizio.parent_tool_call_id == "c1"
-    assert inizio.subagent_run_id == fine.subagent_run_id
+    start, end = events
+    assert start.name == "knowledge"
+    assert start.description == "how does Go do typing?"
+    assert start.parent_tool_call_id == "c1"
+    assert start.subagent_run_id == end.subagent_run_id
 
 
 @pytest.mark.asyncio
 async def test_two_subagents_together_produce_two_starts_before_a_finish():
-    async def due():
-        async def uno(ritardo):
-            async with subagent_run("knowledge", f"domanda {ritardo}"):
-                await asyncio.sleep(ritardo)
+    async def two():
+        async def one(delay):
+            async with subagent_run("knowledge", f"question {delay}"):
+                await asyncio.sleep(delay)
 
-        await asyncio.gather(uno(0.05), uno(0.02))
+        await asyncio.gather(one(0.05), one(0.02))
 
-    tipi = [e.type for e in await raccogli(Relay([due]))]
+    types = [e.type for e in await collect(Relay([two]))]
 
-    assert tipi[:2] == [EventType.SUBAGENT_STARTED, EventType.SUBAGENT_STARTED]
-    assert tipi[2:] == [EventType.SUBAGENT_FINISHED, EventType.SUBAGENT_FINISHED]
+    assert types[:2] == [EventType.SUBAGENT_STARTED, EventType.SUBAGENT_STARTED]
+    assert types[2:] == [EventType.SUBAGENT_FINISHED, EventType.SUBAGENT_FINISHED]
 
 
 @pytest.mark.asyncio
 async def test_a_failing_subagent_emits_an_error_and_lets_it_through():
-    async def rompi():
+    async def break_it():
         async with subagent_run("knowledge"):
-            raise ConnectionError("sottoagente giu'")
+            raise ConnectionError("subagent down")
 
-    relay = Relay([rompi])
+    relay = Relay([break_it])
 
     with pytest.raises(ConnectionError):
-        await raccogli(relay)
+        await collect(relay)
 
 
 @pytest.mark.asyncio
 async def test_the_error_event_reaches_the_stream_before_the_failure():
-    eventi: list[BaseEvent] = []
+    events: list[BaseEvent] = []
 
-    async def rompi():
+    async def break_it():
         async with subagent_run("knowledge"):
-            raise ConnectionError("sottoagente giu'")
+            raise ConnectionError("subagent down")
 
-    relay = Relay([rompi])
+    relay = Relay([break_it])
     with pytest.raises(ConnectionError):
         async for event in relay.run({}):
-            eventi.append(event)
+            events.append(event)
 
-    assert [e.type for e in eventi] == [EventType.SUBAGENT_STARTED, EventType.SUBAGENT_ERROR]
-    assert eventi[-1].code == "ConnectionError"
+    assert [e.type for e in events] == [EventType.SUBAGENT_STARTED, EventType.SUBAGENT_ERROR]
+    assert events[-1].code == "ConnectionError"
 
 
 @pytest.mark.asyncio

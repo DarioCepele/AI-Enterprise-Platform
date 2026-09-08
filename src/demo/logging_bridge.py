@@ -1,9 +1,10 @@
-"""Raccolta dei log applicativi per il tab LOG del frontend.
+"""Collection of application logs for the frontend's LOG tab.
 
-Non tocca AG-UI: gli eventi CUSTOM del protocollo sono riservati al framework
-(usage, oauth_consent_request, function_approval_request, PredictState) e non
-esiste una factory di Content che ne produca uno arbitrario. I log viaggiano
-quindi su un endpoint HTTP proprio, che legge questo collettore a cursore.
+It does not touch AG-UI: the protocol's CUSTOM events are reserved to the
+framework (usage, oauth_consent_request, function_approval_request,
+PredictState) and there is no Content factory producing an arbitrary one. The
+logs therefore travel over an HTTP endpoint of their own, which reads this
+cursor-based collector.
 """
 from __future__ import annotations
 
@@ -43,11 +44,11 @@ class _CollectingHandler(logging.Handler):
         )
 
 class LogCollector:
-    """Buffer circolare dei log di `demo.*`, letto a cursore.
+    """A ring buffer of `demo.*` logs, read by cursor.
 
-    Il cursore e' il numero di sequenza dell'ultima riga vista. Rileggere dallo
-    stesso cursore restituisce le stesse righe: un client che ritenta dopo un
-    errore di rete non perde nulla.
+    The cursor is the sequence number of the last line seen. Reading again from
+    the same cursor returns the same lines: a client retrying after a network
+    error loses nothing.
     """
 
     def __init__(self) -> None:
@@ -65,7 +66,7 @@ class LogCollector:
             self._entries.append(entry)
 
     def attach(self) -> None:
-        """Aggancia il collettore al logger `demo`. Chiamarlo due volte non duplica."""
+        """Attaches the collector to the `demo` logger. Calling it twice does not duplicate."""
         if self._handler is not None:
             return
         self._handler = _CollectingHandler(self)
@@ -86,7 +87,7 @@ class LogCollector:
         self._handler = None
 
     def since(self, cursor: int) -> dict[str, Any]:
-        """Le righe con seq > cursor, il nuovo cursore, e quante se ne sono perse."""
+        """The lines with seq > cursor, the new cursor, and how many were lost."""
         with self._lock:
             entries = [dict(e) for e in self._entries if e["seq"] > cursor]
             oldest_kept = self._entries[0]["seq"] if self._entries else self._next_seq

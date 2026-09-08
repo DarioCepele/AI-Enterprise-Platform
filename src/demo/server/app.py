@@ -1,4 +1,4 @@
-"""App FastAPI: espone il master agent via AG-UI su SSE, piu' i log operativi."""
+"""FastAPI app: exposes the master agent over AG-UI on SSE, plus the operational logs."""
 from __future__ import annotations
 
 import logging
@@ -19,7 +19,7 @@ from ..agents.master import build_master_agent
 from ..config import SINGLE_TENANT_SCOPE, get_settings
 from ..logging_bridge import LogCollector
 from ..a2a.client import A2AClient, fetch_agent_card
-from ..a2a.push import HEADER, riassunto, terminale, token_valido
+from ..a2a.push import HEADER, is_terminal, summary_of, token_is_valid
 from ..memory.remote_store import MemoryServiceSnapshotStore
 from .run_context import LabRunner
 
@@ -28,23 +28,23 @@ logger = logging.getLogger(__name__)
 DEFAULT_STATE = {"artifacts": [], "plan": {"status": "idle", "steps": []}}
 
 def _resolve_snapshot_scope(request: object) -> str:
-    """Lo scope entro cui vivono i thread. Vedi SINGLE_TENANT_SCOPE."""
+    """The scope the threads live in. See SINGLE_TENANT_SCOPE."""
     return SINGLE_TENANT_SCOPE
 
 def _default_snapshot_store() -> AGUIThreadSnapshotStore:
-    """Lo store dei thread: il servizio di memoria se configurato, altrimenti RAM.
+    """The thread store: the memory service when configured, otherwise RAM.
 
-    Il ripiego in memoria non e' pigrizia: tiene il laboratorio avviabile con
-    il solo master agent, senza dover alzare Mongo e Redis per fare due domande.
-    Quale dei due sia attivo si legge nei log all'avvio, perche' la differenza
-    -- la conversazione sopravvive al riavvio, oppure no -- e' visibile solo
-    quando e' troppo tardi per accorgersene.
+    The in-memory fallback is not laziness: it keeps the laboratory startable
+    with the master agent alone, without bringing up Mongo and Redis to ask two
+    questions. Which of the two is active is written in the logs at startup,
+    because the difference -- the conversation survives a restart, or it does
+    not -- only becomes visible when it is too late to notice.
     """
     url = get_settings().memory_service_url
     if not url:
-        logger.info("Memoria dei thread in RAM: si perde al riavvio del processo.")
+        logger.info("Thread memory in RAM: it is lost when the process restarts.")
         return InMemoryAGUIThreadSnapshotStore()
-    logger.info("Memoria dei thread nel servizio di memoria: %s", url)
+    logger.info("Thread memory in the memory service: %s", url)
     return MemoryServiceSnapshotStore(url)
 
 def create_app(
@@ -52,11 +52,11 @@ def create_app(
     collector: LogCollector | None = None,
     snapshot_store: AGUIThreadSnapshotStore | None = None,
 ) -> FastAPI:
-    """Costruisce l'app. `agent`, `collector` e lo store vanno passati nei test."""
+    """Builds the app. `agent`, `collector` and the store are passed in tests."""
     if not logging.getLogger().handlers:
-        # Uvicorn configura solo i propri logger: senza questo, `demo.*` finisce
-        # nell'handler di ultima istanza, che stampa solo dai WARNING in su e
-        # lascia il container muto proprio quando serve leggerlo.
+        # Uvicorn configures only its own loggers: without this, `demo.*` ends up
+        # in the handler of last resort, which prints only WARNING and above and
+        # leaves the container mute exactly when it needs to be read.
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     log_collector = collector if collector is not None else LogCollector()
@@ -86,103 +86,103 @@ def create_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    async def esito_del_task(task_id: str) -> str:
-        """Va a prendere il risultato: la notifica dice che e' finito, non cosa dice."""
+    async def outcome_of_task(task_id: str) -> str:
+        """Fetches the result: the notification says it is done, not what it says."""
         url = get_settings().knowledge_agent_url
         if not url or not task_id:
             return ""
         try:
             client = A2AClient(await fetch_agent_card(url))
             try:
-                return (await client.esito(task_id)).testo
+                return (await client.outcome(task_id)).text
             finally:
                 await client.aclose()
         except Exception:
-            logger.error("Esito del task %s non recuperabile.", task_id[:8], exc_info=True)
+            logger.error("Outcome of task %s not recoverable.", task_id[:8], exc_info=True)
             return ""
 
-    async def annota_in_memoria(
-        scope: str, thread_id: str, task_id: str, stato: str, testo: str
+    async def note_in_memory(
+        scope: str, thread_id: str, task_id: str, state: str, text: str
     ) -> None:
-        """Scrive l'esito nella memoria del thread, cosi' il turno dopo lo vede.
+        """Writes the outcome into the thread memory, so the next turn sees it.
 
-        Senza servizio di memoria resta solo la riga di log: la notifica non si
-        perde in silenzio, ma non entra in nessuna conversazione.
+        With no memory service only the log line remains: the notification is
+        not lost silently, but it enters no conversation.
         """
         url = get_settings().memory_service_url
         if not url:
-            logger.warning("Nessun servizio di memoria: l'esito del task %s resta nei log.", task_id[:8])
+            logger.warning("No memory service: the outcome of task %s stays in the logs.", task_id[:8])
             return
-        messaggio = (
-            f"Il sottoagente ha concluso il task {task_id[:8]} ({stato}).\n{testo}"
-            if testo
-            else f"Il sottoagente ha chiuso il task {task_id[:8]} con stato {stato}, senza risposta."
+        message = (
+            f"The subagent completed task {task_id[:8]} ({state}).\n{text}"
+            if text
+            else f"The subagent closed task {task_id[:8]} with state {state}, with no answer."
         )
         try:
             async with httpx.AsyncClient(base_url=url, timeout=5.0) as http:
                 response = await http.post(
                     f"/threads/{thread_id}/messages",
-                    json={"role": "assistant", "content": messaggio, "meta": {"task_id": task_id}},
+                    json={"role": "assistant", "content": message, "meta": {"task_id": task_id}},
                     headers={"X-Memory-Scope": scope},
                 )
                 response.raise_for_status()
         except Exception:
-            logger.error("Esito del task %s NON annotato in memoria.", task_id[:8], exc_info=True)
+            logger.error("Outcome of task %s NOT noted in memory.", task_id[:8], exc_info=True)
 
     @app.post("/a2a/push/{scope}/{thread_id}")
-    async def notifica_sottoagente(
+    async def subagent_notification(
         scope: str,
         thread_id: str,
         request: Request,
         token: str | None = Header(default=None, alias=HEADER),
     ) -> dict[str, str]:
-        """Riceve l'esito di un task che il sottoagente ha finito dopo la run.
+        """Receives the outcome of a task the subagent finished after the run.
 
-        La correlazione al thread sta nell'URL, l'autenticita' nel token
-        firmato. Senza token valido si rifiuta: un webhook aperto e' un modo
-        per far scrivere a chiunque nella memoria di una conversazione.
+        The correlation to the thread lives in the URL, the authenticity in the
+        signed token. Without a valid token it is refused: an open webhook is a
+        way to let anyone write into a conversation's memory.
         """
-        notifica = await request.json()
-        task_id, stato, testo = riassunto(notifica)
-        if not token_valido(thread_id, token):
-            logger.warning("Notifica push rifiutata per il task %s: token non valido.", task_id)
-            raise HTTPException(status_code=403, detail="token non valido")
+        notification = await request.json()
+        task_id, state, text = summary_of(notification)
+        if not token_is_valid(thread_id, token):
+            logger.warning("Push notification refused for task %s: invalid token.", task_id)
+            raise HTTPException(status_code=403, detail="invalid token")
 
-        if not terminale(stato):
-            # Il sottoagente notifica ogni evento, non solo la fine: scrivere in
-            # memoria a ogni avanzamento riempirebbe la conversazione di rumore.
-            return {"stato": "avanzamento ignorato"}
+        if not is_terminal(state):
+            # The subagent notifies every event, not only the end: writing to
+            # memory on every progress step would fill the conversation with noise.
+            return {"state": "progress ignored"}
 
-        if not testo:
-            testo = await esito_del_task(task_id)
+        if not text:
+            text = await outcome_of_task(task_id)
 
         logger.info(
-            "Il sottoagente ha concluso il task %s (%s) sul thread %s: %d caratteri.",
+            "The subagent completed task %s (%s) on thread %s: %d characters.",
             task_id[:8] or "?",
-            stato or "stato ignoto",
+            state or "unknown state",
             thread_id,
-            len(testo),
+            len(text),
         )
-        await annota_in_memoria(scope, thread_id, task_id, stato, testo)
-        return {"stato": "ricevuta"}
+        await note_in_memory(scope, thread_id, task_id, state, text)
+        return {"state": "received"}
 
     @app.get("/logs")
     async def logs(cursor: int = 0) -> dict[str, object]:
-        """I log applicativi dopo `cursor`.
+        """The application logs after `cursor`.
 
-        Canale separato dallo stream AG-UI: gli eventi CUSTOM del protocollo
-        sono riservati al framework e non sono emettibili dal codice applicativo.
+        A channel separate from the AG-UI stream: the protocol's CUSTOM events
+        are reserved to the framework and application code cannot emit them.
         """
         return log_collector.since(cursor)
 
     store = snapshot_store or _default_snapshot_store()
 
-    async def stato_del_thread(thread_id: str) -> dict | None:
+    async def state_of_thread(thread_id: str) -> dict | None:
         snapshot = await store.get(scope=SINGLE_TENANT_SCOPE, thread_id=thread_id)
-        stato = getattr(snapshot, "state", None)
-        return stato if isinstance(stato, dict) else None
+        state = getattr(snapshot, "state", None)
+        return state if isinstance(state, dict) else None
 
-    runner = LabRunner(agent=agent or build_master_agent(), state_loader=stato_del_thread)
+    runner = LabRunner(agent=agent or build_master_agent(), state_loader=state_of_thread)
     add_agent_framework_fastapi_endpoint(
         app,
         runner,

@@ -1,1 +1,1 @@
-"""Memoria dei thread: dove vive la conversazione fra una run e l'altra."""
+"""Thread memory: where the conversation lives between one run and the next."""

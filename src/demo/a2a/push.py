@@ -1,4 +1,4 @@
-"""Notifiche push dei sottoagenti: chi le riceve, e come si fida."""
+"""Subagent push notifications: who receives them, and how they are trusted."""
 from __future__ import annotations
 
 import hashlib
@@ -12,39 +12,39 @@ logger = logging.getLogger(__name__)
 HEADER = "X-A2A-Notification-Token"
 
 
-def _segreto() -> bytes:
-    return os.getenv("DEMO_PUSH_SECRET", "laboratorio-senza-segreto").encode()
+def _secret() -> bytes:
+    return os.getenv("DEMO_PUSH_SECRET", "laboratory-without-a-secret").encode()
 
 
-def token_per(thread_id: str) -> str:
-    """Il token che il sottoagente rimandera' indietro con la notifica.
+def token_for(thread_id: str) -> str:
+    """The token the subagent will send back with the notification.
 
-    Firma il **thread**, non il task: il webhook si registra prima che il task
-    esista, quindi un token sul task id non si potrebbe calcolare in anticipo.
+    It signs the **thread**, not the task: the webhook is registered before the
+    task exists, so a token over the task id could not be computed in advance.
 
-    Firmato e non memorizzato: verificarlo non richiede stato di processo, cosi'
-    due repliche accettano gli stessi token senza ricordare nulla. Il segreto
-    vive nell'ambiente.
+    Signed and not stored: verifying it needs no process state, so two replicas
+    accept the same tokens without remembering anything. The secret lives in the
+    environment.
     """
-    return hmac.new(_segreto(), thread_id.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(_secret(), thread_id.encode(), hashlib.sha256).hexdigest()
 
 
-def token_valido(thread_id: str, ricevuto: str | None) -> bool:
-    if not ricevuto:
+def token_is_valid(thread_id: str, received: str | None) -> bool:
+    if not received:
         return False
-    return hmac.compare_digest(token_per(thread_id), ricevuto)
+    return hmac.compare_digest(token_for(thread_id), received)
 
 
-def url_webhook(base: str, scope: str, thread_id: str) -> str:
-    """La correlazione sta nell'URL: chi riceve sa gia' a quale thread appartiene.
+def webhook_url(base: str, scope: str, thread_id: str) -> str:
+    """The correlation lives in the URL: the receiver already knows the thread.
 
-    L'alternativa -- una tabella da task a thread -- sarebbe stato di processo,
-    o una query in piu' su ogni notifica.
+    The alternative -- a task-to-thread table -- would be process state, or one
+    more query on every notification.
     """
     return f"{base.rstrip('/')}/a2a/push/{scope}/{thread_id}"
 
 
-TERMINALI = {
+TERMINAL = {
     "TASK_STATE_COMPLETED",
     "TASK_STATE_FAILED",
     "TASK_STATE_CANCELED",
@@ -52,44 +52,44 @@ TERMINALI = {
 }
 
 
-def riassunto(notifica: dict[str, Any]) -> tuple[str, str, str]:
-    """Estrae (task_id, stato, testo) da una notifica, senza fidarsi della forma.
+def summary_of(notification: dict[str, Any]) -> tuple[str, str, str]:
+    """Extracts (task_id, state, text) from a notification, without trusting its shape.
 
-    Il sottoagente notifica **un evento alla volta**, non solo la fine, e li
-    manda come StreamResponse in camelCase: a volte un task intero, a volte un
-    aggiornamento di stato, a volte un artefatto. Qui si accetta tutto e si
-    lascia al chiamante decidere cosa ignorare.
+    The subagent notifies **one event at a time**, not only the end, and sends
+    them as StreamResponse in camelCase: sometimes a whole task, sometimes a
+    status update, sometimes an artifact. Everything is accepted here and the
+    caller decides what to ignore.
     """
-    task = notifica.get("task") or {}
-    stato_aggiornato = notifica.get("statusUpdate") or notifica.get("status_update") or {}
-    artefatto_aggiornato = notifica.get("artifactUpdate") or notifica.get("artifact_update") or {}
+    task = notification.get("task") or {}
+    status_update = notification.get("statusUpdate") or notification.get("status_update") or {}
+    artifact_update = notification.get("artifactUpdate") or notification.get("artifact_update") or {}
 
     task_id = str(
         task.get("id")
-        or stato_aggiornato.get("taskId")
-        or stato_aggiornato.get("task_id")
-        or artefatto_aggiornato.get("taskId")
-        or artefatto_aggiornato.get("task_id")
+        or status_update.get("taskId")
+        or status_update.get("task_id")
+        or artifact_update.get("taskId")
+        or artifact_update.get("task_id")
         or ""
     )
-    stato = str(
+    state = str(
         (task.get("status") or {}).get("state")
-        or (stato_aggiornato.get("status") or {}).get("state")
+        or (status_update.get("status") or {}).get("state")
         or ""
     )
 
-    artefatti = list(task.get("artifacts") or [])
-    if artefatto_aggiornato.get("artifact"):
-        artefatti.append(artefatto_aggiornato["artifact"])
-    parti = [
-        parte["text"]
-        for artefatto in artefatti
-        for parte in artefatto.get("parts") or []
-        if isinstance(parte.get("text"), str)
+    artifacts = list(task.get("artifacts") or [])
+    if artifact_update.get("artifact"):
+        artifacts.append(artifact_update["artifact"])
+    parts = [
+        part["text"]
+        for artifact in artifacts
+        for part in artifact.get("parts") or []
+        if isinstance(part.get("text"), str)
     ]
-    return task_id, stato, "".join(parti).strip()
+    return task_id, state, "".join(parts).strip()
 
 
-def terminale(stato: str) -> bool:
-    """Se questa notifica chiude il task o e' solo un avanzamento."""
-    return stato in TERMINALI
+def is_terminal(state: str) -> bool:
+    """Whether this notification closes the task or is only progress."""
+    return state in TERMINAL

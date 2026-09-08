@@ -1,11 +1,11 @@
-"""Misura del contesto: quanto entra nella finestra, a ogni chiamata al modello.
+"""Context measurement: how much enters the window, on every model call.
 
-Il contesto e' una risorsa finita, e le soglie con cui potarlo -- quando
-riassumere, quando svuotare i risultati dei tool -- vanno scelte su numeri
-misurati, non a occhio. Questo middleware produce quei numeri.
+The context is a finite resource, and the thresholds for pruning it -- when to
+summarize, when to empty tool results -- have to be chosen on measured
+numbers, not by eye. This middleware produces those numbers.
 
-Registra solo **conteggi**, mai il contenuto dei messaggi: i log finiscono nel
-tab LOG del frontend, e la conversazione non e' materiale da diagnostica.
+It records **counts** only, never message content: the logs end up in the
+frontend's LOG tab, and a conversation is not diagnostic material.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _RESULT_ATTRS = ("result", "output")
 
 def _content_size(content: Any) -> int:
-    """Caratteri di un content, qualunque forma abbia."""
+    """Characters of a content, whatever shape it has."""
     text = getattr(content, "text", None)
     if isinstance(text, str):
         return len(text)
@@ -37,11 +37,11 @@ def _is_tool_result(content: Any) -> bool:
     return any(getattr(content, attr, None) is not None for attr in _RESULT_ATTRS)
 
 def measure(messages: Sequence[Message]) -> dict[str, int]:
-    """Dimensione del contesto in partenza: messaggi, caratteri, quota dei tool.
+    """Size of the outgoing context: messages, characters, the tools' share.
 
-    I caratteri sono un proxy dei token, disponibile anche quando il provider
-    non riporta l'uso. Il rapporto e' grossolano ma stabile, e basta per
-    vedere una curva che cresce.
+    Characters are a proxy for tokens, available even when the provider does
+    not report usage. The ratio is coarse but stable, and it is enough to see
+    a curve that grows.
     """
     total = 0
     tool_chars = 0
@@ -54,7 +54,7 @@ def measure(messages: Sequence[Message]) -> dict[str, int]:
     return {"messages": len(messages), "chars": total, "tool_chars": tool_chars}
 
 def _usage(response: object) -> dict[str, int]:
-    """Token realmente consumati, quando il provider li dichiara."""
+    """Tokens actually consumed, when the provider declares them."""
     details = getattr(response, "usage_details", None) or {}
     return {
         "input_tokens": int(details.get("input_token_count") or 0),
@@ -63,12 +63,12 @@ def _usage(response: object) -> dict[str, int]:
 
 def _log(size: dict[str, int], usage: dict[str, int]) -> None:
     tokens = (
-        f"{usage['input_tokens']} token in, {usage['output_tokens']} out"
+        f"{usage['input_tokens']} tokens in, {usage['output_tokens']} out"
         if usage["input_tokens"] or usage["output_tokens"]
-        else "token non riportati dal provider"
+        else "tokens not reported by the provider"
     )
     logger.info(
-        "Contesto: %d messaggi, %d caratteri (%d dai tool); %s.",
+        "Context: %d messages, %d characters (%d from tools); %s.",
         size["messages"],
         size["chars"],
         size["tool_chars"],
@@ -80,10 +80,10 @@ async def log_context_size(
     context: ChatContext,
     call_next: Callable[[], Awaitable[None]],
 ) -> None:
-    """Registra la dimensione del contesto a ogni chiamata al modello.
+    """Records the size of the context on every model call.
 
-    Una run con tool fa piu' di una chiamata: ognuna ha la sua riga, ed e'
-    esattamente li' che si vede il contesto gonfiarsi dentro la stessa run.
+    A run with tools makes more than one call: each has its own line, and that
+    is exactly where the context is seen swelling inside a single run.
     """
     size = measure(context.messages)
 

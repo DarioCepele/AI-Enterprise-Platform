@@ -1,4 +1,4 @@
-"""Il tool con cui il master interroga il knowledge agent via A2A."""
+"""The tool the master uses to query the knowledge agent over A2A."""
 from __future__ import annotations
 
 import logging
@@ -13,19 +13,18 @@ from agent_framework.ag_ui import state_update
 
 import asyncio
 
-from ..a2a.client import A2AClient, Avanzamento, fetch_agent_card
-from ..a2a.push import token_per, url_webhook
+from ..a2a.client import A2AClient, Progress, fetch_agent_card
+from ..a2a.push import token_for, webhook_url
 from ..config import SINGLE_TENANT_SCOPE, get_settings
 from ..server.run_context import pending_of_run, subagent_run, thread_of_run
 
 logger = logging.getLogger(__name__)
 
-DESCRIZIONE = """Interroga l'agente di knowledge base su un argomento.
+DESCRIPTION = """Queries the knowledge base agent about a topic.
 
-Ogni chiamata e' indipendente: il sottoagente non vede la conversazione,
-quindi la domanda deve bastare a se stessa. Per confrontare due
-argomenti chiamalo due volte nello stesso turno, cosi' le due
-interrogazioni partono insieme invece che una dopo l'altra."""
+Every call is independent: the subagent does not see the conversation, so the
+question has to stand on its own. To compare two topics, call it twice in the
+same turn, so the two queries start together instead of one after the other."""
 
 
 def build_subagent_tools(
@@ -42,200 +41,203 @@ def build_subagent_tools(
             card = await load_card()
             if not card.capabilities.streaming:
                 logger.warning(
-                    "La card di %s non dichiara streaming: le risposte arriveranno intere.", url
+                    "The card of %s does not declare streaming: answers will arrive whole.", url
                 )
             cached["client"] = make_client(card)
-            await _catalogo_dalla_card_estesa(cached["client"], card)
+            await _catalogue_from_the_extended_card(cached["client"], card)
         return cached["client"]
 
-    async def _catalogo_dalla_card_estesa(remoto: Any, card: AgentCard) -> None:
-        """Chiede la vista estesa e mette il catalogo nella descrizione del tool.
+    async def _catalogue_from_the_extended_card(remote: Any, card: AgentCard) -> None:
+        """Asks for the extended view and puts the catalogue in the tool description.
 
-        La card pubblica dice cosa l'agente sa fare; quali documenti abbia
-        indicizzato lo dice solo a chi si autentica. Il modello ne trae la
-        differenza fra chiedere alla cieca e sapere cosa c'e' da chiedere.
+        The public card says what the agent can do; which documents it has
+        indexed it only tells whoever authenticates. For the model that is the
+        difference between asking blindly and knowing what there is to ask for.
         """
         token = get_settings().knowledge_service_token
         if not token or not card.capabilities.extended_agent_card:
             return
-        estesa = await remoto.card_estesa(token)
-        if estesa is None:
+        extended = await remote.extended_card(token)
+        if extended is None:
             return
-        catalogo = next((s.description for s in estesa.skills if s.id == "catalogo"), "")
-        if not catalogo:
+        catalogue = next((s.description for s in extended.skills if s.id == "catalogue"), "")
+        if not catalogue:
             return
-        logger.info("Card estesa del knowledge agent: %s", catalogo)
-        interroga_knowledge.description = f"""{DESCRIZIONE}
+        logger.info("Extended card of the knowledge agent: %s", catalogue)
+        ask_knowledge.description = f"""{DESCRIPTION}
 
-{catalogo}"""
+{catalogue}"""
 
     @tool
-    async def interroga_knowledge(
-        domanda: Annotated[str, "La domanda da girare al knowledge agent, autosufficiente"],
+    async def ask_knowledge(
+        question: Annotated[str, "The question to pass to the knowledge agent, self-contained"],
     ) -> Content:
-        """Interroga l'agente di knowledge base su un argomento."""
+        """Queries the knowledge base agent about a topic."""
         start = time.monotonic()
-        impostazioni = get_settings()
+        settings = get_settings()
         thread_id = thread_of_run()
         webhook = (
             (
-                url_webhook(impostazioni.public_url, SINGLE_TENANT_SCOPE, thread_id),
-                token_per(thread_id),
+                webhook_url(settings.public_url, SINGLE_TENANT_SCOPE, thread_id),
+                token_for(thread_id),
             )
-            if impostazioni.public_url and thread_id
+            if settings.public_url and thread_id
             else None
         )
-        in_ritardo = False
-        pezzi: list[str] = []
-        stati: list[str] = []
-        artefatti = 0
-        schede: list = []
+        late = False
+        pieces: list[str] = []
+        states: list[str] = []
+        artifact_count = 0
+        briefings: list = []
         task_id = ""
-        domanda_del_sottoagente = ""
+        question_from_the_subagent = ""
 
         try:
-            remoto = await client()
-            async with subagent_run("knowledge", domanda):
-                avanzamento: Avanzamento | None = None
+            remote = await client()
+            async with subagent_run("knowledge", question):
+                progress: Progress | None = None
                 try:
-                    async with asyncio.timeout(impostazioni.subagent_wait_seconds):
-                        async for avanzamento in remoto.chiedi(domanda, webhook=webhook):
-                            task_id = avanzamento.task_id or task_id
-                            if not stati or stati[-1] != avanzamento.stato:
-                                stati.append(avanzamento.stato)
-                            if avanzamento.testo:
-                                pezzi.append(avanzamento.testo)
-                            if avanzamento.artefatto:
-                                artefatti += 1
-                                schede.append(avanzamento.artefatto)
-                                if avanzamento.artefatto.testo:
-                                    pezzi.append(avanzamento.artefatto.testo)
-                            if avanzamento.attende_risposta:
-                                domanda_del_sottoagente = avanzamento.domanda
+                    async with asyncio.timeout(settings.subagent_wait_seconds):
+                        async for progress in remote.ask(question, webhook=webhook):
+                            task_id = progress.task_id or task_id
+                            if not states or states[-1] != progress.state:
+                                states.append(progress.state)
+                            if progress.text:
+                                pieces.append(progress.text)
+                            if progress.artifact:
+                                artifact_count += 1
+                                briefings.append(progress.artifact)
+                                if progress.artifact.text:
+                                    pieces.append(progress.artifact.text)
+                            if progress.waiting_for_an_answer:
+                                question_from_the_subagent = progress.question
                 except TimeoutError:
-                    in_ritardo = True
+                    late = True
         except Exception:
-            logger.error("Knowledge agent non raggiungibile per '%s'.", domanda, exc_info=True)
+            logger.error("Knowledge agent unreachable for '%s'.", question, exc_info=True)
             return Content.from_text(
-                "Il knowledge agent non ha risposto: procedi con quello che sai, "
-                "dichiarando che questa parte non e' verificata."
+                "The knowledge agent did not answer: go on with what you know, "
+                "stating that this part is not verified."
             )
 
-        risposta = "".join(pezzi).strip()
-        scheda = next(
-            (a.dati for a in schede if a.dati and a.dati.get("component") == "scheda"), None
+        answer = "".join(pieces).strip()
+        briefing = next(
+            (a.data for a in briefings if a.data and a.data.get("component") == "briefing"), None
         )
         logger.info(
-            "Knowledge agent su '%s': task %s, stati %s, %d artefatti in %.2fs, %d caratteri.",
-            domanda,
+            "Knowledge agent on '%s': task %s, states %s, %d artifacts in %.2fs, %d characters.",
+            question,
             task_id[:8] or "?",
-            " -> ".join(stati) or "nessuno",
-            artefatti,
+            " -> ".join(states) or "none",
+            artifact_count,
             time.monotonic() - start,
-            len(risposta),
+            len(answer),
         )
 
-
-        if in_ritardo:
+        if late:
             logger.info(
-                "Il task %s del sottoagente supera l'attesa: si prosegue, l'esito arrivera' via webhook.",
+                "Task %s of the subagent outlasts the wait: going on, the outcome will arrive by webhook.",
                 task_id[:8] or "?",
             )
-            parziale = f" Finora ha detto: {risposta}" if risposta else ""
+            partial = f" So far it said: {answer}" if answer else ""
             return Content.from_text(
-                "Il knowledge agent sta ancora lavorando e non ho aspettato oltre."
-                + parziale
-                + " L'esito arrivera' come notifica e sara' disponibile al prossimo turno:"
-                " dillo all'utente invece di inventare la risposta."
+                "The knowledge agent is still working and I did not wait any longer."
+                + partial
+                + " The outcome will arrive as a notification and will be available next turn:"
+                " tell the user that instead of inventing the answer."
             )
 
-        if domanda_del_sottoagente:
+        if question_from_the_subagent:
             logger.info(
-                "Il task %s attende un chiarimento: %s",
+                "Task %s is waiting for a clarification: %s",
                 task_id[:8] or "?",
-                domanda_del_sottoagente,
+                question_from_the_subagent,
             )
             return state_update(
                 text=(
-                    f"Il knowledge agent si e' fermato e chiede: {domanda_del_sottoagente}\n"
-                    "Rigira la domanda all'utente invece di rispondere al posto suo. "
-                    "Quando l'utente risponde, usa 'rispondi_al_sottoagente'."
+                    f"The knowledge agent stopped and asks: {question_from_the_subagent}\n"
+                    "Pass the question on to the user instead of answering in their place. "
+                    "When the user answers, use 'answer_subagent'."
                 ),
                 state={
                     "subagent_pending": {
                         "task_id": task_id,
-                        "agente": "knowledge",
-                        "domanda": domanda_del_sottoagente,
-                        "richiesta": domanda,
+                        "agent": "knowledge",
+                        "question": question_from_the_subagent,
+                        "request": question,
                     }
                 },
             )
-        if not risposta:
+        if not answer:
             return Content.from_text(
-                f"Il knowledge agent non ha prodotto una risposta su '{domanda}'."
+                f"The knowledge agent produced no answer about '{question}'."
             )
-        if scheda is None:
-            return Content.from_text(risposta)
+        if briefing is None:
+            return Content.from_text(answer)
 
-        artefatto_id = f"kb_{task_id[:8] or uuid4().hex[:8]}"
+        artifact_id = f"kb_{task_id[:8] or uuid4().hex[:8]}"
         return state_update(
-            text=risposta,
+            text=answer,
             tool_result={
-                "component": "scheda",
-                "id": artefatto_id,
-                "agente": "knowledge",
-                "domanda": str(scheda.get("domanda", domanda)),
-                "documenti": [str(d) for d in scheda.get("documenti", [])],
-                "estratto": str(scheda.get("estratto", risposta)),
+                "component": "briefing",
+                "id": artifact_id,
+                "agent": "knowledge",
+                "question": str(briefing.get("question", question)),
+                "documents": [str(d) for d in briefing.get("documents", [])],
+                "summary": str(briefing.get("summary", answer)),
             },
             state={
                 "artifacts": [
-                    {"id": artefatto_id, "component": "scheda", "title": f"knowledge: {domanda[:60]}"}
+                    {
+                        "id": artifact_id,
+                        "component": "briefing",
+                        "title": f"knowledge: {question[:60]}",
+                    }
                 ]
             },
         )
 
     @tool
-    async def rispondi_al_sottoagente(
-        risposta: Annotated[str, "La risposta dell'utente al chiarimento chiesto dal sottoagente"],
+    async def answer_subagent(
+        answer: Annotated[str, "The user's answer to the clarification the subagent asked for"],
     ) -> Content:
-        """Riprende il sottoagente che aveva chiesto un chiarimento.
+        """Resumes the subagent that asked for a clarification.
 
-        Usalo quando l'utente risponde a una domanda che ti aveva girato il
-        knowledge agent: la conversazione col sottoagente riprende dallo stesso
-        task, non da capo.
+        Use it when the user answers a question the knowledge agent passed up to
+        you: the conversation with the subagent resumes from the same task, not
+        from scratch.
         """
-        in_attesa = pending_of_run()
-        if not in_attesa or not in_attesa.get("task_id"):
+        waiting = pending_of_run()
+        if not waiting or not waiting.get("task_id"):
             return Content.from_text(
-                "Nessun sottoagente sta aspettando una risposta: se serve, interrogalo da capo."
+                "No subagent is waiting for an answer: query it from scratch if needed."
             )
 
-        task_id = str(in_attesa["task_id"])
-        pezzi: list[str] = []
-        schede: list = []
+        task_id = str(waiting["task_id"])
+        pieces: list[str] = []
+        briefings: list = []
         try:
-            remoto = await client()
-            async with subagent_run("knowledge", risposta):
-                async for avanzamento in remoto.chiedi(risposta, task_id=task_id):
-                    if avanzamento.testo:
-                        pezzi.append(avanzamento.testo)
-                    if avanzamento.artefatto:
-                        schede.append(avanzamento.artefatto)
-                        if avanzamento.artefatto.testo:
-                            pezzi.append(avanzamento.artefatto.testo)
+            remote = await client()
+            async with subagent_run("knowledge", answer):
+                async for progress in remote.ask(answer, task_id=task_id):
+                    if progress.text:
+                        pieces.append(progress.text)
+                    if progress.artifact:
+                        briefings.append(progress.artifact)
+                        if progress.artifact.text:
+                            pieces.append(progress.artifact.text)
         except Exception:
-            logger.error("Ripresa del task %s fallita.", task_id[:8], exc_info=True)
+            logger.error("Resuming task %s failed.", task_id[:8], exc_info=True)
             return Content.from_text(
-                "Non sono riuscito a riprendere il sottoagente: dillo all'utente."
+                "I could not resume the subagent: tell the user."
             )
 
-        testo = "".join(pezzi).strip()
-        logger.info("Task %s ripreso: %d caratteri.", task_id[:8], len(testo))
+        text = "".join(pieces).strip()
+        logger.info("Task %s resumed: %d characters.", task_id[:8], len(text))
         return state_update(
-            text=testo or "Il sottoagente non ha aggiunto nulla dopo il chiarimento.",
+            text=text or "The subagent added nothing after the clarification.",
             state={"subagent_pending": {}},
         )
 
-    interroga_knowledge.description = DESCRIZIONE
-    return [interroga_knowledge, rispondi_al_sottoagente]
+    ask_knowledge.description = DESCRIPTION
+    return [ask_knowledge, answer_subagent]

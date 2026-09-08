@@ -6,14 +6,14 @@ from demo.tools.ui_tools import STATE_KEY
 STEPS = [
     {
         "id": 1,
-        "title": "Carica la skill",
-        "detail": "Skill di confronto.",
+        "title": "Load the skill",
+        "detail": "Comparison skill.",
         "source": "skill:comparison#1",
     },
     {
         "id": 2,
-        "title": "Produci la tabella",
-        "detail": "Confronto tabellare.",
+        "title": "Produce the table",
+        "detail": "Tabular comparison.",
         "source": "ui_table",
     },
 ]
@@ -24,7 +24,7 @@ def test_write_creates_pending_steps_and_starts_the_plan():
 
     assert plan["status"] == "in_progress"
     assert [s["status"] for s in plan["steps"]] == ["pending", "pending"]
-    assert plan["steps"][0]["title"] == "Carica la skill"
+    assert plan["steps"][0]["title"] == "Load the skill"
     assert plan["steps"][0]["started_at"] is None
 
 def test_set_status_touches_only_the_named_step():
@@ -49,10 +49,10 @@ def test_a_failed_step_fails_the_plan():
     store = PlanStore()
     store.write(STEPS)
     store.set_status(1, "completed", None)
-    plan = store.set_status(2, "failed", "il tool non ha risposto")
+    plan = store.set_status(2, "failed", "the tool did not answer")
 
     assert plan["status"] == "failed"
-    assert plan["steps"][1]["note"] == "il tool non ha risposto"
+    assert plan["steps"][1]["note"] == "the tool did not answer"
 
 def test_a_failed_step_requires_a_reason():
     store = PlanStore()
@@ -65,15 +65,15 @@ def test_unknown_step_is_rejected_loudly():
     store = PlanStore()
     store.write(STEPS)
 
-    with pytest.raises(ValueError, match="passo 99"):
+    with pytest.raises(ValueError, match="step 99"):
         store.set_status(99, "completed", None)
 
 def test_unknown_status_is_rejected_loudly():
     store = PlanStore()
     store.write(STEPS)
 
-    with pytest.raises(ValueError, match="quasi"):
-        store.set_status(1, "quasi", None)
+    with pytest.raises(ValueError, match="almost"):
+        store.set_status(1, "almost", None)
 
 def test_snapshot_is_a_copy_not_a_live_reference():
     store = PlanStore()
