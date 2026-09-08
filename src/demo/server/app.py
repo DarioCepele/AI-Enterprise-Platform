@@ -18,6 +18,7 @@ from ..agents.master import build_master_agent
 from ..config import SINGLE_TENANT_SCOPE, get_settings
 from ..logging_bridge import LogCollector
 from ..memory.remote_store import MemoryServiceSnapshotStore
+from .subagent_events import SubagentEventRelay
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +86,10 @@ def create_app(
         """
         return log_collector.since(cursor)
 
+    runner = SubagentEventRelay(agent=agent or build_master_agent())
     add_agent_framework_fastapi_endpoint(
         app,
-        agent or build_master_agent(),
+        runner,
         "/agui",
         allow_origins=allowed_origins,
         default_state=DEFAULT_STATE,

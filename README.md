@@ -207,3 +207,25 @@ in 14,25 s, terminate a 0,9 s di distanza — in serie sarebbero stati ~26 s.
 Sottoagente irraggiungibile: l'errore torna al modello come testo, che risponde
 con quello che sa dichiarando che quella parte non è verificata. La run non
 muore per un sottoagente giù.
+
+## Eventi dei sottoagenti sullo stream
+
+Il protocollo AG-UI ha `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` /
+`SUBAGENT_ERROR`, ma **l'adattatore non li emette**: zero occorrenze di
+`SUBAGENT` in `agent_framework_ag_ui`. La spec del laboratorio dava per scontato
+il contrario.
+
+Si iniettano estendendo `AgentFrameworkAgent`, il cui `run()` è un async
+generator di eventi: `SubagentEventRelay` fa girare quel generator in un task
+che pubblica su una coda, e intanto drena la stessa coda dove i tool scrivono i
+propri eventi. La coda viaggia in una `ContextVar`, e funziona perché MAF crea
+ogni tool call con `contextvars.copy_context()`.
+
+Il tool si limita a `async with subagent_run("knowledge", domanda):` — fuori da
+una run quel gestore non fa nulla, quindi il tool resta usabile e testabile da
+solo.
+
+Su una run vera lo stream porta due `SUBAGENT_STARTED` di fila e poi due
+`SUBAGENT_FINISHED`: è la firma delle invocazioni parallele descritta nella
+spec. Un sottoagente che fallisce produce `SUBAGENT_ERROR` **prima** che
+l'errore risalga, così il difetto si vede nell'inspector e non solo nei log.

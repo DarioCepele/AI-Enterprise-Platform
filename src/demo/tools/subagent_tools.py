@@ -13,6 +13,8 @@ from agent_framework import Content, FunctionTool, tool
 from agent_framework.a2a import A2AAgent
 from google.protobuf.json_format import ParseDict
 
+from ..server.subagent_events import subagent_run
+
 logger = logging.getLogger(__name__)
 
 CARD_PATH = ".well-known/agent-card.json"
@@ -66,12 +68,13 @@ def build_subagent_tools(
         aggiornamenti = 0
         try:
             remote_card = await card()
-            async with open_it(remote_card) as remote:
-                async for update in remote.run(domanda, stream=True):
-                    aggiornamenti += 1
-                    testo = getattr(update, "text", None)
-                    if testo:
-                        pezzi.append(testo)
+            async with subagent_run("knowledge", domanda):
+                async with open_it(remote_card) as remote:
+                    async for update in remote.run(domanda, stream=True):
+                        aggiornamenti += 1
+                        testo = getattr(update, "text", None)
+                        if testo:
+                            pezzi.append(testo)
         except Exception:
             logger.error("Knowledge agent non raggiungibile per '%s'.", domanda, exc_info=True)
             return Content.from_text(
