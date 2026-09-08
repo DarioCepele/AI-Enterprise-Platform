@@ -11,7 +11,12 @@ from a2a.server.routes import (
     create_jsonrpc_routes,
     create_rest_routes,
 )
-from a2a.server.tasks import InMemoryTaskStore
+import httpx
+from a2a.server.tasks import (
+    BasePushNotificationSender,
+    InMemoryPushNotificationConfigStore,
+    InMemoryTaskStore,
+)
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 from agent_framework import Agent
 from .executor import KnowledgeExecutor
@@ -39,7 +44,7 @@ def build_agent_card(base_url: str) -> AgentCard:
         ],
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
-        capabilities=AgentCapabilities(streaming=True),
+        capabilities=AgentCapabilities(streaming=True, push_notifications=True),
         skills=[SKILL],
     )
 
@@ -51,10 +56,13 @@ def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastA
     url = base_url or os.getenv("KNOWLEDGE_BASE_URL", "http://localhost:8200/")
     card = build_agent_card(url)
     executor = KnowledgeExecutor(agent or build_knowledge_agent())
+    push_store = InMemoryPushNotificationConfigStore()
     handler = DefaultRequestHandler(
         agent_executor=executor,
         task_store=InMemoryTaskStore(),
         agent_card=card,
+        push_config_store=push_store,
+        push_sender=BasePushNotificationSender(httpx.AsyncClient(timeout=10.0), push_store),
     )
 
     app = FastAPI(title="Knowledge agent")
