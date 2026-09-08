@@ -55,6 +55,39 @@ normale, dove il posto ormai c'e'. Verificato con dodici append simultanei.
 | `thread_turns` | `(scope, thread_id, last_seq desc)` | leggere la coda |
 | `threads` | `(scope, thread_id)` unico | contatore delle posizioni |
 
+## Snapshot dei thread: chi manda tutto, chi calcola il delta
+
+Il master agent manda lo **stato completo** del thread a ogni run, non il
+delta — è il contratto `AGUIThreadSnapshotStore` dell'adattatore AG-UI. Il
+delta lo calcola questo servizio, che è l'unico posto ad avere sotto gli occhi
+sia ciò che è già scritto sia ciò che arriva: farlo calcolare al chiamante
+significherebbe riscriverlo in ogni chiamante.
+
+| | | |
+| --- | --- | --- |
+| `PUT` | `/threads/{id}/snapshot` | assorbe lo stato completo, risponde `turni_nuovi` |
+| `GET` | `/threads/{id}/snapshot` | ricompone il thread, `404` se sconosciuto |
+| `DELETE` | `/scope` | dimentica tutti i thread di uno scope |
+
+I messaggi non si sovrascrivono mai: la conversazione è append-only, e uno
+snapshot che ripete turni già visti aggiunge zero. È questo che rende sicuro
+rimandare tutto a ogni run.
+
+Il riconoscimento dei turni già scritti usa l'**identificativo** quando c'è —
+regge riordini e snapshot che ripartono da capo — e ripiega sulla **posizione**
+per i messaggi che non ne hanno. Il ripiego è prudente di proposito: in caso di
+dubbio scrive di meno, non di più. Un turno mancante si nota; un turno
+duplicato nel contesto del modello no.
+
+La forma originale di ogni messaggio viene conservata **verbatim** in `payload`
+e restituita così com'è: un thread ricostruito da ruolo e testo perderebbe le
+chiamate ai tool, cioè restituirebbe al modello una conversazione che non è mai
+avvenuta. `role` e `content` restano accanto, per i riassunti che verranno.
+
+Lo stato del thread che non sono messaggi — `state`, `interrupt`,
+`session_state` — sta nel documento del thread, non nei bucket: è un valore
+solo, sempre l'ultimo, e riscriverlo non deve toccare la conversazione.
+
 ## Lo scope, e di chi ci si fida
 
 Ogni chiamata dichiara `X-Memory-Scope`: e' il confine di autorizzazione, e

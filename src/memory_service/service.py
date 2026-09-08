@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import logging
 
-from .models import NewMessage, StoredMessage, Transcript
+from .models import NewMessage, Snapshot, StoredMessage, Transcript
+from .snapshots import new_messages
 from .stores.hot import HotTail
 from .stores.mongo import MongoTranscripts
 
@@ -45,6 +46,56 @@ class ThreadMemory:
 
         messages = await self._durable.tail(scope, thread_id, limit)
         return Transcript(thread_id=thread_id, messages=messages, source="durable")
+
+    async def save_snapshot(self, scope: str, thread_id: str, snapshot: Snapshot) -> int:
+        """Assorbe uno snapshot del thread. Restituisce i turni nuovi scritti.
+
+        I messaggi non si sovrascrivono mai: la conversazione e' append-only, e
+        uno snapshot che ne ripete di gia' visti aggiunge zero. E' quello che
+        rende sicuro rimandare lo stato completo a ogni run.
+        """
+        stored = await self._durable.history(scope, thread_id)
+        fresh = new_messages(stored, snapshot.messages)
+        for message in fresh:
+            await self.append(scope, thread_id, message)
+
+        await self._durable.save_head(
+            scope,
+            thread_id,
+            state=snapshot.state,
+            interrupt=snapshot.interrupt,
+            session_state=snapshot.session_state,
+        )
+        return len(fresh)
+
+    async def read_snapshot(self, scope: str, thread_id: str) -> Snapshot | None:
+        """Ricompone lo snapshot, o None se di quel thread non si sa nulla."""
+        head = await self._durable.read_head(scope, thread_id)
+        messages = await self._durable.history(scope, thread_id)
+        if head is None and not messages:
+            return None
+
+        head = head or {}
+        return Snapshot(
+            # Si restituisce la forma originale quando c'e': un messaggio
+            # ricostruito da ruolo e testo perderebbe le chiamate ai tool.
+            messages=[
+                message.payload
+                if message.payload is not None
+                else {"role": message.role, "content": message.content}
+                for message in messages
+            ],
+            state=head.get("state"),
+            interrupt=head.get("interrupt"),
+            session_state=head.get("session_state"),
+        )
+
+    async def forget_scope(self, scope: str) -> int:
+        """Dimentica tutti i thread di uno scope. Restituisce quanti erano."""
+        threads = await self._durable.threads_of(scope)
+        for thread_id in threads:
+            await self.forget(scope, thread_id)
+        return len(threads)
 
     async def check(self) -> dict[str, str]:
         """Stato delle due memorie, con la differenza che conta.

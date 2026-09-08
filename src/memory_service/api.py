@@ -18,7 +18,7 @@ from pymongo import AsyncMongoClient
 from redis.asyncio import Redis
 
 from .config import Settings, get_settings
-from .models import NewMessage, StoredMessage, Transcript
+from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
 from .stores.hot import HotTail
 from .stores.mongo import MongoTranscripts, build_client
@@ -104,6 +104,29 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     ) -> Transcript:
         return await memory_instance.tail(scope, thread_id, limit)
 
+    @app.put("/threads/{thread_id}/snapshot")
+    async def save_snapshot(
+        thread_id: str,
+        snapshot: Snapshot,
+        scope: str = Depends(current_scope),
+        memory_instance: ThreadMemory = Depends(current_memory),
+    ) -> dict[str, int]:
+        """Assorbe lo stato completo del thread. I turni gia' visti non tornano."""
+        return {"turni_nuovi": await memory_instance.save_snapshot(scope, thread_id, snapshot)}
+
+    @app.get("/threads/{thread_id}/snapshot")
+    async def read_snapshot(
+        thread_id: str,
+        scope: str = Depends(current_scope),
+        memory_instance: ThreadMemory = Depends(current_memory),
+    ) -> Snapshot:
+        snapshot = await memory_instance.read_snapshot(scope, thread_id)
+        if snapshot is None:
+            # 404 e non uno snapshot vuoto: "non so nulla di questo thread" e
+            # "questo thread e' vuoto" portano il chiamante a decisioni diverse.
+            raise HTTPException(status_code=404, detail="thread sconosciuto")
+        return snapshot
+
     @app.delete("/threads/{thread_id}")
     async def forget_thread(
         thread_id: str,
@@ -111,5 +134,18 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
         return {"buckets_rimossi": await memory_instance.forget(scope, thread_id)}
+
+    @app.delete("/scope")
+    async def forget_scope(
+        scope: str = Depends(current_scope),
+        memory_instance: ThreadMemory = Depends(current_memory),
+    ) -> dict[str, int]:
+        """Dimentica tutti i thread di uno scope.
+
+        Non esiste un modo di cancellare piu' scope in una chiamata sola, ed e'
+        voluto: cancellare attraverso un confine di autorizzazione e' proprio
+        l'operazione che quel confine esiste per impedire.
+        """
+        return {"thread_rimossi": await memory_instance.forget_scope(scope)}
 
     return app

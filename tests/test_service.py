@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from memory_service.api import create_app
-from memory_service.models import NewMessage
+from memory_service.models import NewMessage, Snapshot
 from memory_service.service import ThreadMemory
 
 from conftest import needs_backends
@@ -136,3 +136,101 @@ async def test_health_says_degraded_when_redis_is_down(transcripts):
     # Degradato, non guasto: i messaggi si scrivono e si leggono lo stesso.
     assert response.status_code == 200
     assert response.json()["status"] == "degraded"
+
+
+async def test_a_snapshot_becomes_turns(memory, scope):
+    written = await memory.save_snapshot(
+        scope,
+        "t1",
+        Snapshot(
+            messages=[
+                {"id": "m1", "role": "user", "content": "ciao"},
+                {"id": "m2", "role": "assistant", "content": "ok"},
+            ],
+            state={"plan": {"status": "idle"}},
+        ),
+    )
+
+    tail = await memory.tail(scope, "t1", limit=10)
+    assert written == 2
+    assert [m.content for m in tail.messages] == ["ciao", "ok"]
+
+
+async def test_resending_the_same_snapshot_writes_nothing(memory, scope):
+    snapshot = Snapshot(messages=[{"id": "m1", "role": "user", "content": "ciao"}])
+
+    await memory.save_snapshot(scope, "t1", snapshot)
+    again = await memory.save_snapshot(scope, "t1", snapshot)
+
+    # E' cio' che rende sicuro rimandare lo stato completo a ogni run.
+    assert again == 0
+    assert len((await memory.tail(scope, "t1", limit=10)).messages) == 1
+
+
+async def test_a_snapshot_grows_by_the_new_turns_only(memory, scope):
+    await memory.save_snapshot(
+        scope, "t1", Snapshot(messages=[{"id": "m1", "role": "user", "content": "uno"}])
+    )
+    written = await memory.save_snapshot(
+        scope,
+        "t1",
+        Snapshot(
+            messages=[
+                {"id": "m1", "role": "user", "content": "uno"},
+                {"id": "m2", "role": "assistant", "content": "due"},
+            ]
+        ),
+    )
+
+    assert written == 1
+
+
+async def test_the_snapshot_comes_back_whole(memory, scope):
+    original = Snapshot(
+        messages=[
+            {"id": "m1", "role": "user", "content": "ciao"},
+            {
+                "id": "m2",
+                "role": "assistant",
+                "content": "",
+                "toolCalls": [{"id": "c1", "function": {"name": "ui_table"}}],
+            },
+        ],
+        state={"plan": {"status": "in_progress"}},
+        session_state={"provider": "continuazione"},
+    )
+    await memory.save_snapshot(scope, "t1", original)
+
+    rebuilt = await memory.read_snapshot(scope, "t1")
+
+    # Le chiamate ai tool devono tornare identiche: un thread ricostruito a
+    # meta' e' una conversazione che al modello non risulta.
+    assert rebuilt.messages == original.messages
+    assert rebuilt.state == original.state
+    assert rebuilt.session_state == original.session_state
+
+
+async def test_an_unknown_thread_has_no_snapshot(memory, scope):
+    assert await memory.read_snapshot(scope, "mai-visto") is None
+
+
+async def test_the_api_round_trips_a_snapshot(memory, scope):
+    async with await client_for(memory) as client:
+        headers = {"X-Memory-Scope": scope}
+        saved = await client.put(
+            "/threads/t1/snapshot",
+            json={"messages": [{"id": "m1", "role": "user", "content": "ciao"}], "state": {"a": 1}},
+            headers=headers,
+        )
+        read = await client.get("/threads/t1/snapshot", headers=headers)
+
+    assert saved.json() == {"turni_nuovi": 1}
+    assert read.json()["messages"] == [{"id": "m1", "role": "user", "content": "ciao"}]
+    assert read.json()["state"] == {"a": 1}
+
+
+async def test_the_api_says_404_for_a_thread_it_never_saw(memory, scope):
+    async with await client_for(memory) as client:
+        response = await client.get("/threads/mai-visto/snapshot", headers={"X-Memory-Scope": scope})
+
+    assert response.status_code == 404

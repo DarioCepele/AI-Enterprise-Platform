@@ -164,6 +164,58 @@ class MongoTranscripts:
             )
         return stored
 
+    async def save_head(
+        self,
+        scope: str,
+        thread_id: str,
+        *,
+        state: dict[str, Any] | None,
+        interrupt: list[dict[str, Any]] | None,
+        session_state: dict[str, Any] | None,
+    ) -> None:
+        """Lo stato del thread che non sono i messaggi.
+
+        Sta nel documento contatore, non nei bucket: e' un valore solo, sempre
+        l'ultimo, e riscriverlo non deve toccare la conversazione.
+        """
+        await self._db[THREADS].update_one(
+            {"scope": scope, "thread_id": thread_id},
+            {
+                "$set": {
+                    "state": state,
+                    "interrupt": interrupt,
+                    "session_state": session_state,
+                    "updated_at": datetime.now(UTC),
+                },
+                "$setOnInsert": {"created_at": datetime.now(UTC), "next_seq": 0},
+            },
+            upsert=True,
+        )
+
+    async def read_head(self, scope: str, thread_id: str) -> dict[str, Any] | None:
+        return await self._db[THREADS].find_one(
+            {"scope": scope, "thread_id": thread_id},
+            projection={"state": 1, "interrupt": 1, "session_state": 1, "_id": 0},
+        )
+
+    async def history(self, scope: str, thread_id: str) -> list[StoredMessage]:
+        """Tutta la conversazione, dal primo turno all'ultimo.
+
+        La usa la ricostruzione dello snapshot, che deve restituire il thread
+        intero. Quando arrivera' la compattazione, sara' questa a diventare
+        "riassunto piu' coda" -- ed e' il motivo per cui e' una funzione a se'
+        e non una `tail` con un limite grande.
+        """
+        messages: list[StoredMessage] = []
+        cursor = (
+            self._db[TURNS]
+            .find({"scope": scope, "thread_id": thread_id}, projection={"messages": 1})
+            .sort("bucket", ASCENDING)
+        )
+        async for document in cursor:
+            messages.extend(StoredMessage(**entry) for entry in document.get("messages", []))
+        return messages
+
     async def tail(self, scope: str, thread_id: str, limit: int) -> list[StoredMessage]:
         """Gli ultimi `limit` messaggi, dal piu' vecchio al piu' recente.
 
@@ -181,6 +233,10 @@ class MongoTranscripts:
             if len(collected) >= limit:
                 break
         return [StoredMessage(**entry) for entry in collected[-limit:]]
+
+    async def threads_of(self, scope: str) -> list[str]:
+        """Gli id dei thread di uno scope."""
+        return [str(value) for value in await self._db[THREADS].distinct('thread_id', {'scope': scope})]
 
     async def forget(self, scope: str, thread_id: str) -> int:
         """Cancella una conversazione. Restituisce i bucket rimossi."""
