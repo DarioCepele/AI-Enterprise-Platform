@@ -235,3 +235,25 @@ describe("sottoagenti in timeline", () => {
     expect(screen.getByText("knowledge agent giu'")).toBeInTheDocument();
   });
 });
+
+describe("scheda in timeline", () => {
+  it("mostra estratto, agente e fonti", () => {
+    const entry: Entry = {
+      kind: "artifact",
+      id: "a1",
+      artifact: {
+        component: "scheda",
+        id: "kb_1",
+        agente: "knowledge",
+        domanda: "Come tipizza Go?",
+        documenti: ["go", "rust"],
+        estratto: "Statica, verificata dal compilatore.",
+      },
+    };
+    render(<EntryView entry={entry} />);
+
+    expect(screen.getByText("Statica, verificata dal compilatore.")).toBeInTheDocument();
+    expect(screen.getByText("knowledge")).toBeInTheDocument();
+    expect(screen.getByText(/fonti: go, rust/)).toBeInTheDocument();
+  });
+});

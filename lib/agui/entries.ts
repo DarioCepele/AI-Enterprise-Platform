@@ -6,6 +6,14 @@ export type Artifact =
       columns: string[];
       rows: string[][];
     }
+  | {
+      component: "scheda";
+      id: string;
+      agente: string;
+      domanda: string;
+      documenti: string[];
+      estratto: string;
+    }
   | { component: "unknown"; id: string; raw: unknown };
 
 export type Entry =
@@ -77,6 +85,21 @@ export function parseArtifact(content: unknown): Artifact | null {
       title: shape.title,
       columns: shape.columns,
       rows: shape.rows,
+    };
+  }
+
+  if (
+    shape.component === "scheda" &&
+    typeof shape.estratto === "string" &&
+    isStringArray(shape.documenti)
+  ) {
+    return {
+      component: "scheda",
+      id,
+      agente: typeof shape.agente === "string" ? shape.agente : "sottoagente",
+      domanda: typeof shape.domanda === "string" ? shape.domanda : "",
+      documenti: shape.documenti,
+      estratto: shape.estratto,
     };
   }
 

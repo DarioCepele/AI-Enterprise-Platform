@@ -298,3 +298,50 @@ describe("sottoagenti", () => {
     expect(state.events).toHaveLength(1);
   });
 });
+
+describe("scheda del sottoagente", () => {
+  const scheda = {
+    component: "scheda",
+    id: "kb_123",
+    agente: "knowledge",
+    domanda: "Come tipizza Go?",
+    documenti: ["go"],
+    estratto: "Statica, verificata dal compilatore.",
+  };
+
+  it("una scheda diventa un artefatto in timeline, non testo", () => {
+    const state = reduce(initialState, {
+      type: "TOOL_CALL_RESULT",
+      toolCallId: "c1",
+      content: JSON.stringify(scheda),
+    });
+
+    const entry = state.entries[0];
+    expect(entry.kind).toBe("artifact");
+    expect(entry.kind === "artifact" && entry.artifact.component).toBe("scheda");
+  });
+
+  it("conserva fonti e domanda, che sono la ragione per cui e' strutturata", () => {
+    const state = reduce(initialState, {
+      type: "TOOL_CALL_RESULT",
+      toolCallId: "c1",
+      content: JSON.stringify(scheda),
+    });
+
+    const entry = state.entries[0];
+    if (entry.kind !== "artifact" || entry.artifact.component !== "scheda") throw new Error("no");
+    expect(entry.artifact.documenti).toEqual(["go"]);
+    expect(entry.artifact.domanda).toBe("Come tipizza Go?");
+  });
+
+  it("una scheda senza estratto degrada a fallback invece di fingere", () => {
+    const state = reduce(initialState, {
+      type: "TOOL_CALL_RESULT",
+      toolCallId: "c1",
+      content: JSON.stringify({ component: "scheda", id: "kb_1", documenti: ["go"] }),
+    });
+
+    const entry = state.entries[0];
+    expect(entry.kind === "artifact" && entry.artifact.component).toBe("unknown");
+  });
+});

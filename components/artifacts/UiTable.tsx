@@ -1,6 +1,9 @@
 import type { Artifact } from "@/lib/agui/entries";
+import { Scheda } from "./Scheda";
 
 export function UiTable({ artifact }: { artifact: Artifact }) {
+  if (artifact.component === "scheda") return <Scheda artifact={artifact} />;
+
   if (artifact.component !== "ui-table") {
     return (
       <div className="rounded-lg border border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted)]">
