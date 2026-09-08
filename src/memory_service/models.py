@@ -59,3 +59,7 @@ class Snapshot(BaseModel):
     # Stato privato di continuazione del server. Non e' materiale da
     # rimandare a un client: chi lo legge e' solo il backend che lo ha scritto.
     session_state: dict[str, Any] | None = None
+    # Cosa e' stato tolto ricomponendo il contesto. Viaggia con lo snapshot
+    # perche' una potatura silenziosa e' indistinguibile da una perdita di
+    # dati: chi legge deve poterla vedere e scriverla nei propri log.
+    curation: dict[str, int] | None = None

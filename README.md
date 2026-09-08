@@ -88,6 +88,52 @@ Lo stato del thread che non sono messaggi — `state`, `interrupt`,
 `session_state` — sta nel documento del thread, non nei bucket: è un valore
 solo, sempre l'ultimo, e riscriverlo non deve toccare la conversazione.
 
+## Conservare tutto, restituire il necessario
+
+Sono due decisioni diverse, e tenerle separate è il punto: una memoria che pota
+in scrittura ha buttato per sempre, una che pota in lettura può cambiare idea —
+e il transcript integrale resta per i riassunti e per capire cosa è successo.
+
+Misurato su due turni reali di questo laboratorio (40 messaggi, 12 KB salvati):
+
+| ruolo | messaggi | byte | quota |
+| --- | --- | --- | --- |
+| user | 2 | 214 | **1,8%** |
+| reasoning | 12 | 2.256 | 18,9% |
+| assistant | 14 | 6.933 | 58,0% |
+| tool | 12 | 2.558 | 21,4% |
+
+Quello che l'utente ha davvero detto è il 2% del transcript. Il resto è
+macchinario, e il macchinario vecchio non aiuta il turno nuovo.
+
+Cosa fa `GET /threads/{id}/snapshot` prima di rispondere:
+
+1. **Toglie il ragionamento dei turni passati.** Il modello lo rifà; rimandarlo
+   costa token e non aggiunge nulla. Dentro una run resta intatto, perché quel
+   ciclo non passa da qui.
+2. **Svuota i risultati dei tool più vecchi**, tenendo gli ultimi 4 interi e
+   sostituendo il contenuto degli altri con un segnaposto. La traccia della
+   chiamata resta: il modello vede che quel passo è avvenuto. È la potatura a
+   rischio più basso, perché quei risultati si riottengono richiamando il tool.
+3. **Tiene una finestra di 60 messaggi**, tagliando su un confine di turno.
+   Fra i due confini possibili si sceglie quello precedente al taglio ideale:
+   meglio qualche messaggio oltre il tetto che un turno spezzato, dove
+   resterebbe il risultato di un tool senza la chiamata che lo ha prodotto.
+
+Effetto misurato sullo stesso thread, senza nessuna chiamata a un LLM:
+**40 messaggi e 12.457 byte diventano 28 messaggi e 9.626 byte, il 22,7% in
+meno.** Con `?raw=true` torna il transcript integrale.
+
+Ogni risposta porta con sé il campo `curation` con il conto di ciò che manca, e
+il master agent lo scrive nei propri log: una potatura silenziosa è
+indistinguibile da una perdita di memoria.
+
+| Variabile | Default | Cosa decide |
+| --- | --- | --- |
+| `MEMORY_DROP_REASONING` | `true` | togliere il ragionamento dei turni passati |
+| `MEMORY_KEEP_TOOL_RESULTS` | `4` | quanti risultati di tool restano interi |
+| `MEMORY_MAX_CONTEXT_MESSAGES` | `60` | tetto di messaggi restituiti |
+
 ## Lo scope, e di chi ci si fida
 
 Ogni chiamata dichiara `X-Memory-Scope`: e' il confine di autorizzazione, e
@@ -124,6 +170,9 @@ Variabili con prefisso `MEMORY_`, dal `.env` locale non versionato:
 | `MEMORY_BUCKET_SIZE` | messaggi per bucket (default 50) |
 | `MEMORY_HOT_TAIL_SECONDS` | scadenza della coda calda (default 1800) |
 | `MEMORY_HOT_TAIL_MESSAGES` | quanti messaggi tiene la coda calda (default 100) |
+| `MEMORY_DROP_REASONING` | togliere il ragionamento passato dal contesto (default true) |
+| `MEMORY_KEEP_TOOL_RESULTS` | risultati di tool lasciati interi (default 4) |
+| `MEMORY_MAX_CONTEXT_MESSAGES` | tetto di messaggi restituiti (default 60) |
 
 I due database si alzano dal compose di `demo-infra`:
 
@@ -145,8 +194,9 @@ loro. Senza `.env` configurato i test si saltano invece di fallire.
 
 ## Cosa non c'e' ancora
 
-- **Riassunti**: i turni vecchi non vengono compattati. La collezione dei
-  riassunti sara' separata dai transcript, che restano integrali.
+- **Riassunti**: i turni scartati dalla finestra spariscono dal contesto invece
+  di diventare un riassunto. La collezione dei riassunti sara' separata dai
+  transcript, che restano integrali.
 - **Fatti duraturi per utente** (preferenze, entita').
 - **Ricerca semantica**: `$vectorSearch` e' solo su Atlas. Redis 8 include il
   Query Engine e i vector set (`FT.CREATE`, `VADD` verificati sull'istanza),

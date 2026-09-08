@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     hot_tail_seconds: int = Field(default=1800, ge=1)
     hot_tail_messages: int = Field(default=100, ge=1)
 
+    # Potatura del contesto restituito. Non tocca cio' che e' scritto: si
+    # conserva tutto e si restituisce il necessario.
+    drop_reasoning: bool = True
+    keep_tool_results: int = Field(default=4, ge=0)
+    max_context_messages: int | None = Field(default=60, ge=1)
+
 
 @lru_cache
 def get_settings() -> Settings:

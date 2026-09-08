@@ -18,6 +18,7 @@ from pymongo import AsyncMongoClient
 from redis.asyncio import Redis
 
 from .config import Settings, get_settings
+from .curation import ContextPolicy
 from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
 from .stores.hot import HotTail
@@ -48,6 +49,11 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         state["memory"] = ThreadMemory(
             durable,
             HotTail(redis, config.hot_tail_seconds, config.hot_tail_messages),
+            ContextPolicy(
+                drop_reasoning=config.drop_reasoning,
+                keep_tool_results=config.keep_tool_results,
+                max_messages=config.max_context_messages,
+            ),
         )
         try:
             yield
@@ -117,10 +123,14 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     @app.get("/threads/{thread_id}/snapshot")
     async def read_snapshot(
         thread_id: str,
+        raw: bool = Query(
+            default=False,
+            description="Transcript integrale invece del contesto potato.",
+        ),
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> Snapshot:
-        snapshot = await memory_instance.read_snapshot(scope, thread_id)
+        snapshot = await memory_instance.read_snapshot(scope, thread_id, raw=raw)
         if snapshot is None:
             # 404 e non uno snapshot vuoto: "non so nulla di questo thread" e
             # "questo thread e' vuoto" portano il chiamante a decisioni diverse.

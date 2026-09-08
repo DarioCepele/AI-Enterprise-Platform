@@ -234,3 +234,46 @@ async def test_the_api_says_404_for_a_thread_it_never_saw(memory, scope):
         response = await client.get("/threads/mai-visto/snapshot", headers={"X-Memory-Scope": scope})
 
     assert response.status_code == 404
+
+
+async def test_the_returned_context_is_pruned_but_the_transcript_is_whole(memory, scope):
+    await memory.save_snapshot(
+        scope,
+        "t1",
+        Snapshot(
+            messages=[
+                {"id": "m1", "role": "user", "content": "domanda"},
+                {"id": "m2", "role": "reasoning", "content": "", "encrypted_value": "[lungo]"},
+                {"id": "m3", "role": "assistant", "content": "risposta"},
+            ]
+        ),
+    )
+
+    potato = await memory.read_snapshot(scope, "t1")
+    integrale = await memory.read_snapshot(scope, "t1", raw=True)
+
+    # Conservare tutto e restituire il necessario sono due decisioni diverse.
+    assert [m["role"] for m in potato.messages] == ["user", "assistant"]
+    assert [m["role"] for m in integrale.messages] == ["user", "reasoning", "assistant"]
+    assert potato.curation["ragionamenti_tolti"] == 1
+    assert integrale.curation is None
+
+
+async def test_the_api_can_ask_for_the_whole_transcript(memory, scope):
+    async with await client_for(memory) as client:
+        headers = {"X-Memory-Scope": scope}
+        await client.put(
+            "/threads/t1/snapshot",
+            json={
+                "messages": [
+                    {"id": "m1", "role": "user", "content": "domanda"},
+                    {"id": "m2", "role": "reasoning", "content": "pensiero"},
+                ]
+            },
+            headers=headers,
+        )
+        potato = await client.get("/threads/t1/snapshot", headers=headers)
+        integrale = await client.get("/threads/t1/snapshot?raw=true", headers=headers)
+
+    assert [m["role"] for m in potato.json()["messages"]] == ["user"]
+    assert [m["role"] for m in integrale.json()["messages"]] == ["user", "reasoning"]

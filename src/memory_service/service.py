@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 
+from .curation import ContextPolicy, curate
 from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .snapshots import new_messages
 from .stores.hot import HotTail
@@ -20,9 +21,15 @@ class ThreadMemory:
     un sistema di memoria, perche' sparisce da solo alla scadenza.
     """
 
-    def __init__(self, durable: MongoTranscripts, hot: HotTail) -> None:
+    def __init__(
+        self,
+        durable: MongoTranscripts,
+        hot: HotTail,
+        policy: ContextPolicy | None = None,
+    ) -> None:
         self._durable = durable
         self._hot = hot
+        self._policy = policy or ContextPolicy()
 
     async def append(self, scope: str, thread_id: str, message: NewMessage) -> StoredMessage:
         stored = await self._durable.append(scope, thread_id, message)
@@ -68,26 +75,56 @@ class ThreadMemory:
         )
         return len(fresh)
 
-    async def read_snapshot(self, scope: str, thread_id: str) -> Snapshot | None:
-        """Ricompone lo snapshot, o None se di quel thread non si sa nulla."""
+    async def read_snapshot(
+        self,
+        scope: str,
+        thread_id: str,
+        *,
+        raw: bool = False,
+    ) -> Snapshot | None:
+        """Ricompone lo snapshot, o None se di quel thread non si sa nulla.
+
+        Di default il contesto e' **potato**: fuori il ragionamento dei turni
+        passati, svuotati i risultati di tool piu' vecchi. Con `raw=True` torna
+        il transcript integrale, che e' quello che serve per riassumere e per
+        capire cosa e' successo davvero.
+        """
         head = await self._durable.read_head(scope, thread_id)
         messages = await self._durable.history(scope, thread_id)
         if head is None and not messages:
             return None
 
         head = head or {}
+        # Si restituisce la forma originale quando c'e': un messaggio
+        # ricostruito da ruolo e testo perderebbe le chiamate ai tool.
+        payloads = [
+            message.payload
+            if message.payload is not None
+            else {"role": message.role, "content": message.content}
+            for message in messages
+        ]
+
+        report = None
+        if not raw:
+            payloads, curation = curate(payloads, self._policy)
+            report = curation.as_dict()
+            logger.info(
+                "Contesto del thread %s ricomposto: %d messaggi su %d "
+                "(%d ragionamenti tolti, %d risultati svuotati, %d scartati).",
+                thread_id,
+                curation.conservati,
+                len(messages),
+                curation.ragionamenti_tolti,
+                curation.risultati_svuotati,
+                curation.messaggi_scartati,
+            )
+
         return Snapshot(
-            # Si restituisce la forma originale quando c'e': un messaggio
-            # ricostruito da ruolo e testo perderebbe le chiamate ai tool.
-            messages=[
-                message.payload
-                if message.payload is not None
-                else {"role": message.role, "content": message.content}
-                for message in messages
-            ],
+            messages=payloads,
             state=head.get("state"),
             interrupt=head.get("interrupt"),
             session_state=head.get("session_state"),
+            curation=report,
         )
 
     async def forget_scope(self, scope: str) -> int:
