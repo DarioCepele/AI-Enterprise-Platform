@@ -12,12 +12,41 @@ services:
       DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
       # Vuoto = default del backend (localhost e 127.0.0.1 su 3000 e 3001).
       DEMO_ALLOWED_ORIGINS: ${DEMO_ALLOWED_ORIGINS:-}
+      # Vuoto = memoria dei thread in RAM. Qui c'e', quindi la conversazione
+      # sopravvive al riavvio dell'agente.
+      DEMO_MEMORY_SERVICE_URL: http://memory-service:8100
     # Per raggiungere un LLM in ascolto sull'host (LM Studio, Ollama):
     # dentro il container "localhost" e' il container stesso.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      memory-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # La memoria delle conversazioni. Sta fra l'agente e i due database: l'agente
+  # non conosce Mongo ne' Redis, conosce questo servizio.
+  memory-service:
+    build: ../demo-memory-service
+    environment:
+      # Dentro la rete di compose i database si chiamano per nome di servizio e
+      # rispondono sulla porta interna, non su quella pubblicata sull'host.
+      MEMORY_MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/?authSource=admin
+      MEMORY_MONGO_DATABASE: ${MONGO_INITDB_DATABASE}
+      MEMORY_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/0
+    # Nessuna porta pubblicata: e' un servizio interno, e l'unico modo serio di
+    # dire "non esporlo" e' non esporlo.
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
       interval: 10s
       timeout: 3s
       retries: 5
