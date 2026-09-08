@@ -91,3 +91,28 @@ uv run pytest
 ```
 
 I test usano client finti e dipendenze esplicite: non fanno chiamate a un LLM reale e non richiedono un `.env` o credenziali del provider. Coprono tool, skill, stato condiviso, protocollo AG-UI, raccolta dei log, cursori e CORS. Le verifiche con un modello reale restano separate dai test automatici.
+
+## Memoria della conversazione
+
+La storia del thread la possiede il server. Il client AG-UI manda solo il turno
+nuovo; l'adattatore ricompone la conversazione dallo snapshot del thread e la
+passa al modello. Senza questo, ogni run ripartiva da zero: stesso `threadId`,
+seconda domanda, e il modello rispondeva "non me l'hai ancora chiesto".
+
+Lo store e' `InMemoryAGUIThreadSnapshotStore`: un solo snapshot per
+`(scope, thread_id)`, in memoria di processo, niente durata oltre il riavvio.
+In produzione si sostituisce con uno store durevole senza toccare l'agente --
+la firma da implementare e' il protocollo `AGUIThreadSnapshotStore`
+(`save`, `get`, `delete`, `clear`).
+
+**Lo scope e' un confine di autorizzazione, non un identificativo.** Il
+framework rifiuta uno snapshot store senza `snapshot_scope_resolver`, e la
+ragione e' che un thread id identifica un thread ma non autorizza a leggerlo.
+Qui il laboratorio gira senza autenticazione e lo scope e' dichiarato uno solo
+per tutto il processo (`SINGLE_TENANT_SCOPE` in `server/app.py`). In produzione
+quella funzione restituisce l'identita' verificata della richiesta, presa da una
+dependency di autenticazione sull'endpoint, mai da un header scelto dal client.
+
+Conseguenza da tenere d'occhio: la storia ora cresce a ogni turno e nessuno la
+pota. E' il prossimo passo -- tetto di contesto, compattazione dei tool result
+e riassunto dei turni vecchi.
