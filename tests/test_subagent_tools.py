@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
-
 import pytest
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface
 
@@ -22,9 +20,11 @@ def card(streaming: bool = True) -> AgentCard:
     )
 
 
-class Update:
-    def __init__(self, text: str) -> None:
-        self.text = text
+from demo.a2a.client import Avanzamento
+
+
+def avanzamento(testo: str = "", stato: str = "al lavoro", grezzo: int = 2) -> Avanzamento:
+    return Avanzamento(task_id="t-1", stato=stato, stato_grezzo=grezzo, testo=testo)
 
 
 class FakeRemote:
@@ -33,24 +33,22 @@ class FakeRemote:
         self.ritardo = ritardo
         self.domande: list[str] = []
 
-    async def run(self, domanda: str, stream: bool = False):
-        self.domande.append(domanda)
+    async def chiedi(self, testo: str, task_id=None, context_id=None):
+        self.domande.append(testo)
+        yield avanzamento(stato="accettato", grezzo=1)
         for pezzo in self.pezzi:
             if self.ritardo:
                 await asyncio.sleep(self.ritardo)
-            yield Update(pezzo)
+            yield avanzamento(pezzo)
+        yield avanzamento(stato="concluso", grezzo=3)
 
 
 def tool_with(remote: FakeRemote, streaming: bool = True, loader=None):
-    @asynccontextmanager
-    async def opener(_card):
-        yield remote
-
     async def load():
         return card(streaming)
 
     return build_subagent_tools(
-        "http://kb:8200/", card_loader=loader or load, remote_opener=opener
+        "http://kb:8200/", card_loader=loader or load, client_factory=lambda _card: remote
     )[0]
 
 
@@ -113,16 +111,16 @@ async def test_two_questions_in_the_same_turn_run_together():
 
 @pytest.mark.asyncio
 async def test_an_unreachable_subagent_does_not_kill_the_run(caplog):
-    @asynccontextmanager
-    async def rotto(_card):
-        raise ConnectionError("knowledge agent giu'")
-        yield
+    class Rotto:
+        async def chiedi(self, testo, task_id=None, context_id=None):
+            raise ConnectionError("knowledge agent giu'")
+            yield
 
     async def load():
         return card()
 
     strumento = build_subagent_tools(
-        "http://kb:8200/", card_loader=load, remote_opener=rotto
+        "http://kb:8200/", card_loader=load, client_factory=lambda _card: Rotto()
     )[0]
 
     with caplog.at_level(logging.ERROR, logger="demo.tools.subagent_tools"):
@@ -140,3 +138,55 @@ async def test_an_empty_answer_is_declared_not_faked():
     risposta = await strumento.func(domanda="il nulla")
 
     assert "non ha prodotto una risposta" in risposta.text
+
+
+class RemoteConArtefatti(FakeRemote):
+    async def chiedi(self, testo, task_id=None, context_id=None):
+        from demo.a2a.client import Artefatto
+
+        self.domande.append(testo)
+        yield avanzamento(stato="accettato", grezzo=1)
+        a = avanzamento()
+        a.artefatto = Artefatto(
+            artifact_id="a1", name="scheda", description="", testo="dal documento"
+        )
+        yield a
+        yield avanzamento(stato="concluso", grezzo=3)
+
+
+class RemoteCheChiede(FakeRemote):
+    async def chiedi(self, testo, task_id=None, context_id=None):
+        self.domande.append(testo)
+        a = avanzamento(stato="attende una risposta", grezzo=6)
+        a.domanda = "Su quale versione di Go?"
+        yield a
+
+
+@pytest.mark.asyncio
+async def test_the_text_that_arrives_as_an_artifact_is_not_lost():
+    strumento = tool_with(RemoteConArtefatti([]))
+
+    risposta = await strumento.func(domanda="qualcosa")
+
+    assert "dal documento" in risposta.text
+
+
+@pytest.mark.asyncio
+async def test_the_task_lifecycle_ends_up_in_the_logs(caplog):
+    strumento = tool_with(FakeRemote(["ok"]))
+
+    with caplog.at_level(logging.INFO, logger="demo.tools.subagent_tools"):
+        await strumento.func(domanda="qualcosa")
+
+    assert "accettato -> al lavoro -> concluso" in caplog.text
+    assert "task t-1" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_subagent_that_asks_is_reported_not_answered_for():
+    strumento = tool_with(RemoteCheChiede([]))
+
+    risposta = await strumento.func(domanda="qualcosa")
+
+    assert "si e' fermato e chiede" in risposta.text
+    assert "Su quale versione di Go?" in risposta.text

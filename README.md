@@ -233,3 +233,27 @@ Su una run vera lo stream porta due `SUBAGENT_STARTED` di fila e poi due
 `SUBAGENT_FINISHED`: è la firma delle invocazioni parallele descritta nella
 spec. Un sottoagente che fallisce produce `SUBAGENT_ERROR` **prima** che
 l'errore risalga, così il difetto si vede nell'inspector e non solo nei log.
+
+## Il client A2A: il task, non solo il testo
+
+Il tool non usa più `A2AAgent` della colla Microsoft ma un client nostro
+(`demo/a2a/client.py`) scritto contro `a2a-sdk`, che è **stabile** mentre
+`agent-framework-a2a` è ancora beta. Il motivo non è solo la maturità: `A2AAgent`
+appiattisce tutto in testo, e con lui il ciclo di vita del task si perde.
+
+Ora ogni interrogazione riporta lo stato reale del task remoto:
+
+```
+task 582aa21b, stati accettato -> al lavoro -> concluso, 205 artefatti in 31.39s
+```
+
+Una scoperta utile: **il testo arriva come artifact update, non come messaggio**.
+L'executor MAF del sottoagente spedisce ogni chunk con `add_artifact()`, senza
+nome. Chi accumula solo i messaggi di stato riceve una risposta vuota — è quello
+che sarebbe successo al primo collegamento se non avessi guardato gli eventi
+grezzi.
+
+Il client espone anche ciò che serve ai passi successivi: il `task_id` per
+riprendere un task, e `attende_risposta` quando il sottoagente si ferma in
+`TASK_STATE_INPUT_REQUIRED`. Oggi il tool riferisce la domanda all'utente invece
+di rispondere al posto suo; la ripresa vera dello stesso task è il pezzo dopo.

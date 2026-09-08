@@ -4,53 +4,35 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-import httpx
 from a2a.types import AgentCard
 from agent_framework import Content, FunctionTool, tool
-from agent_framework.a2a import A2AAgent
-from google.protobuf.json_format import ParseDict
 
+from ..a2a.client import A2AClient, Avanzamento, fetch_agent_card
 from ..server.run_context import subagent_run
 
 logger = logging.getLogger(__name__)
-
-CARD_PATH = ".well-known/agent-card.json"
-
-
-async def fetch_agent_card(url: str, timeout: float = 10.0) -> AgentCard:
-    async with httpx.AsyncClient(timeout=timeout) as http:
-        response = await http.get(f"{url.rstrip('/')}/{CARD_PATH}")
-        response.raise_for_status()
-        return ParseDict(response.json(), AgentCard(), ignore_unknown_fields=True)
-
-
-@asynccontextmanager
-async def open_remote(card: AgentCard, name: str = "knowledge"):
-    async with A2AAgent(name=name, agent_card=card) as remote:
-        yield remote
 
 
 def build_subagent_tools(
     url: str,
     card_loader: Callable[[], Awaitable[AgentCard]] | None = None,
-    remote_opener: Any = None,
+    client_factory: Callable[[AgentCard], Any] | None = None,
 ) -> list[FunctionTool]:
     load_card = card_loader or (lambda: fetch_agent_card(url))
-    open_it = remote_opener or open_remote
-    cached: dict[str, AgentCard] = {}
+    make_client = client_factory or (lambda card: A2AClient(card))
+    cached: dict[str, Any] = {}
 
-    async def card() -> AgentCard:
-        if "card" not in cached:
-            cached["card"] = await load_card()
-            capabilities = cached["card"].capabilities
-            if not capabilities.streaming:
+    async def client() -> Any:
+        if "client" not in cached:
+            card = await load_card()
+            if not card.capabilities.streaming:
                 logger.warning(
                     "La card di %s non dichiara streaming: le risposte arriveranno intere.", url
                 )
-        return cached["card"]
+            cached["client"] = make_client(card)
+        return cached["client"]
 
     @tool
     async def interroga_knowledge(
@@ -65,16 +47,27 @@ def build_subagent_tools(
         """
         start = time.monotonic()
         pezzi: list[str] = []
-        aggiornamenti = 0
+        stati: list[str] = []
+        artefatti = 0
+        task_id = ""
+        domanda_del_sottoagente = ""
+
         try:
-            remote_card = await card()
+            remoto = await client()
             async with subagent_run("knowledge", domanda):
-                async with open_it(remote_card) as remote:
-                    async for update in remote.run(domanda, stream=True):
-                        aggiornamenti += 1
-                        testo = getattr(update, "text", None)
-                        if testo:
-                            pezzi.append(testo)
+                avanzamento: Avanzamento | None = None
+                async for avanzamento in remoto.chiedi(domanda):
+                    task_id = avanzamento.task_id or task_id
+                    if not stati or stati[-1] != avanzamento.stato:
+                        stati.append(avanzamento.stato)
+                    if avanzamento.testo:
+                        pezzi.append(avanzamento.testo)
+                    if avanzamento.artefatto:
+                        artefatti += 1
+                        if avanzamento.artefatto.testo:
+                            pezzi.append(avanzamento.artefatto.testo)
+                    if avanzamento.attende_risposta:
+                        domanda_del_sottoagente = avanzamento.domanda
         except Exception:
             logger.error("Knowledge agent non raggiungibile per '%s'.", domanda, exc_info=True)
             return Content.from_text(
@@ -84,14 +77,24 @@ def build_subagent_tools(
 
         risposta = "".join(pezzi).strip()
         logger.info(
-            "Knowledge agent su '%s': %d aggiornamenti in %.2fs, %d caratteri.",
+            "Knowledge agent su '%s': task %s, stati %s, %d artefatti in %.2fs, %d caratteri.",
             domanda,
-            aggiornamenti,
+            task_id[:8] or "?",
+            " -> ".join(stati) or "nessuno",
+            artefatti,
             time.monotonic() - start,
             len(risposta),
         )
+
+        if domanda_del_sottoagente:
+            return Content.from_text(
+                f"Il knowledge agent si e' fermato e chiede: {domanda_del_sottoagente}\n"
+                "Riferiscilo all'utente invece di rispondere al posto suo."
+            )
         if not risposta:
-            return Content.from_text(f"Il knowledge agent non ha prodotto una risposta su '{domanda}'.")
+            return Content.from_text(
+                f"Il knowledge agent non ha prodotto una risposta su '{domanda}'."
+            )
         return Content.from_text(risposta)
 
     return [interroga_knowledge]
