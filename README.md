@@ -1,0 +1,93 @@
+# Master agent del laboratorio AG-UI
+
+Backend Python con Microsoft Agent Framework e FastAPI. Espone il master agent su `POST /agui` tramite `add_agent_framework_fastapi_endpoint`: lo stream SSE contiene gli eventi AG-UI per chat, piano e inspector. I log operativi usano un secondo canale HTTP, `GET /logs`. `GET /health` restituisce lo stato del servizio.
+
+## Avvio e configurazione
+
+Servono Python 3.12 e `uv`. Dalla radice di questo repository:
+
+```powershell
+uv sync --locked
+uv run python -m demo
+```
+
+Il server locale ascolta su `http://127.0.0.1:8000`. Per avviare anche il frontend con Docker Compose, seguire il [README di demo-infra](../demo-infra/README.md).
+
+La configurazione viene letta dall'ambiente; in locale viene caricato anche il file `.env`, non versionato. Le variabili sono:
+
+| Variabile | Uso |
+| --- | --- |
+| `OPENAI_BASE_URL` | Endpoint del provider compatibile con Chat Completions. |
+| `OPENAI_API_KEY` | Credenziale del provider. |
+| `OPENAI_CHAT_COMPLETION_MODEL` | Identificativo del modello. |
+| `DEMO_FAKE_CLIENT` | Attiva il client deterministico per verifiche locali senza LLM. |
+| `DEMO_ALLOWED_ORIGINS` | Origini CORS del frontend, separate da virgole. |
+
+Il flusso del piano richiede un modello che esegua davvero le chiamate ai tool. Il client finto serve ai test del protocollo, non riproduce l'intero flusso del modello reale.
+
+## Tre gruppi di tool
+
+| Gruppo | Tool | Contratto |
+| --- | --- | --- |
+| Piano | `todo_write`, `todo_set_status` | Scrivono e aggiornano `state.plan`. |
+| Skill | `load_skill` | Restituisce al modello le istruzioni Markdown della skill richiesta. |
+| Artefatti UI | `ui_table` | Produce il payload della tabella e aggiorna `state.artifacts`. |
+
+`todo_write(steps)` sostituisce il piano precedente. Ogni passo ha un `id` intero, `title`, `detail` e `source`; parte da `pending`. `todo_set_status(step_id, status, note)` accetta `pending`, `in_progress`, `completed` e `failed`. Per `failed` la nota deve essere non vuota. Gli aggiornamenti includono i tempi di inizio e fine e riemettono il piano intero. L'agente deve aggiornare i passi mentre lavora, per rendere visibile l'avanzamento.
+
+Il `PlanStore` vive in memoria nell'istanza dell'agente. L'app costruisce un solo agente: **un piano per processo, condiviso anche fra due schede del browser**. Non esiste isolamento per thread e il piano non persiste al riavvio. Questa è una limitazione dichiarata della demo.
+
+`ui_table(title, columns, rows)` restituisce un artefatto `ui-table` con un `id` numerato per processo, usato per collegare il risultato del tool al riepilogo nello stato. L'id non è stabile fra riavvii. Il risultato AG-UI contiene una stringa JSON con titolo, colonne e righe; `state.artifacts` contiene il riepilogo della tabella corrente. `plan` e `artifacts` sono chiavi separate: gli aggiornamenti sostituiscono le chiavi di primo livello, quindi ogni gruppo scrive solo la propria.
+
+## Aggiungere una skill
+
+Le skill sono cartelle sotto `src/demo/skills/`, ciascuna con un file `SKILL.md`. Esempio:
+
+```markdown
+---
+name: comparison
+description: Confronta elementi lungo dimensioni comuni e produce una tabella.
+---
+
+# Confronto strutturato
+
+Individua le dimensioni del confronto, chiama ui_table e sintetizza le differenze.
+```
+
+Il frontmatter deve iniziare alla prima riga ed essere delimitato da `---`; `name` e `description` sono obbligatori. Il parser attuale supporta solo righe scalari `chiave: valore`, non YAML annidato o multilinea. Il corpo successivo è Markdown.
+
+Per aggiungere una skill, creare `src/demo/skills/<nome>/SKILL.md` con un nome univoco e riavviare l'agente; se si usa Docker, ricostruire l'immagine. Non serve registrarla nel codice: il catalogo viene letto alla costruzione dei tool e incluso nella descrizione di `load_skill`. Un file malformato interrompe la costruzione del catalogo. Una richiesta a `load_skill` con nome sconosciuto restituisce invece un messaggio con i nomi disponibili, senza interrompere la run. Le skill sono incluse anche nel pacchetto Python.
+
+## Log operativi
+
+`GET /logs?cursor=0` legge le righe disponibili. Il client passa poi il `cursor` ricevuto per ottenere solo righe con `seq` maggiore:
+
+```json
+{
+  "entries": [
+    {
+      "seq": 1,
+      "ts": "2026-09-08T10:00:00.000+00:00",
+      "level": "INFO",
+      "source": "tools.plan_tools",
+      "message": "Piano scritto: 3 passi."
+    }
+  ],
+  "cursor": 1,
+  "dropped": 0
+}
+```
+
+Il buffer circolare conserva le ultime **500 righe** in memoria per processo. `cursor` è la sequenza dell'ultima riga restituita; senza nuove righe resta invariato. `dropped` conta le righe successive al cursore richiesto già uscite dal buffer. I cursori ripartono al riavvio del processo e non identificano una singola run.
+
+Il collettore riceve i log da `demo` e dai suoi discendenti `demo.*`, da livello `INFO` in su; `source` omette il prefisso `demo.`. Registra scrittura e avanzamento del piano, caricamento delle skill e produzione delle tabelle. I logger delle librerie sono esclusi perché possono contenere URL e header con credenziali. Non è una redazione automatica dei messaggi applicativi: chi aggiunge log a `demo.*` deve evitare credenziali e dati sensibili. L'handler viene rimosso allo shutdown dell'app.
+
+Nell'integrazione AG-UI adottata, gli eventi `CUSTOM` sono riservati al framework e non c'è una factory applicativa per emetterli arbitrariamente. Per questo il tab LOG legge `/logs`: il principio delle tre viste dello stesso stream vale per chat, piano e inspector, mentre i log hanno un canale separato.
+
+## Test offline
+
+```powershell
+uv run pytest
+```
+
+I test usano client finti e dipendenze esplicite: non fanno chiamate a un LLM reale e non richiedono un `.env` o credenziali del provider. Coprono tool, skill, stato condiviso, protocollo AG-UI, raccolta dei log, cursori e CORS. Le verifiche con un modello reale restano separate dai test automatici.
