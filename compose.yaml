@@ -35,3 +35,71 @@ services:
     depends_on:
       master-agent:
         condition: service_healthy
+
+  # Backend di persistenza per la memoria conversazionale dell'agente (tappa
+  # successiva). Vive qui e non nel repo dell'app perche' e' infrastruttura:
+  # l'app deve poterlo trovare gia' in piedi, non gestirne il ciclo di vita.
+  mongo:
+    # Versione pinnata: con "latest" un rebuild a distanza di mesi cambierebbe
+    # major sotto i piedi, e un major di MongoDB puo' richiedere una migrazione
+    # del data file gia' presente nel volume.
+    image: mongo:8.0.16
+    # unless-stopped e non "no" come gli altri servizi: master-agent e frontend
+    # sono stateless e si rilanciano a mano, il DB invece deve tornare su da
+    # solo al riavvio di Docker Desktop, altrimenti l'app parte senza memoria.
+    restart: unless-stopped
+    environment:
+      # Nessun default inline: se il .env non e' compilato il servizio deve
+      # fallire subito, non partire con credenziali indovinate.
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?serve in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?serve in .env}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:?serve in .env}
+    ports:
+      # Solo su loopback: senza il prefisso 127.0.0.1 Docker pubblica su tutte
+      # le interfacce e un DB con credenziali da laboratorio finirebbe esposto
+      # sulla rete locale. La porta host e' variabile perche' su una macchina
+      # con un mongod nativo la 27017 e' gia' occupata.
+      - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
+    volumes:
+      # Volume nominato, non bind mount: i dati sopravvivono a "compose down"
+      # e restano fuori dal working tree del repo.
+      - mongo-data:/data/db
+    healthcheck:
+      # Ping reale sul server, non un check sulla porta aperta: mongod accetta
+      # connessioni TCP prima di essere pronto a rispondere a comandi.
+      # "ping" non richiede autenticazione, quindi il check non ha bisogno
+      # delle credenziali e non le espone nella definizione del servizio.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      # Il primo avvio inizializza i data file: start_period evita che i
+      # tentativi falliti di quella fase contino come unhealthy.
+      retries: 5
+      start_period: 20s
+
+  # Memoria a breve termine: la coda calda della conversazione e la cache del
+  # servizio di memoria. Sta separata da Mongo perche' ha requisiti opposti --
+  # latenza bassa e scadenza automatica invece di durata e storia completa.
+  redis:
+    # Redis 8 open source (AGPLv3) include il Query Engine, quindi anche la
+    # ricerca vettoriale: nessun bisogno dell'immagine redis-stack, che dalla
+    # 8 non e' piu' mantenuta.
+    image: redis:8.2.3
+    restart: unless-stopped
+    # Password anche in locale: la porta e' su loopback, ma un Redis senza
+    # credenziali e' il bersaglio piu' banale che esista su una macchina di
+    # sviluppo condivisa.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?serve in .env}", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    # Nessun volume, ed e' voluto: quello che vive qui deve essere sempre
+    # ricostruibile da Mongo. Se perdere Redis perdesse dati, sarebbe il posto
+    # sbagliato dove tenerli.
+
+volumes:
+  mongo-data:

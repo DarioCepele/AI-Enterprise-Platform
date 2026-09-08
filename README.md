@@ -80,6 +80,84 @@ chiude la run in corso senza segnalare un errore. Nell'inspector gli eventi
 consecutivi dello stesso tipo stanno in una riga sola con il conteggio: il
 contatore in alto resta quello degli eventi, e il payload compare aprendo la riga.
 
+## MongoDB
+
+Istanza di persistenza per la memoria conversazionale dell'agente. Vive nello
+stesso compose degli altri servizi ma è indipendente: si alza da sola e non è
+un `depends_on` di nessuno.
+
+```bash
+docker compose up -d mongo
+docker compose ps mongo          # atteso: Up (healthy)
+```
+
+Le credenziali arrivano dal `.env` (`MONGO_INITDB_ROOT_USERNAME`,
+`MONGO_INITDB_ROOT_PASSWORD`, `MONGO_INITDB_DATABASE`); in `.env.example` ci
+sono solo segnaposto. Vengono lette **solo al primo avvio**, quando il volume è
+vuoto: per cambiarle davvero serve ricreare il volume.
+
+I dati stanno nel volume nominato `demo-infra_mongo-data`, non in una cartella
+del repo. Sopravvivono a `docker compose down`; per azzerarli serve
+`docker compose down -v` (oppure `docker volume rm demo-infra_mongo-data`).
+
+Dall'host la porta è pubblicata **solo su loopback**, quindi il DB non è
+raggiungibile dalla rete locale:
+
+```bash
+mongosh "mongodb://<user>:<password>@127.0.0.1:${MONGO_HOST_PORT}/<db>?authSource=admin"
+```
+
+`MONGO_HOST_PORT` esiste perché su una macchina con un mongod nativo la 27017 è
+già occupata e il container non partirebbe; in quel caso basta metterla a 27018.
+Dagli altri container di compose l'indirizzo è invece `mongo:27017`, sempre con
+`authSource=admin`.
+
+Verifica rapida della connettività, senza scrivere la password a riga di comando:
+
+```bash
+docker compose exec mongo sh -c 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" \
+  -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin \
+  --eval "db.adminCommand({ping:1})"'
+```
+
+### Limiti da conoscere prima di costruirci sopra
+
+È un **nodo singolo, senza replica set**. Due conseguenze che pesano sul design
+di un layer di memoria:
+
+- **niente transazioni multi-documento**: `session.startTransaction()` fallisce.
+  Scrivere un turno di conversazione deve stare in un solo documento, o
+  tollerare scritture parziali.
+- **niente change streams**: `db.collection.watch()` non è disponibile, quindi
+  nessuna notifica push sui cambi. Chi vuole reagire alle scritture deve fare
+  polling.
+
+Entrambi richiedono un replica set, anche a singolo nodo (`--replSet` più
+`rs.initiate()`), che comporta oplog e una configurazione in più: non è stato
+introdotto perché per una demo locale il costo supera il beneficio.
+
+## Redis
+
+Memoria a breve termine del servizio di memoria: la coda calda delle
+conversazioni. Requisiti opposti a quelli di Mongo — latenza bassa e scadenza
+automatica invece di durata e storia completa — per questo è un servizio a sé e
+non un'altra collezione.
+
+```bash
+docker compose up -d redis
+docker compose ps redis          # atteso: Up (healthy)
+```
+
+Password obbligatoria dal `.env` (`REDIS_PASSWORD`), porta su loopback
+(`REDIS_HOST_PORT`, default 6379). **Nessun volume, ed è voluto**: quello che
+vive qui deve essere sempre ricostruibile da Mongo. Se perdere Redis perdesse
+dati, sarebbe il posto sbagliato dove tenerli.
+
+L'immagine è `redis:8.2.3`, non `redis-stack`: da Redis 8 il Query Engine sta
+nella distribuzione open source (AGPLv3) e redis-stack non è più mantenuta.
+Verificato sull'istanza: `FT.CREATE` e `VADD` rispondono, quindi la ricerca
+vettoriale è disponibile qui senza aggiungere un terzo datastore.
+
 ## Test
 
 ```bash
