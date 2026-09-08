@@ -22,16 +22,16 @@ class BrokenHot:
     """Simulate unavailable Redis; the service must degrade gracefully."""
 
     async def append(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis giu'")
+        raise ConnectionError("redis down")
 
     async def tail(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis giu'")
+        raise ConnectionError("redis down")
 
     async def forget(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis giu'")
+        raise ConnectionError("redis down")
 
     async def ping(self) -> None:
-        raise ConnectionError("redis giu'")
+        raise ConnectionError("redis down")
 
 
 async def client_for(memory: ThreadMemory) -> httpx.AsyncClient:
@@ -53,11 +53,11 @@ async def test_the_tail_comes_from_the_cache_once_it_is_warm(memory, scope):
 async def test_without_redis_it_still_answers_from_the_durable_store(transcripts, scope):
     degraded = ThreadMemory(transcripts, BrokenHot())
 
-    await degraded.append(scope, "t1", NewMessage(role="user", content="scritto comunque"))
+    await degraded.append(scope, "t1", NewMessage(role="user", content="written anyway"))
     result = await degraded.tail(scope, "t1", limit=10)
 
     assert result.source == "durable"
-    assert [m.content for m in result.messages] == ["scritto comunque"]
+    assert [m.content for m in result.messages] == ["written anyway"]
 
 
 async def test_the_cache_never_holds_the_only_copy(memory, transcripts, hot, scope):
@@ -235,9 +235,9 @@ async def test_the_returned_context_is_pruned_but_the_transcript_is_whole(memory
         "t1",
         Snapshot(
             messages=[
-                {"id": "m1", "role": "user", "content": "domanda"},
+                {"id": "m1", "role": "user", "content": "question"},
                 {"id": "m2", "role": "reasoning", "content": "", "encrypted_value": "[lungo]"},
-                {"id": "m3", "role": "assistant", "content": "risposta"},
+                {"id": "m3", "role": "assistant", "content": "answer"},
             ]
         ),
     )
@@ -258,7 +258,7 @@ async def test_the_api_can_ask_for_the_whole_transcript(memory, scope):
             "/threads/t1/snapshot",
             json={
                 "messages": [
-                    {"id": "m1", "role": "user", "content": "domanda"},
+                    {"id": "m1", "role": "user", "content": "question"},
                     {"id": "m2", "role": "reasoning", "content": "pensiero"},
                 ]
             },
@@ -295,8 +295,8 @@ class BrokenSummarizer:
 def long_thread(turns: int) -> list[dict]:
     messages = []
     for i in range(turns):
-        messages.append({"id": f"u{i}", "role": "user", "content": f"domanda {i}"})
-        messages.append({"id": f"a{i}", "role": "assistant", "content": f"risposta {i}"})
+        messages.append({"id": f"u{i}", "role": "user", "content": f"question {i}"})
+        messages.append({"id": f"a{i}", "role": "assistant", "content": f"answer {i}"})
     return messages
 
 
@@ -324,7 +324,7 @@ async def test_crossing_the_window_produces_a_summary(compacting, summarizer, sc
     await compacting.compact_if_needed(scope, "t1")
 
     assert len(summarizer.calls) == 1
-    assert [m["content"] for m in summarizer.calls[0]][:2] == ["domanda 0", "risposta 0"]
+    assert [m["content"] for m in summarizer.calls[0]][:2] == ["question 0", "answer 0"]
 
 
 async def test_the_summary_arrives_at_the_head_of_the_context(compacting, scope):

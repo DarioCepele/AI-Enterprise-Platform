@@ -56,7 +56,7 @@ async def test_scopes_do_not_see_each_other(memories, redis_client, scope):
 async def test_the_limit_is_respected(memories, scope):
     await memories.index(
         scope,
-        [("t1", i, f"ricordo {i}") for i in range(5)],
+        [("t1", i, f"memory {i}") for i in range(5)],
         [[1.0, i / 10, 0.0] for i in range(5)],
     )
 

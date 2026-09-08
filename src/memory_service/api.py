@@ -103,7 +103,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         ),
     ) -> str:
         if not scope.strip():
-            raise HTTPException(status_code=400, detail="scope vuoto")
+            raise HTTPException(status_code=400, detail="empty scope")
         return scope
 
     @app.get("/health")
@@ -161,7 +161,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     ) -> Snapshot:
         snapshot = await memory_instance.read_snapshot(scope, thread_id, raw=raw)
         if snapshot is None:
-            raise HTTPException(status_code=404, detail="thread sconosciuto")
+            raise HTTPException(status_code=404, detail="unknown thread")
         return snapshot
 
     @app.delete("/threads/{thread_id}")

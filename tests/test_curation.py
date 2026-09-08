@@ -8,14 +8,14 @@ def msg(role: str, content: str = "x", **extra) -> dict:
     return {"role": role, "content": content, **extra}
 
 
-def turn(user: str = "domanda") -> list[dict]:
+def turn(user: str = "question") -> list[dict]:
     """Build a complete agent turn."""
     return [
         msg("user", user),
         msg("reasoning", "", encrypted_value="[molto lungo]"),
         msg("assistant", "", toolCalls=[{"id": "c1"}]),
         msg("tool", "tool result"),
-        msg("assistant", "risposta"),
+        msg("assistant", "answer"),
     ]
 
 

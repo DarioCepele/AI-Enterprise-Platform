@@ -96,7 +96,7 @@ def test_the_summary_does_not_come_back_as_a_turn():
 
     incoming = [
         summary_message("cosa si era detto", covers_to_seq=9),
-        {"id": "m5", "role": "user", "content": "nuova domanda"},
+        {"id": "m5", "role": "user", "content": "new question"},
     ]
 
     fresh = new_messages(stored(("user", "m1")), incoming)
