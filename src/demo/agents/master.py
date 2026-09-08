@@ -9,6 +9,7 @@ from ..config import SINGLE_TENANT_SCOPE, get_settings
 from ..telemetry import log_context_size
 from ..tools.memory_tools import build_memory_tools
 from ..tools.plan_tools import PlanStore, build_plan_tools
+from ..tools.subagent_tools import build_subagent_tools
 from ..tools.skill_tools import build_skill_tools
 from ..tools.ui_tools import get_tools
 
@@ -28,6 +29,11 @@ Quando richiede piu' passi:
 
 Quando devi confrontare piu' elementi lungo dimensioni comuni, usa il tool
 `ui_table` invece di descrivere il confronto a parole.
+
+Per domande su linguaggi di programmazione chiama `interroga_knowledge`: la
+risposta viene da una knowledge base, non dalla tua memoria. Se devi confrontare
+due argomenti, fai le due chiamate **nello stesso turno**, cosi' partono insieme
+invece che una dopo l'altra.
 
 Se l'utente si riferisce a qualcosa di gia' detto che non vedi nel contesto,
 chiama `cerca_nei_ricordi` prima di dire che non lo sai: le conversazioni
@@ -51,6 +57,11 @@ def build_master_agent(
     store = plan_store if plan_store is not None else PlanStore()
     settings = get_settings()
 
+    subagent_tools = (
+        build_subagent_tools(settings.knowledge_agent_url)
+        if settings.knowledge_agent_url
+        else []
+    )
     memory_tools = (
         build_memory_tools(settings.memory_service_url, SINGLE_TENANT_SCOPE)
         if settings.memory_service_url
@@ -65,6 +76,7 @@ def build_master_agent(
             *build_plan_tools(store),
             *build_skill_tools(),
             *memory_tools,
+            *subagent_tools,
         ],
 
         middleware=[log_context_size],

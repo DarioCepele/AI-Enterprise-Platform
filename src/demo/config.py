@@ -26,6 +26,7 @@ class Settings:
     allowed_origins: tuple[str, ...]
 
     memory_service_url: str
+    knowledge_agent_url: str
 
 def _read_origins() -> tuple[str, ...]:
     raw = os.getenv("DEMO_ALLOWED_ORIGINS", "")
@@ -42,4 +43,5 @@ def get_settings() -> Settings:
         use_fake_client=os.getenv("DEMO_FAKE_CLIENT", "false").lower() == "true",
         allowed_origins=_read_origins(),
         memory_service_url=os.getenv("DEMO_MEMORY_SERVICE_URL", "").strip(),
+        knowledge_agent_url=os.getenv("DEMO_KNOWLEDGE_AGENT_URL", "").strip(),
     )

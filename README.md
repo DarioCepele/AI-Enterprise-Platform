@@ -187,3 +187,23 @@ torna al modello come testo e la run continua.
 Verificato dal vivo: informazione detta in una conversazione, poi in un thread
 nuovo la domanda «quale alternativa avevamo scartato per il deploy?» → l'agente
 chiama `cerca_nei_ricordi` e risponde «ECS», che nel contesto non c'era.
+
+## Interrogare il sottoagente
+
+Con `DEMO_KNOWLEDGE_AGENT_URL` impostata, l'agente ha `interroga_knowledge`:
+gira una domanda al [knowledge agent](../demo-knowledge-agent/README.md) via
+**A2A**, non come tool locale ma come agente remoto.
+
+La card viene scaricata da `/.well-known/agent-card.json` e passata come
+`agent_card`: con il solo `url` il client A2A degrada a non-streaming senza
+dirlo. La card si scarica **una volta** e si riusa; se non dichiara `streaming`,
+il tool lo scrive nei log invece di far finta di niente.
+
+Le istruzioni chiedono al modello di fare le due interrogazioni **nello stesso
+turno**: MAF esegue le tool call di un turno con `asyncio.gather`, quindi
+partono insieme. Misurato su una run vera: 158 aggiornamenti in 11,67 s e 166
+in 14,25 s, terminate a 0,9 s di distanza — in serie sarebbero stati ~26 s.
+
+Sottoagente irraggiungibile: l'errore torna al modello come testo, che risponde
+con quello che sa dichiarando che quella parte non è verificata. La run non
+muore per un sottoagente giù.
