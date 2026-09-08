@@ -28,10 +28,12 @@ from typing import Any
 # qualcosa, invece di far credere al modello che il tool non abbia risposto.
 CLEARED = "[risultato rimosso per fare spazio nel contesto]"
 
-# Prefisso dell'id del messaggio di riassunto. Serve a riconoscerlo quando
-# torna indietro dentro lo snapshot successivo: senza, il riassunto verrebbe
-# scritto come un turno vero e finirebbe nel riassunto dopo, all'infinito.
-SUMMARY_ID_PREFIX = "memoria:riassunto"
+# Prefisso degli id dei messaggi che questo servizio inietta ricomponendo il
+# contesto -- riassunto e fatti. Riconoscerli quando tornano indietro dentro lo
+# snapshot successivo evita che diventino turni veri: senza, il servizio
+# finirebbe per riassumere i propri riassunti, a ogni giro, per sempre.
+MEMORY_ID_PREFIX = "memoria:"
+SUMMARY_ID_PREFIX = f"{MEMORY_ID_PREFIX}riassunto"
 
 
 @dataclass(frozen=True)

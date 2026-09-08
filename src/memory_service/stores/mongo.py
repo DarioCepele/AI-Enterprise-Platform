@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 TURNS = "thread_turns"
 THREADS = "threads"
 SUMMARIES = "thread_summaries"
+# I fatti stanno sullo scope e non sul thread: cancellare una conversazione non
+# cancella cio' che si e' imparato dell'utente.
+FACTS = "scope_facts"
 
 
 def build_client(uri: str) -> AsyncMongoClient:
@@ -80,6 +83,11 @@ class MongoTranscripts:
             [("scope", ASCENDING), ("thread_id", ASCENDING)],
             unique=True,
             name="thread_unico",
+        )
+        await self._db[FACTS].create_index(
+            [("scope", ASCENDING), ("chiave", ASCENDING)],
+            unique=True,
+            name="fatto_unico",
         )
         await self._db[SUMMARIES].create_index(
             [("scope", ASCENDING), ("thread_id", ASCENDING), ("covers_to_seq", DESCENDING)],
@@ -276,6 +284,55 @@ class MongoTranscripts:
             sort=[("covers_to_seq", DESCENDING)],
             projection={"text": 1, "covers_to_seq": 1, "_id": 0},
         )
+
+    async def upsert_facts(
+        self,
+        scope: str,
+        facts: list[tuple[str, str]],
+        *,
+        thread_id: str,
+    ) -> int:
+        """Scrive i fatti dello scope. Restituisce quanti ne sono cambiati.
+
+        Chiave sola per scope: lo stesso fatto ridetto **aggiorna** invece di
+        duplicare. Un agente che crede due valori diversi della stessa cosa e'
+        peggio di uno che non la sa.
+        """
+        changed = 0
+        for chiave, valore in facts:
+            result = await self._db[FACTS].update_one(
+                {"scope": scope, "chiave": chiave},
+                {
+                    "$set": {
+                        "valore": valore,
+                        "updated_at": datetime.now(UTC),
+                        "thread_id": thread_id,
+                    },
+                    "$setOnInsert": {"created_at": datetime.now(UTC)},
+                },
+                upsert=True,
+            )
+            if result.upserted_id is not None or result.modified_count:
+                changed += 1
+        return changed
+
+    async def facts_of(self, scope: str, limit: int) -> list[dict[str, Any]]:
+        """I fatti dello scope, dai piu' recenti.
+
+        Il limite non e' un dettaglio: senza, il contesto di ogni run
+        crescerebbe con tutto quello che si e' mai saputo dell'utente.
+        """
+        cursor = (
+            self._db[FACTS]
+            .find({"scope": scope}, projection={"chiave": 1, "valore": 1, "_id": 0})
+            .sort("updated_at", DESCENDING)
+            .limit(limit)
+        )
+        return [document async for document in cursor]
+
+    async def forget_facts(self, scope: str) -> int:
+        result = await self._db[FACTS].delete_many({"scope": scope})
+        return int(result.deleted_count)
 
     async def threads_of(self, scope: str) -> list[str]:
         """Gli id dei thread di uno scope."""

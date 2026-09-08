@@ -5,11 +5,12 @@ import logging
 from dataclasses import replace
 
 from .curation import ContextPolicy, curate, summary_message, window_start
+from .facts import facts_message, parse_facts
 from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .snapshots import new_messages
 from .stores.hot import HotTail
 from .stores.mongo import MongoTranscripts
-from .summarizer import Summarizer
+from .summarizer import FactExtractor, Summarizer
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,15 @@ class ThreadMemory:
         hot: HotTail,
         policy: ContextPolicy | None = None,
         summarizer: Summarizer | None = None,
+        extractor: FactExtractor | None = None,
+        max_facts: int = 30,
     ) -> None:
         self._durable = durable
         self._hot = hot
         self._policy = policy or ContextPolicy()
         self._summarizer = summarizer
+        self._extractor = extractor
+        self._max_facts = max_facts
         # Thread con una compattazione gia' in corso.
         self._compacting: set[tuple[str, str]] = set()
 
@@ -97,7 +102,7 @@ class ThreadMemory:
         misurato, non temuto. Il riassunto serve al turno successivo, non a
         questo, quindi puo' benissimo arrivare dopo.
         """
-        if self._summarizer is None or not self._policy.max_messages:
+        if (self._summarizer is None and self._extractor is None) or not self._policy.max_messages:
             return
 
         key = (scope, thread_id)
@@ -110,11 +115,56 @@ class ThreadMemory:
         self._compacting.add(key)
         try:
             await self._compact(scope, thread_id)
+            await self._learn_facts(scope, thread_id)
         finally:
             self._compacting.discard(key)
 
+    async def _learn_facts(self, scope: str, thread_id: str) -> None:
+        """Distilla i fatti duraturi dai turni che stanno uscendo.
+
+        Stesso momento della compattazione, e non e' un caso: quello e' il
+        punto in cui dei messaggi stanno per smettere di essere leggibili dal
+        modello. Se qualcosa li' dentro vale anche domani, va estratto adesso o
+        mai piu'.
+        """
+        if self._extractor is None or not self._policy.max_messages:
+            return
+
+        history = await self._durable.history(scope, thread_id)
+        payloads = [_payload_of(message) for message in history]
+        cut = window_start(payloads, self._policy.max_messages)
+        if cut == 0:
+            return
+
+        try:
+            raw = await self._extractor.extract_facts(payloads[:cut])
+        except Exception:
+            logger.error(
+                "Fatti NON estratti dal thread %s: quei turni escono dal contesto "
+                "senza lasciare nulla di duraturo.",
+                thread_id,
+                exc_info=True,
+            )
+            return
+
+        facts = parse_facts(raw)
+        if not facts:
+            return
+
+        changed = await self._durable.upsert_facts(
+            scope, [(fact.chiave, fact.valore) for fact in facts], thread_id=thread_id
+        )
+        logger.info(
+            "Dal thread %s: %d fatti duraturi, %d nuovi o cambiati.",
+            thread_id,
+            len(facts),
+            changed,
+        )
+
     async def _compact(self, scope: str, thread_id: str) -> None:
         """Il lavoro vero: taglio, riassunto, scrittura."""
+        if self._summarizer is None:
+            return
         history = await self._durable.history(scope, thread_id)
         payloads = [_payload_of(message) for message in history]
         cut = window_start(payloads, self._policy.max_messages)
@@ -175,7 +225,26 @@ class ThreadMemory:
         head = await self._durable.read_head(scope, thread_id)
         messages = await self._durable.history(scope, thread_id)
         if head is None and not messages:
-            return None
+            # Thread mai visto: niente conversazione, ma i fatti duraturi
+            # valgono comunque -- stanno sullo scope, non qui. Rispondere 404
+            # rendeva inutile l'intera memoria a lungo termine: il primo
+            # messaggio in una scheda nuova ripartiva senza saper nulla.
+            if raw:
+                return None
+            facts = await self._durable.facts_of(scope, self._max_facts)
+            if not facts:
+                return None
+            return Snapshot(
+                messages=[facts_message(facts)],
+                curation={
+                    "conservati": 1,
+                    "ragionamenti_tolti": 0,
+                    "risultati_svuotati": 0,
+                    "messaggi_scartati": 0,
+                    "riassunti": 0,
+                    "fatti": len(facts),
+                },
+            )
 
         head = head or {}
         # Si restituisce la forma originale quando c'e': un messaggio
@@ -205,6 +274,14 @@ class ThreadMemory:
                 policy = replace(policy, max_messages=None)
             payloads, curation = curate(payloads, policy, summary)
             report = curation.as_dict()
+
+            # I fatti entrano sempre, anche in un thread appena aperto dove non
+            # c'e' niente da riassumere: e' esattamente li' che si vede la
+            # differenza fra un agente con memoria e uno che ricomincia.
+            facts = await self._durable.facts_of(scope, self._max_facts)
+            report["fatti"] = len(facts)
+            if facts:
+                payloads = [facts_message(facts), *payloads]
             logger.info(
                 "Contesto del thread %s ricomposto: %d messaggi su %d "
                 "(%d ragionamenti tolti, %d risultati svuotati, %d scartati).",
@@ -229,6 +306,9 @@ class ThreadMemory:
         threads = await self._durable.threads_of(scope)
         for thread_id in threads:
             await self.forget(scope, thread_id)
+        # Anche i fatti: sono l'unica cosa che sopravvive alla cancellazione di
+        # un thread, ma non deve sopravvivere alla cancellazione dello scope.
+        await self._durable.forget_facts(scope)
         return len(threads)
 
     async def check(self) -> dict[str, str]:

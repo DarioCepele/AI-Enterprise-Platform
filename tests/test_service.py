@@ -471,3 +471,154 @@ async def test_the_api_compacts_after_answering(transcripts, hot, summarizer, sc
     # completo -- salva, compatta, ricomponi -- funzioni davvero.
     assert response.status_code == 200
     assert context.json()["curation"]["riassunti"] == 1
+
+
+class RecordingExtractor:
+    """Estrattore finto: risponde JSON e registra cosa ha visto."""
+
+    def __init__(self, raw: str = '[{"chiave": "referente", "valore": "Marta"}]') -> None:
+        self.raw = raw
+        self.calls: list[list[dict]] = []
+
+    async def extract_facts(self, messages):
+        self.calls.append(messages)
+        return self.raw
+
+
+@pytest.fixture
+def extractor() -> RecordingExtractor:
+    return RecordingExtractor()
+
+
+@pytest.fixture
+def learning(transcripts, hot, summarizer, extractor) -> ThreadMemory:
+    from memory_service.curation import ContextPolicy
+
+    return ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer, extractor)
+
+
+async def test_facts_are_learned_from_the_turns_that_leave(learning, extractor, scope):
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+
+    assert len(extractor.calls) == 1
+    snapshot = await learning.read_snapshot(scope, "t1")
+    assert snapshot.curation["fatti"] == 1
+
+
+async def test_a_fact_learned_in_one_thread_shows_up_in_another(learning, scope):
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+
+    # Thread nuovo, nessuna conversazione da riassumere: e' qui che si vede la
+    # differenza fra un agente con memoria e uno che ricomincia ogni volta.
+    await learning.save_snapshot(
+        scope, "t2", Snapshot(messages=[{"id": "x", "role": "user", "content": "ciao"}])
+    )
+    altro = await learning.read_snapshot(scope, "t2")
+
+    assert altro.messages[0]["role"] == "system"
+    assert "referente: Marta" in altro.messages[0]["content"]
+
+
+async def test_facts_do_not_cross_scopes(learning, transcripts, hot, summarizer, extractor, scope):
+    from memory_service.curation import ContextPolicy
+
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+
+    altrui = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer, extractor)
+    await altrui.save_snapshot(
+        f"{scope}-altro", "t1", Snapshot(messages=[{"id": "y", "role": "user", "content": "ciao"}])
+    )
+    snapshot = await altrui.read_snapshot(f"{scope}-altro", "t1")
+
+    assert snapshot.curation["fatti"] == 0
+
+
+async def test_the_same_fact_updated_does_not_become_two(learning, extractor, transcripts, scope):
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+
+    extractor.raw = '[{"chiave": "referente", "valore": "Giulio"}]'
+    await learning.save_snapshot(scope, "t2", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t2")
+
+    facts = await transcripts.facts_of(scope, limit=10)
+    # Un agente che crede due valori diversi della stessa cosa e' peggio di uno
+    # che non la sa.
+    assert facts == [{"chiave": "referente", "valore": "Giulio"}]
+
+
+async def test_deleting_a_thread_keeps_the_facts(learning, transcripts, scope):
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+
+    await learning.forget(scope, "t1")
+
+    # I fatti stanno sullo scope: cancellare una conversazione non cancella
+    # cio' che si e' imparato dell'utente.
+    assert await transcripts.facts_of(scope, limit=10) != []
+
+
+async def test_deleting_the_scope_takes_the_facts_too(learning, transcripts, scope):
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+
+    await learning.forget_scope(scope)
+
+    assert await transcripts.facts_of(scope, limit=10) == []
+
+
+async def test_unreadable_facts_do_not_break_the_compaction(
+    transcripts, hot, summarizer, scope, caplog
+):
+    from memory_service.curation import ContextPolicy
+
+    memory = ThreadMemory(
+        transcripts, hot, ContextPolicy(max_messages=6), summarizer, RecordingExtractor("non JSON")
+    )
+    await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await memory.compact_if_needed(scope, "t1")
+
+    snapshot = await memory.read_snapshot(scope, "t1")
+    # I fatti sono un di piu': il riassunto e la conversazione restano interi.
+    assert snapshot.curation["fatti"] == 0
+    assert snapshot.curation["riassunti"] == 1
+
+
+async def test_the_injected_facts_do_not_come_back_as_a_turn(learning, scope):
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+    context = await learning.read_snapshot(scope, "t1")
+
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=context.messages))
+    integrale = await learning.read_snapshot(scope, "t1", raw=True)
+
+    assert all(m.get("role") != "system" for m in integrale.messages)
+
+
+async def test_a_brand_new_thread_still_gets_the_facts(learning, scope):
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+
+    # Thread mai visto: nessuna conversazione, ma i fatti stanno sullo scope.
+    # Rispondere "non so nulla" qui rendeva inutile la memoria a lungo termine.
+    vergine = await learning.read_snapshot(scope, "mai-aperto-prima")
+
+    assert vergine is not None
+    assert vergine.curation["fatti"] == 1
+    assert "referente: Marta" in vergine.messages[0]["content"]
+
+
+async def test_a_brand_new_thread_without_facts_is_still_unknown(memory, scope):
+    # Senza fatti non c'e' nulla da dire: 404, come prima.
+    assert await memory.read_snapshot(scope, "mai-aperto-prima") is None
+
+
+async def test_the_whole_transcript_of_an_unknown_thread_stays_unknown(learning, scope):
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+
+    # I fatti sono una ricomposizione, non un transcript: con raw non entrano.
+    assert await learning.read_snapshot(scope, "mai-aperto-prima", raw=True) is None

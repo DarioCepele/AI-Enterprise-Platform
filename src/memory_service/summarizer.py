@@ -35,10 +35,35 @@ Scrivi in italiano, in prosa asciutta, al massimo dieci righe. Non inventare
 nulla che non sia nella conversazione: se un punto non e' chiaro, dillo."""
 
 
+# Cosa e' un fatto e cosa non lo e'. La differenza che conta: un fatto resta
+# vero anche fuori da questa conversazione. "Preferisce Go" e' un fatto,
+# "sta aspettando la risposta" no.
+FACTS_INSTRUCTIONS = """Estrai dalla conversazione i fatti duraturi sull'utente e sul suo lavoro.
+
+Un fatto duraturo resta vero anche in una conversazione diversa, domani:
+identita' e ruoli, preferenze stabili, vincoli, nomi di progetti, decisioni
+prese. Non lo sono lo stato di questa conversazione, cio' che l'utente sta
+chiedendo adesso, ne' le informazioni che il modello ha portato da fuori.
+
+Rispondi **solo** con un array JSON di oggetti {"chiave", "valore"}, dove la
+chiave e' un'etichetta breve in minuscolo con underscore (per esempio
+"referente" o "linguaggio_preferito") e il valore e' conciso. La chiave serve a
+riconoscere lo stesso fatto quando cambia valore: usa la stessa etichetta per
+la stessa cosa.
+
+Se non c'e' nessun fatto duraturo, rispondi con un array vuoto. Non inventare."""
+
+
 class Summarizer(Protocol):
     """Da una lista di messaggi a un riassunto in prosa."""
 
     async def summarize(self, messages: list[dict[str, Any]]) -> str: ...
+
+
+class FactExtractor(Protocol):
+    """Da una lista di messaggi ai fatti duraturi, in JSON."""
+
+    async def extract_facts(self, messages: list[dict[str, Any]]) -> str: ...
 
 
 class NoSummarizer:
@@ -78,16 +103,27 @@ class OpenAICompatibleSummarizer:
         )
 
     async def summarize(self, messages: list[dict[str, Any]]) -> str:
+        return await self._ask(INSTRUCTIONS, messages)
+
+    async def extract_facts(self, messages: list[dict[str, Any]]) -> str:
+        """Due chiamate separate e non una sola che restituisce tutto.
+
+        Costano di piu', ma un JSON malformato farebbe perdere anche il
+        riassunto, e i due lavori falliscono per ragioni diverse.
+        """
+        return await self._ask(FACTS_INSTRUCTIONS, messages)
+
+    async def _ask(self, instructions: str, messages: list[dict[str, Any]]) -> str:
         transcript = "\n".join(_readable(message) for message in messages)
         response = await self._client.post(
             "/chat/completions",
             json={
                 "model": self._model,
                 "messages": [
-                    {"role": "system", "content": INSTRUCTIONS},
+                    {"role": "system", "content": instructions},
                     {"role": "user", "content": transcript},
                 ],
-                # Un riassunto non deve essere creativo.
+                # Ne' un riassunto ne' un'estrazione devono essere creativi.
                 "temperature": 0,
             },
         )

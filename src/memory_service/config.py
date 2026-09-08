@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     drop_reasoning: bool = True
     keep_tool_results: int = Field(default=4, ge=0)
     max_context_messages: int | None = Field(default=60, ge=1)
+    # Quanti fatti duraturi entrano nel contesto. Senza un tetto, il contesto
+    # di ogni run crescerebbe con tutto cio' che si e' mai saputo dell'utente.
+    max_facts: int = Field(default=30, ge=0)
 
 
 @lru_cache

@@ -192,6 +192,62 @@ riassunti — uno sopravvissuto racconterebbe una conversazione cancellata.
 | `MEMORY_SUMMARY_MODEL` | il modello che riassume; vuoto = nessuna compattazione, detto all'avvio |
 | `MEMORY_SUMMARY_BASE_URL` | endpoint Chat Completions del riassuntore |
 | `MEMORY_SUMMARY_API_KEY` | credenziale del riassuntore |
+| `MEMORY_MAX_FACTS` | quanti fatti duraturi entrano nel contesto (default 30) |
+
+## Fatti duraturi: cosa resta vero fuori dalla conversazione
+
+Il riassunto è legato al thread: racconta *quella* conversazione. Un fatto no.
+«Preferisce Go», «il referente è Marta», «fuso Europe/Rome» valgono anche in un
+thread aperto domani, dove non c'è nessuna conversazione da riassumere — ed è
+lì che si vede la differenza fra un agente con memoria e uno che ricomincia
+ogni volta.
+
+Per questo i fatti stanno **sullo scope, non sul thread**: cancellare una
+conversazione non cancella ciò che si è imparato dell'utente; cancellare lo
+scope sì.
+
+**Si estraggono nello stesso momento della compattazione**, e non è un caso:
+quello è il punto in cui dei messaggi stanno per smettere di essere leggibili
+dal modello. Se qualcosa lì dentro vale anche domani, va tirato fuori adesso o
+mai più. Sono due chiamate distinte al modello e non una sola che restituisce
+tutto: costano di più, ma un JSON malformato farebbe perdere anche il
+riassunto, e i due lavori falliscono per ragioni diverse.
+
+**La chiave è un'etichetta, non una frase** (`linguaggio_preferito`, non «il
+linguaggio che preferisce è»). Serve a riconoscere lo stesso fatto quando viene
+ridetto con un valore diverso, per **aggiornarlo invece di duplicarlo**: un
+agente che crede due valori diversi della stessa cosa è peggio di uno che non
+la sa. Una voce senza chiave o senza valore viene scartata, e un JSON
+illeggibile non solleva: i fatti sono un di più, e non devono poter far fallire
+una conversazione.
+
+I fatti entrano nel contesto a **ogni** lettura, anche in un thread appena
+aperto, con una riga che dice come comportarsi in caso di conflitto: *se
+l'utente li contraddice, vale quello che dice adesso*. Senza, il modello
+difende un fatto vecchio contro chi sta parlando.
+
+Prova reale, di seguito. Prima una conversazione lunga in cui l'utente si
+presenta; poi, in un **thread mai visto**, la domanda:
+
+> **Che linguaggio preferisco e in che fuso orario sono?**
+> Preferisci Go e sei nel fuso orario Europe/Rome.
+
+Cosa era finito in `scope_facts`, estratto dai turni usciti dalla finestra:
+
+```json
+[{"chiave": "nome", "valore": "Dario"},
+ {"chiave": "ruolo", "valore": "backend engineer"},
+ {"chiave": "linguaggio_preferito", "valore": "Go"},
+ {"chiave": "fuso_orario", "valore": "Europe/Rome"}]
+```
+
+| Variabile | Cosa decide |
+| --- | --- |
+| `MEMORY_MAX_FACTS` | quanti fatti entrano nel contesto (default 30) |
+
+Il tetto non è un dettaglio: senza, il contesto di ogni run crescerebbe con
+tutto ciò che si è mai saputo dell'utente. Manca ancora il **decadimento**: un
+fatto vecchio e mai più confermato pesa quanto uno di ieri.
 
 ## Lo scope, e di chi ci si fida
 
@@ -256,7 +312,9 @@ loro. Senza `.env` configurato i test si saltano invece di fallire.
 
 ## Cosa non c'e' ancora
 
-- **Fatti duraturi per utente** (preferenze, entita').
+- **Decadimento dei fatti**: un fatto vecchio e mai piu' confermato pesa quanto
+  uno di ieri. L'articolo di riferimento suggerisce di abbassare una forza
+  invece di cancellare.
 - **Ricerca semantica**: `$vectorSearch` e' solo su Atlas. Redis 8 include il
   Query Engine e i vector set (`FT.CREATE`, `VADD` verificati sull'istanza),
   quindi la ricerca per significato puo' vivere dove sta gia' la coda calda,

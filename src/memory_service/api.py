@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 
 def create_app(memory: ThreadMemory | None = None, settings: Settings | None = None) -> FastAPI:
     """Costruisce l'app. `memory` va passato nei test."""
+    # Uvicorn configura i propri logger, non quelli dell'applicazione: senza
+    # questa riga, in container si vedono solo le righe di accesso HTTP e ogni
+    # diagnostica del servizio sparisce. Ha gia' nascosto un guasto vero --
+    # l'estrazione dei fatti che falliva in silenzio.
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
     config = settings or get_settings()
     # Il servizio iniettato e' pronto subito, senza aspettare il lifespan: i
     # test lo montano su un transport ASGI che il lifespan non lo esegue.
@@ -52,13 +59,16 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             summarizer = OpenAICompatibleSummarizer(
                 config.summary_base_url, config.summary_api_key, config.summary_model
             )
-            logger.info("Compattazione attiva con il modello %s.", config.summary_model)
+            logger.info(
+                "Compattazione e fatti duraturi attivi con il modello %s.", config.summary_model
+            )
         else:
             # Detto una volta all'avvio invece che a ogni taglio: e' una scelta
             # di configurazione, non un evento.
             logger.warning(
                 "Nessun modello per i riassunti (MEMORY_SUMMARY_MODEL): i turni "
-                "fuori dalla finestra usciranno dal contesto senza riassunto."
+                "fuori dalla finestra usciranno dal contesto senza riassunto, e "
+                "non si imparera' nessun fatto duraturo."
             )
         state["memory"] = ThreadMemory(
             durable,
@@ -69,6 +79,10 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 max_messages=config.max_context_messages,
             ),
             summarizer,
+            # Stesso oggetto per riassumere ed estrarre: stesso endpoint,
+            # stesso modello, due lavori diversi.
+            summarizer,
+            config.max_facts,
         )
         try:
             yield
