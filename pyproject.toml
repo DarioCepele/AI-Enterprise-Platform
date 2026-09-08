@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Master agent del laboratorio AG-UI: AG-UI su SSE + tool nativi"
 requires-python = ">=3.12"
 dependencies = [
-    "agent-framework-a2a",
     "a2a-sdk[http-server]",
     "agent-framework-ag-ui>=1.2.2",
     "agent-framework-core==1.17.0",

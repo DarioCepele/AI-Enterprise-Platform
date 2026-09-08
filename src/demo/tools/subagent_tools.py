@@ -5,9 +5,11 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
+from uuid import uuid4
 
 from a2a.types import AgentCard
 from agent_framework import Content, FunctionTool, tool
+from agent_framework.ag_ui import state_update
 
 from ..a2a.client import A2AClient, Avanzamento, fetch_agent_card
 from ..server.run_context import subagent_run
@@ -49,6 +51,7 @@ def build_subagent_tools(
         pezzi: list[str] = []
         stati: list[str] = []
         artefatti = 0
+        schede: list = []
         task_id = ""
         domanda_del_sottoagente = ""
 
@@ -64,6 +67,7 @@ def build_subagent_tools(
                         pezzi.append(avanzamento.testo)
                     if avanzamento.artefatto:
                         artefatti += 1
+                        schede.append(avanzamento.artefatto)
                         if avanzamento.artefatto.testo:
                             pezzi.append(avanzamento.artefatto.testo)
                     if avanzamento.attende_risposta:
@@ -76,6 +80,9 @@ def build_subagent_tools(
             )
 
         risposta = "".join(pezzi).strip()
+        scheda = next(
+            (a.dati for a in schede if a.dati and a.dati.get("component") == "scheda"), None
+        )
         logger.info(
             "Knowledge agent su '%s': task %s, stati %s, %d artefatti in %.2fs, %d caratteri.",
             domanda,
@@ -95,6 +102,25 @@ def build_subagent_tools(
             return Content.from_text(
                 f"Il knowledge agent non ha prodotto una risposta su '{domanda}'."
             )
-        return Content.from_text(risposta)
+        if scheda is None:
+            return Content.from_text(risposta)
+
+        artefatto_id = f"kb_{task_id[:8] or uuid4().hex[:8]}"
+        return state_update(
+            text=risposta,
+            tool_result={
+                "component": "scheda",
+                "id": artefatto_id,
+                "agente": "knowledge",
+                "domanda": str(scheda.get("domanda", domanda)),
+                "documenti": [str(d) for d in scheda.get("documenti", [])],
+                "estratto": str(scheda.get("estratto", risposta)),
+            },
+            state={
+                "artifacts": [
+                    {"id": artefatto_id, "component": "scheda", "title": f"knowledge: {domanda[:60]}"}
+                ]
+            },
+        )
 
     return [interroga_knowledge]

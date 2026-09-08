@@ -257,3 +257,8 @@ Il client espone anche ciò che serve ai passi successivi: il `task_id` per
 riprendere un task, e `attende_risposta` quando il sottoagente si ferma in
 `TASK_STATE_INPUT_REQUIRED`. Oggi il tool riferisce la domanda all'utente invece
 di rispondere al posto suo; la ripresa vera dello stesso task è il pezzo dopo.
+
+La scheda del sottoagente arriva in timeline come **artefatto**, con le fonti
+che ha letto — non come testo indistinguibile dal resto della risposta. Nessuno
+dei due repository dipende più da `agent-framework-a2a`: client ed executor
+stanno sull'SDK stabile.
