@@ -116,3 +116,26 @@ dependency di autenticazione sull'endpoint, mai da un header scelto dal client.
 Conseguenza da tenere d'occhio: la storia ora cresce a ogni turno e nessuno la
 pota. E' il prossimo passo -- tetto di contesto, compattazione dei tool result
 e riassunto dei turni vecchi.
+
+## Telemetria del contesto
+
+Un middleware di chat registra la dimensione del contesto **a ogni chiamata al
+modello**, non a ogni run: e' dentro la singola run, fra un tool e l'altro, che
+il contesto si gonfia. Le righe finiscono su `demo.telemetry`, quindi nel tab
+LOG del frontend:
+
+```
+Contesto: 1 messaggi, 58 caratteri (0 dai tool); 1167 token in, 1788 out.
+Contesto: 3 messaggi, 1252 caratteri (659 dai tool); 1554 token in, 100 out.
+Contesto: 9 messaggi, 2640 caratteri (801 dai tool); 2181 token in, 123 out.
+```
+
+I caratteri sono un proxy grossolano dei token, disponibile anche quando il
+provider non riporta l'uso; la quota "dai tool" e' contata a parte perche' e' la
+prima da svuotare quando serve fare spazio. Le righe contengono **solo
+conteggi**: la conversazione non e' materiale da diagnostica, e questi log sono
+leggibili dal frontend.
+
+I client finti dei test ereditano da `ChatMiddlewareLayer` come il client
+OpenAI vero. Senza quel livello il middleware non verrebbe eseguito nei test, e
+la telemetria risulterebbe verde in laboratorio e assente in produzione.

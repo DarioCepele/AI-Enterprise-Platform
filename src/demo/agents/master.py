@@ -6,6 +6,7 @@ from agent_framework.openai import OpenAIChatCompletionClient
 
 from ..chat_clients.fake import FakeStreamingChatClient
 from ..config import get_settings
+from ..telemetry import log_context_size
 from ..tools.plan_tools import PlanStore, build_plan_tools
 from ..tools.skill_tools import build_skill_tools
 from ..tools.ui_tools import get_tools
@@ -50,4 +51,7 @@ def build_master_agent(
         instructions=INSTRUCTIONS,
         client=chat_client or _default_chat_client(),
         tools=[*get_tools(), *build_plan_tools(store), *build_skill_tools()],
+        # Una riga per chiamata al modello, non per run: e' dentro la singola
+        # run, fra un tool e l'altro, che il contesto si gonfia.
+        middleware=[log_context_size],
     )

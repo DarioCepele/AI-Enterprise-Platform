@@ -16,13 +16,19 @@ from agent_framework import (
     Message,
     ResponseStream,
 )
+from agent_framework._middleware import ChatMiddlewareLayer
 from agent_framework._tools import FunctionInvocationLayer
 
 DEFAULT_CHUNKS = ["Sto ", "elaborando ", "la ", "risposta."]
 
 
-class FakeStreamingChatClient(BaseChatClient):
-    """Emette `chunks` uno alla volta, con `delay` secondi di distanza."""
+class FakeStreamingChatClient(ChatMiddlewareLayer, BaseChatClient):
+    """Emette `chunks` uno alla volta, con `delay` secondi di distanza.
+
+    Eredita da ChatMiddlewareLayer come il client OpenAI vero: senza quel
+    livello il middleware montato sull'agente non verrebbe eseguito nei test,
+    e la telemetria risulterebbe verde qui e assente in produzione.
+    """
 
     def __init__(self, chunks: list[str] | None = None, delay: float = 0.0) -> None:
         super().__init__()
@@ -62,10 +68,11 @@ class FakeStreamingChatClient(BaseChatClient):
         return ResponseStream(_stream(), finalizer=ChatResponse.from_updates)
 
 
-class ToolCallingFakeClient(FunctionInvocationLayer, BaseChatClient):
+class ToolCallingFakeClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
     """Primo giro: chiama `tool_name` con `tool_args`. Giri successivi: testo.
 
-    Eredita da FunctionInvocationLayer, senza il quale Agent non esegue i tool.
+    Eredita da FunctionInvocationLayer, senza il quale Agent non esegue i tool,
+    e da ChatMiddlewareLayer: stesso ordine di livelli del client OpenAI vero.
     Serve a testare offline la catena TOOL_CALL_* -> STATE_SNAPSHOT.
     """
 
