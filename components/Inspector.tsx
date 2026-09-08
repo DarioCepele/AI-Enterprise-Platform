@@ -9,6 +9,7 @@ const FILTERS = {
   tutti: () => true,
   ragionamento: (e: AGUIEvent) => e.type.startsWith("REASONING"),
   tool: (e: AGUIEvent) => e.type.startsWith("TOOL_CALL"),
+  sottoagenti: (e: AGUIEvent) => e.type.startsWith("SUBAGENT"),
   stato: (e: AGUIEvent) => e.type.startsWith("STATE") || e.type.startsWith("RUN"),
   testo: (e: AGUIEvent) => e.type.startsWith("TEXT_MESSAGE"),
 } as const;

@@ -13,6 +13,14 @@ export type Entry =
   | { kind: "assistant"; id: string; text: string }
   | { kind: "reasoning"; id: string; text: string; done: boolean }
   | { kind: "tool"; id: string; name: string; args: string; done: boolean }
+  | {
+      kind: "subagent";
+      id: string;
+      name: string;
+      description: string;
+      stato: "in corso" | "concluso" | "errore";
+      errore?: string;
+    }
   | { kind: "artifact"; id: string; artifact: Artifact };
 
 export function parseReasoningDelta(encryptedValue: string): string {

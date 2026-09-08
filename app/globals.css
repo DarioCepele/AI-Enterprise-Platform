@@ -76,3 +76,7 @@ button:disabled { cursor: wait; }
   .lab-grid > main { height: 65dvh; min-height: 380px; border-right: 0; }
   .lab-aside { height: 65dvh; min-height: 380px; border-top: 1px solid var(--border); }
 }
+
+.timeline-entry[data-kind="subagent"]::before { background: var(--accent); }
+.subagent[data-stato="in corso"] { border-color: var(--accent); }
+.subagent[data-stato="errore"] { border-color: #c0554f; }

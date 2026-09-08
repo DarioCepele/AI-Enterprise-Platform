@@ -22,6 +22,15 @@ export type AGUIEvent =
     }
   | { type: "REASONING_MESSAGE_END"; messageId: string }
   | { type: "REASONING_END"; messageId: string }
+  | {
+      type: "SUBAGENT_STARTED";
+      subagentRunId: string;
+      name: string;
+      description?: string;
+      parentToolCallId?: string;
+    }
+  | { type: "SUBAGENT_FINISHED"; subagentRunId: string; result?: unknown }
+  | { type: "SUBAGENT_ERROR"; subagentRunId: string; message: string; code?: string }
   | { type: "CUSTOM"; name: string; value: unknown };
 
 export interface RunInput {

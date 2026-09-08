@@ -130,6 +130,37 @@ export function reduce(state: LabState, event: AGUIEvent): LabState {
       };
     }
 
+    case "SUBAGENT_STARTED":
+      return {
+        ...next,
+        entries: [
+          ...next.entries,
+          {
+            kind: "subagent",
+            id: event.subagentRunId,
+            name: event.name,
+            description: event.description ?? "",
+            stato: "in corso",
+          },
+        ],
+      };
+
+    case "SUBAGENT_FINISHED":
+      return {
+        ...next,
+        entries: patch(next.entries, event.subagentRunId, (e) =>
+          e.kind === "subagent" && e.stato === "in corso" ? { ...e, stato: "concluso" } : e,
+        ),
+      };
+
+    case "SUBAGENT_ERROR":
+      return {
+        ...next,
+        entries: patch(next.entries, event.subagentRunId, (e) =>
+          e.kind === "subagent" ? { ...e, stato: "errore", errore: event.message } : e,
+        ),
+      };
+
     case "STATE_SNAPSHOT":
       return { ...next, shared: event.snapshot };
 

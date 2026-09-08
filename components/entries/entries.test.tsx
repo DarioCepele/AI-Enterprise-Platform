@@ -185,3 +185,53 @@ describe("Chat", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("connessione interrotta");
   });
 });
+
+describe("sottoagenti in timeline", () => {
+  it("mostra nome, stato e domanda del sottoagente", () => {
+    const entry: Entry = {
+      kind: "subagent",
+      id: "s1",
+      name: "knowledge",
+      description: "Come tipizza Rust?",
+      stato: "in corso",
+    };
+    render(<EntryView entry={entry} />);
+
+    expect(screen.getByText("knowledge")).toBeInTheDocument();
+    expect(screen.getByText(/in corso/)).toBeInTheDocument();
+    expect(screen.getByText("Come tipizza Rust?")).toBeInTheDocument();
+  });
+
+  it("distingue concluso da in corso senza affidarsi al colore", () => {
+    const { container, rerender } = render(
+      <EntryView
+        entry={{ kind: "subagent", id: "s1", name: "knowledge", description: "", stato: "in corso" }}
+      />,
+    );
+    expect(container.querySelector('[data-stato="in corso"]')).not.toBeNull();
+
+    rerender(
+      <EntryView
+        entry={{ kind: "subagent", id: "s1", name: "knowledge", description: "", stato: "concluso" }}
+      />,
+    );
+    expect(container.querySelector('[data-stato="concluso"]')).not.toBeNull();
+  });
+
+  it("un sottoagente fallito dice cosa e' andato storto", () => {
+    render(
+      <EntryView
+        entry={{
+          kind: "subagent",
+          id: "s1",
+          name: "knowledge",
+          description: "",
+          stato: "errore",
+          errore: "knowledge agent giu'",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("knowledge agent giu'")).toBeInTheDocument();
+  });
+});

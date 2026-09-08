@@ -241,3 +241,60 @@ describe("reduce sullo stream reale", () => {
     expect(kinds.indexOf("tool")).toBeLessThan(kinds.indexOf("artifact"));
   });
 });
+
+describe("sottoagenti", () => {
+  const avvio = (id: string, name = "knowledge", description = "domanda"): AGUIEvent => ({
+    type: "SUBAGENT_STARTED",
+    subagentRunId: id,
+    name,
+    description,
+  });
+
+  it("un sottoagente avviato compare in timeline come in corso", () => {
+    const state = reduce(initialState, avvio("s1"));
+
+    expect(state.entries).toEqual([
+      { kind: "subagent", id: "s1", name: "knowledge", description: "domanda", stato: "in corso" },
+    ]);
+  });
+
+  it("la chiusura aggiorna quel sottoagente e non gli altri", () => {
+    let state = reduce(initialState, avvio("s1", "knowledge", "prima"));
+    state = reduce(state, avvio("s2", "knowledge", "seconda"));
+    state = reduce(state, { type: "SUBAGENT_FINISHED", subagentRunId: "s2" });
+
+    expect(state.entries.map((e) => e.kind === "subagent" && e.stato)).toEqual([
+      "in corso",
+      "concluso",
+    ]);
+  });
+
+  it("due avvii senza chiusura in mezzo restano due voci parallele", () => {
+    let state = reduce(initialState, avvio("s1"));
+    state = reduce(state, avvio("s2"));
+
+    expect(state.entries).toHaveLength(2);
+    expect(state.entries.every((e) => e.kind === "subagent" && e.stato === "in corso")).toBe(true);
+  });
+
+  it("un errore del sottoagente resta visibile con il suo messaggio", () => {
+    let state = reduce(initialState, avvio("s1"));
+    state = reduce(state, {
+      type: "SUBAGENT_ERROR",
+      subagentRunId: "s1",
+      message: "knowledge agent giu'",
+      code: "ConnectionError",
+    });
+
+    const entry = state.entries[0];
+    expect(entry.kind === "subagent" && entry.stato).toBe("errore");
+    expect(entry.kind === "subagent" && entry.errore).toBe("knowledge agent giu'");
+  });
+
+  it("una chiusura senza avvio non inventa una voce", () => {
+    const state = reduce(initialState, { type: "SUBAGENT_FINISHED", subagentRunId: "mai-visto" });
+
+    expect(state.entries).toEqual([]);
+    expect(state.events).toHaveLength(1);
+  });
+});
