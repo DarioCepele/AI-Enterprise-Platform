@@ -1,10 +1,4 @@
-"""Chi trasforma i turni vecchi in un riassunto.
-
-La compattazione e' l'unica potatura che **costa un'inferenza**: le altre sono
-regole, questa e' una chiamata a un modello. Per questo sta dietro
-un'interfaccia sola, viene invocata fuori dal percorso di risposta, e quando
-non e' configurata il servizio lo dice invece di fingere.
-"""
+"""Summarize old turns through a dedicated model interface. Compaction requires inference, runs outside the response path, and reports missing configuration explicitly."""
 from __future__ import annotations
 
 import json
@@ -15,69 +9,63 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-INSTRUCTIONS = """Riassumi la conversazione qui sotto per un agente che deve continuarla.
+INSTRUCTIONS = """Summarize the conversation below for an agent that has to continue it.
 
-Conserva:
-- le decisioni prese e le conclusioni raggiunte;
-- i fatti, i numeri e i nomi che sono stati stabiliti;
-- cio' che era in sospeso o non risolto;
-- cosa ha chiesto l'utente, con le sue richieste ancora aperte.
+Keep:
+- the decisions taken and the conclusions reached;
+- the facts, numbers and names that were established;
+- whatever was pending or unresolved;
+- what the user asked for, with their still-open requests.
 
-Togli:
-- le formulazioni esatte e i convenevoli;
-- i passaggi intermedi e i risultati dei tool gia' usati;
-- tutto cio' che il modello puo' ricavare da solo.
+Drop:
+- exact phrasings and pleasantries;
+- intermediate steps and the results of tools already used;
+- anything the model can work out on its own.
 
-Scrivi in italiano, in prosa asciutta, al massimo dieci righe. Non inventare
-nulla che non sia nella conversazione: se un punto non e' chiaro, dillo."""
+Write in Italian, in dry prose, ten lines at most. Invent nothing that is not
+in the conversation: if a point is unclear, say so."""
 
 
-FACTS_INSTRUCTIONS = """Estrai dalla conversazione i fatti duraturi sull'utente e sul suo lavoro.
+FACTS_INSTRUCTIONS = """Extract from the conversation the durable facts about the user and their work.
 
-Un fatto duraturo resta vero anche in una conversazione diversa, domani:
-identita' e ruoli, preferenze stabili, vincoli, nomi di progetti, decisioni
-prese. Non lo sono lo stato di questa conversazione, cio' che l'utente sta
-chiedendo adesso, ne' le informazioni che il modello ha portato da fuori.
+A durable fact stays true in a different conversation, tomorrow: identities and
+roles, stable preferences, constraints, project names, decisions taken. The
+state of this conversation is not one, nor is what the user is asking right
+now, nor information the model brought in from outside.
 
-Rispondi **solo** con un array JSON di oggetti {"chiave", "valore"}, dove la
-chiave e' un'etichetta breve in minuscolo con underscore (per esempio
-"referente" o "linguaggio_preferito") e il valore e' conciso. La chiave serve a
-riconoscere lo stesso fatto quando cambia valore: usa la stessa etichetta per
-la stessa cosa.
+Answer **only** with a JSON array of {"key", "value"} objects, where the key is
+a short lowercase label with underscores (for instance "contact" or
+"preferred_language") and the value is concise. The key exists to recognize the
+same fact when its value changes: use the same label for the same thing.
 
-Se non c'e' nessun fatto duraturo, rispondi con un array vuoto. Non inventare."""
+If there is no durable fact, answer with an empty array. Do not invent."""
 
 
 class Summarizer(Protocol):
-    """Da una lista di messaggi a un riassunto in prosa."""
+    """Convert messages into a prose summary."""
 
     async def summarize(self, messages: list[dict[str, Any]]) -> str: ...
 
 
 class FactExtractor(Protocol):
-    """Da una lista di messaggi ai fatti duraturi, in JSON."""
+    """Extract durable facts from messages as JSON."""
 
     async def extract_facts(self, messages: list[dict[str, Any]]) -> str: ...
 
 
 class NoSummarizer:
-    """Nessun modello configurato: nessun riassunto, e si sa perche'."""
+    """Report missing model configuration and produce no summary."""
 
     async def summarize(self, messages: list[dict[str, Any]]) -> str:
         logger.warning(
-            "Riassunto non prodotto: nessun modello configurato (MEMORY_SUMMARY_MODEL). "
-            "I turni fuori dalla finestra restano fuori dal contesto."
+            "Summary not produced: no model configured (MEMORY_SUMMARY_MODEL). "
+            "The turns outside the window stay outside the context."
         )
         return ""
 
 
 class OpenAICompatibleSummarizer:
-    """Riassume con un endpoint Chat Completions.
-
-    Stesso profilo del master agent -- OpenRouter, LM Studio, qualunque cosa
-    parli quel protocollo -- ma con la sua chiave e il suo modello: riassumere
-    e' un lavoro diverso dal rispondere, e puo' meritare un modello piu' piccolo.
-    """
+    """Summarize through a Chat Completions endpoint with a dedicated model and credentials. Compatible providers include OpenRouter and LM Studio."""
 
     def __init__(
         self,
@@ -98,11 +86,7 @@ class OpenAICompatibleSummarizer:
         return await self._ask(INSTRUCTIONS, messages)
 
     async def extract_facts(self, messages: list[dict[str, Any]]) -> str:
-        """Due chiamate separate e non una sola che restituisce tutto.
-
-        Costano di piu', ma un JSON malformato farebbe perdere anche il
-        riassunto, e i due lavori falliscono per ragioni diverse.
-        """
+        """Extract facts separately from summaries so malformed JSON does not discard a valid summary."""
         return await self._ask(FACTS_INSTRUCTIONS, messages)
 
     async def _ask(self, instructions: str, messages: list[dict[str, Any]]) -> str:
@@ -127,11 +111,7 @@ class OpenAICompatibleSummarizer:
 
 
 def _readable(message: dict[str, Any]) -> str:
-    """Un messaggio in una riga leggibile dal modello che riassume.
-
-    Le chiamate ai tool diventano una nota, non JSON: al riassunto interessa
-    che un tool sia stato usato e con che esito, non la sua forma sul filo.
-    """
+    """Render a message for the summarizer. Tool calls become readable notes describing usage instead of wire-format JSON."""
     role = message.get("role", "?")
     content = message.get("content")
     if not isinstance(content, str) or not content:
@@ -142,6 +122,6 @@ def _readable(message: dict[str, Any]) -> str:
                 for call in calls
                 if isinstance(call, dict)
             )
-            return f"[{role}] ha chiamato: {names}"
+            return f"[{role}] called: {names}"
         content = json.dumps(content, ensure_ascii=False) if content else ""
     return f"[{role}] {content}"

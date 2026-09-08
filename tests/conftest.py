@@ -1,10 +1,4 @@
-"""Fixture condivise.
-
-I test di integrazione girano contro Mongo e Redis veri, quelli alzati da
-`docker compose up -d mongo redis` in demo-infra. Non sono simulati apposta:
-il modello a bucket senza transazioni si regge su garanzie del server --
-atomicita' del singolo documento e indice unico -- che un finto non riproduce.
-"""
+"""Shared fixtures using real Mongo and Redis from demo-infra. Integration tests verify single-document atomicity and unique indexes that mocks cannot reproduce."""
 from __future__ import annotations
 
 import os
@@ -25,13 +19,13 @@ REDIS_URI = os.getenv("MEMORY_REDIS_URI")
 
 needs_backends = pytest.mark.skipif(
     not (MONGO_URI and REDIS_URI),
-    reason="servono MEMORY_MONGO_URI e MEMORY_REDIS_URI nel .env",
+    reason="MEMORY_MONGO_URI and MEMORY_REDIS_URI are required in .env",
 )
 
 
 @pytest.fixture
 def scope() -> str:
-    """Uno scope diverso per ogni test: nessuna interferenza fra esecuzioni."""
+    """Allocate a distinct scope for each test to avoid interference."""
     return f"test-{uuid.uuid4().hex[:12]}"
 
 

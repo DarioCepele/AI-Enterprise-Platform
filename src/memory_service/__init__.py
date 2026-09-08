@@ -1,1 +1,1 @@
-"""Servizio di memoria conversazionale del laboratorio AG-UI."""
+"""Conversational memory service for the AG-UI laboratory."""

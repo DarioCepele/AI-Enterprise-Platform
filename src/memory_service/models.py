@@ -1,4 +1,4 @@
-"""Le forme che il servizio scambia con chi lo chiama."""
+"""Data models exchanged with service callers."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class NewMessage(BaseModel):
-    """Un turno da appendere alla conversazione."""
+    """A turn to append to the conversation."""
 
     role: str
     content: str = ""
@@ -18,14 +18,14 @@ class NewMessage(BaseModel):
 
 
 class StoredMessage(NewMessage):
-    """Un turno gia' scritto: ha una posizione e un istante."""
+    """A stored turn with its position and timestamp."""
 
     seq: int
     ts: datetime
 
 
 class Transcript(BaseModel):
-    """La coda di una conversazione, dal piu' vecchio al piu' recente."""
+    """The conversation tail, from oldest to newest."""
 
     thread_id: str
     messages: list[StoredMessage]
@@ -33,19 +33,14 @@ class Transcript(BaseModel):
 
 
 class SearchQuery(BaseModel):
-    """Una domanda da cercare nei ricordi."""
+    """A query to search across memories."""
 
     query: str = Field(min_length=1)
     limit: int = Field(default=5, ge=1, le=50)
 
 
 class Snapshot(BaseModel):
-    """Lo stato di un thread come lo scambia il protocollo AG-UI.
-
-    I messaggi sono la conversazione; il resto e' stato del thread. Il servizio
-    tratta i due pezzi in modo diverso: i messaggi diventano turni numerati e
-    interrogabili, lo stato viene conservato come arriva.
-    """
+    """Thread state exchanged through AG-UI. Messages become numbered, searchable turns; other thread state is preserved as supplied."""
 
     messages: list[dict[str, Any]] = Field(default_factory=list)
     state: dict[str, Any] | None = None

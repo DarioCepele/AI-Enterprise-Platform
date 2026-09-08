@@ -1,13 +1,4 @@
-"""Memoria a breve termine: la coda calda della conversazione, su Redis.
-
-Requisiti opposti a quelli di Mongo: latenza bassa e scadenza automatica invece
-di durata e storia completa. Per questo e' un'altra tecnologia e non un'altra
-collezione.
-
-**Regola che tiene in piedi il disegno:** qui non vive mai l'unica copia di un
-dato. Redis puo' essere svuotato, scadere o non partire affatto, e il servizio
-continua a rispondere leggendo da Mongo. Per questo il container non ha volume.
-"""
+"""Short-term conversation tails in Redis, optimized for low latency and automatic expiry. Redis never holds the only copy: Mongo remains readable when the cache expires, is cleared, or is unavailable. The cache container therefore needs no volume."""
 from __future__ import annotations
 
 import json
@@ -21,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class HotTail:
-    """Ultimi messaggi di un thread, con scadenza."""
+    """Expiring recent messages for a thread."""
 
     def __init__(self, redis: Redis, ttl_seconds: int, max_messages: int) -> None:
         self._redis = redis
@@ -33,7 +24,7 @@ class HotTail:
         return f"tail:{scope}:{thread_id}"
 
     async def append(self, scope: str, thread_id: str, message: StoredMessage) -> None:
-        """Aggiunge in coda, taglia la testa e rinnova la scadenza."""
+        """Append messages, trim the head, and renew expiry."""
         key = self._key(scope, thread_id)
         pipeline = self._redis.pipeline()
         pipeline.rpush(key, message.model_dump_json())
@@ -42,12 +33,7 @@ class HotTail:
         await pipeline.execute()
 
     async def tail(self, scope: str, thread_id: str, limit: int) -> list[StoredMessage] | None:
-        """La coda calda, o None se la cache non ce l'ha.
-
-        Restituisce None anche quando la cache e' piena ma piu' corta di quanto
-        chiesto: una risposta parziale spacciata per completa sarebbe peggio di
-        una lettura in piu' su Mongo.
-        """
+        """Return the cached tail or None. An incomplete cache also returns None so callers can fetch the complete result from Mongo."""
         key = self._key(scope, thread_id)
         cached = await self._redis.lrange(key, -limit, -1)
         if not cached:
@@ -60,5 +46,5 @@ class HotTail:
         await self._redis.delete(self._key(scope, thread_id))
 
     async def ping(self) -> None:
-        """Solleva se Redis non risponde."""
+        """Raise if Redis does not respond."""
         await self._redis.ping()

@@ -1,4 +1,4 @@
-"""Il servizio nel suo insieme: cache calda, degrado, API."""
+"""Service integration tests covering cache hits, degradation, and HTTP APIs."""
 from __future__ import annotations
 
 import httpx
@@ -19,7 +19,7 @@ def memory(transcripts, hot) -> ThreadMemory:
 
 
 class BrokenHot:
-    """Redis spento. Il servizio deve degradare, non cadere."""
+    """Simulate unavailable Redis; the service must degrade gracefully."""
 
     async def append(self, *args, **kwargs) -> None:
         raise ConnectionError("redis giu'")
@@ -100,7 +100,7 @@ async def test_the_api_keeps_scopes_apart(memory, scope):
             headers={"X-Memory-Scope": scope},
         )
         altrui = await client.get(
-            "/threads/t1/messages", headers={"X-Memory-Scope": f"{scope}-altro"}
+            "/threads/t1/messages", headers={"X-Memory-Scope": f"{scope}-other"}
         )
 
     assert altrui.json()["messages"] == []
@@ -115,7 +115,7 @@ async def test_the_api_forgets_a_thread(memory, scope):
         removed = await client.delete("/threads/t1", headers=headers)
         read = await client.get("/threads/t1/messages", headers=headers)
 
-    assert removed.json()["buckets_rimossi"] == 1
+    assert removed.json()["buckets_removed"] == 1
     assert read.json()["messages"] == []
 
 
@@ -217,7 +217,7 @@ async def test_the_api_round_trips_a_snapshot(memory, scope):
         )
         read = await client.get("/threads/t1/snapshot", headers=headers)
 
-    assert saved.json() == {"turni_nuovi": 1}
+    assert saved.json() == {"new_turns": 1}
     assert read.json()["messages"] == [{"id": "m1", "role": "user", "content": "ciao"}]
     assert read.json()["state"] == {"a": 1}
 
@@ -242,12 +242,12 @@ async def test_the_returned_context_is_pruned_but_the_transcript_is_whole(memory
         ),
     )
 
-    potato = await memory.read_snapshot(scope, "t1")
+    pruned = await memory.read_snapshot(scope, "t1")
     integrale = await memory.read_snapshot(scope, "t1", raw=True)
 
-    assert [m["role"] for m in potato.messages] == ["user", "assistant"]
+    assert [m["role"] for m in pruned.messages] == ["user", "assistant"]
     assert [m["role"] for m in integrale.messages] == ["user", "reasoning", "assistant"]
-    assert potato.curation["ragionamenti_tolti"] == 1
+    assert pruned.curation["reasoning_removed"] == 1
     assert integrale.curation is None
 
 
@@ -264,19 +264,19 @@ async def test_the_api_can_ask_for_the_whole_transcript(memory, scope):
             },
             headers=headers,
         )
-        potato = await client.get("/threads/t1/snapshot", headers=headers)
+        pruned = await client.get("/threads/t1/snapshot", headers=headers)
         integrale = await client.get("/threads/t1/snapshot?raw=true", headers=headers)
 
-    assert [m["role"] for m in potato.json()["messages"]] == ["user"]
+    assert [m["role"] for m in pruned.json()["messages"]] == ["user"]
     assert [m["role"] for m in integrale.json()["messages"]] == ["user", "reasoning"]
 
 
 class RecordingSummarizer:
-    """Riassuntore finto: registra cosa gli e' stato dato da riassumere."""
+    """Record the messages supplied to a fake summarizer."""
 
     _model = "finto"
 
-    def __init__(self, text: str = "si parlava del codice ORCHIDEA-77") -> None:
+    def __init__(self, text: str = "the code ORCHIDEA-77 was mentioned") -> None:
         self.text = text
         self.calls: list[list[dict]] = []
 
@@ -289,7 +289,7 @@ class BrokenSummarizer:
     _model = "rotto"
 
     async def summarize(self, messages):
-        raise RuntimeError("modello irraggiungibile")
+        raise RuntimeError("model unreachable")
 
 
 def long_thread(turns: int) -> list[dict]:
@@ -335,8 +335,8 @@ async def test_the_summary_arrives_at_the_head_of_the_context(compacting, scope)
 
     assert snapshot.messages[0]["role"] == "system"
     assert "ORCHIDEA-77" in snapshot.messages[0]["content"]
-    assert snapshot.curation["riassunti"] == 1
-    assert snapshot.curation["messaggi_scartati"] > 0
+    assert snapshot.curation["summarized"] == 1
+    assert snapshot.curation["messages_dropped"] > 0
 
 
 async def test_the_whole_transcript_has_no_summary_in_it(compacting, scope):
@@ -380,8 +380,8 @@ async def test_a_broken_summarizer_does_not_break_the_conversation(transcripts, 
         await memory.compact_if_needed(scope, "t1")
     snapshot = await memory.read_snapshot(scope, "t1")
 
-    assert snapshot.curation["riassunti"] == 0
-    assert "Riassunto NON prodotto" in caplog.text
+    assert snapshot.curation["summarized"] == 0
+    assert "Summary NOT produced" in caplog.text
 
 
 async def test_without_a_summarizer_nothing_is_compacted(transcripts, hot, scope):
@@ -393,7 +393,7 @@ async def test_without_a_summarizer_nothing_is_compacted(transcripts, hot, scope
     await memory.compact_if_needed(scope, "t1")
     snapshot = await memory.read_snapshot(scope, "t1")
 
-    assert snapshot.curation["riassunti"] == 0
+    assert snapshot.curation["summarized"] == 0
 
 
 async def test_forgetting_a_thread_takes_its_summaries_too(compacting, transcripts, scope):
@@ -406,7 +406,7 @@ async def test_forgetting_a_thread_takes_its_summaries_too(compacting, transcrip
 
 
 class SlowSummarizer:
-    """Un modello lento. E' il caso normale, non quello patologico."""
+    """Simulate normal model latency."""
 
     _model = "lento"
 
@@ -418,7 +418,7 @@ class SlowSummarizer:
 
         self.called = True
         await asyncio.sleep(5)
-        return "riassunto tardivo"
+        return "late summary"
 
 
 async def test_saving_does_not_wait_for_the_summary(transcripts, hot, scope):
@@ -448,13 +448,13 @@ async def test_the_api_compacts_after_answering(transcripts, hot, summarizer, sc
         context = await client.get("/threads/t1/snapshot", headers=headers)
 
     assert response.status_code == 200
-    assert context.json()["curation"]["riassunti"] == 1
+    assert context.json()["curation"]["summarized"] == 1
 
 
 class RecordingExtractor:
-    """Estrattore finto: risponde JSON e registra cosa ha visto."""
+    """Record input and return a configured JSON response."""
 
-    def __init__(self, raw: str = '[{"chiave": "referente", "valore": "Marta"}]') -> None:
+    def __init__(self, raw: str = '[{"key": "contact", "value": "Marta"}]') -> None:
         self.raw = raw
         self.calls: list[list[dict]] = []
 
@@ -481,7 +481,7 @@ async def test_facts_are_learned_from_the_turns_that_leave(learning, extractor, 
 
     assert len(extractor.calls) == 1
     snapshot = await learning.read_snapshot(scope, "t1")
-    assert snapshot.curation["fatti"] == 1
+    assert snapshot.curation["facts"] == 1
 
 
 async def test_a_fact_learned_in_one_thread_shows_up_in_another(learning, scope):
@@ -491,10 +491,10 @@ async def test_a_fact_learned_in_one_thread_shows_up_in_another(learning, scope)
     await learning.save_snapshot(
         scope, "t2", Snapshot(messages=[{"id": "x", "role": "user", "content": "ciao"}])
     )
-    altro = await learning.read_snapshot(scope, "t2")
+    other = await learning.read_snapshot(scope, "t2")
 
-    assert altro.messages[0]["role"] == "system"
-    assert "referente: Marta" in altro.messages[0]["content"]
+    assert other.messages[0]["role"] == "system"
+    assert "contact: Marta" in other.messages[0]["content"]
 
 
 async def test_facts_do_not_cross_scopes(learning, transcripts, hot, summarizer, extractor, scope):
@@ -505,23 +505,23 @@ async def test_facts_do_not_cross_scopes(learning, transcripts, hot, summarizer,
 
     altrui = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer, extractor)
     await altrui.save_snapshot(
-        f"{scope}-altro", "t1", Snapshot(messages=[{"id": "y", "role": "user", "content": "ciao"}])
+        f"{scope}-other", "t1", Snapshot(messages=[{"id": "y", "role": "user", "content": "ciao"}])
     )
-    snapshot = await altrui.read_snapshot(f"{scope}-altro", "t1")
+    snapshot = await altrui.read_snapshot(f"{scope}-other", "t1")
 
-    assert snapshot.curation["fatti"] == 0
+    assert snapshot.curation["facts"] == 0
 
 
 async def test_the_same_fact_updated_does_not_become_two(learning, extractor, transcripts, scope):
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t1")
 
-    extractor.raw = '[{"chiave": "referente", "valore": "Giulio"}]'
+    extractor.raw = '[{"key": "contact", "value": "Giulio"}]'
     await learning.save_snapshot(scope, "t2", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t2")
 
     facts = await transcripts.facts_of(scope, limit=10)
-    assert facts == [{"chiave": "referente", "valore": "Giulio"}]
+    assert facts == [{"key": "contact", "value": "Giulio"}]
 
 
 async def test_deleting_a_thread_keeps_the_facts(learning, transcripts, scope):
@@ -548,14 +548,14 @@ async def test_unreadable_facts_do_not_break_the_compaction(
     from memory_service.curation import ContextPolicy
 
     memory = ThreadMemory(
-        transcripts, hot, ContextPolicy(max_messages=6), summarizer, RecordingExtractor("non JSON")
+        transcripts, hot, ContextPolicy(max_messages=6), summarizer, RecordingExtractor("not JSON")
     )
     await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await memory.compact_if_needed(scope, "t1")
 
     snapshot = await memory.read_snapshot(scope, "t1")
-    assert snapshot.curation["fatti"] == 0
-    assert snapshot.curation["riassunti"] == 1
+    assert snapshot.curation["facts"] == 0
+    assert snapshot.curation["summarized"] == 1
 
 
 async def test_the_injected_facts_do_not_come_back_as_a_turn(learning, scope):
@@ -573,11 +573,11 @@ async def test_a_brand_new_thread_still_gets_the_facts(learning, scope):
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t1")
 
-    vergine = await learning.read_snapshot(scope, "mai-aperto-prima")
+    brand_new = await learning.read_snapshot(scope, "mai-aperto-prima")
 
-    assert vergine is not None
-    assert vergine.curation["fatti"] == 1
-    assert "referente: Marta" in vergine.messages[0]["content"]
+    assert brand_new is not None
+    assert brand_new.curation["facts"] == 1
+    assert "contact: Marta" in brand_new.messages[0]["content"]
 
 
 async def test_a_brand_new_thread_without_facts_is_still_unknown(memory, scope):
@@ -592,21 +592,17 @@ async def test_the_whole_transcript_of_an_unknown_thread_stays_unknown(learning,
 
 
 class WordEmbedder:
-    """Embedder finto e deterministico: un asse per parola chiave.
+    """Deterministic test embeddings with one axis per keyword. Verify indexing, retrieval, and deletion; real-model checks cover semantic quality."""
 
-    Non simula la semantica -- quella la verifica la prova con il modello vero.
-    Qui si verifica il giro: cosa si indicizza, cosa si ritrova, cosa sparisce.
-    """
-
-    PAROLE = ("go", "python", "carbonara")
+    WORDS = ("go", "python", "carbonara")
 
     @property
     def dimensions(self) -> int:
-        return len(self.PAROLE)
+        return len(self.WORDS)
 
     async def embed(self, texts):
         return [
-            [1.0 if parola in testo.lower() else 0.0 for parola in self.PAROLE] for testo in texts
+            [1.0 if word in text.lower() else 0.0 for word in self.WORDS] for text in texts
         ]
 
 
@@ -631,7 +627,7 @@ def searchable(transcripts, hot, summarizer, extractor, redis_client, scope):
 def thread_about(*topics: str) -> list[dict]:
     messages = []
     for i, topic in enumerate(topics):
-        messages.append({"id": f"u{i}", "role": "user", "content": f"parliamo di {topic}"})
+        messages.append({"id": f"u{i}", "role": "user", "content": f"let us talk about {topic}"})
         messages.append({"id": f"a{i}", "role": "assistant", "content": f"ecco su {topic}"})
     return messages
 
@@ -642,10 +638,10 @@ async def test_what_leaves_the_window_becomes_searchable(searchable, scope):
     )
     await searchable.compact_if_needed(scope, "t1")
 
-    trovati = await searchable.search_memories(scope, "carbonara", limit=3)
+    found = await searchable.search_memories(scope, "carbonara", limit=3)
 
-    assert trovati
-    assert "carbonara" in trovati[0].testo
+    assert found
+    assert "carbonara" in found[0].text
 
 
 async def test_a_memory_says_which_thread_it_came_from(searchable, scope):
@@ -654,10 +650,10 @@ async def test_a_memory_says_which_thread_it_came_from(searchable, scope):
     )
     await searchable.compact_if_needed(scope, "t1")
 
-    trovato = (await searchable.search_memories(scope, "python", limit=1))[0]
+    found_one = (await searchable.search_memories(scope, "python", limit=1))[0]
 
-    assert trovato.thread_id == "t1"
-    assert trovato.seq > 0
+    assert found_one.thread_id == "t1"
+    assert found_one.seq > 0
 
 
 async def test_nothing_is_indexed_twice(searchable, transcripts, redis_client, scope):
@@ -688,6 +684,6 @@ async def test_searching_without_an_embedder_returns_nothing_and_says_so(memory,
     import logging
 
     with caplog.at_level(logging.WARNING):
-        assert await memory.search_memories(scope, "qualsiasi cosa", limit=3) == []
+        assert await memory.search_memories(scope, "anything at all", limit=3) == []
 
-    assert "non configurata" in caplog.text
+    assert "not configured" in caplog.text

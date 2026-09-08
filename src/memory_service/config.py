@@ -1,4 +1,4 @@
-"""Configurazione del servizio, letta dall'ambiente."""
+"""Service configuration loaded from the environment."""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -8,11 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Impostazioni del servizio di memoria.
-
-    Le connessioni arrivano per URI: il servizio non costruisce credenziali,
-    le riceve gia' pronte da chi lo dispiega.
-    """
+    """Memory service settings. Deployment supplies complete connection URIs and credentials."""
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MEMORY_", extra="ignore")
 
@@ -39,5 +35,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Una sola istanza per processo: la configurazione non cambia a caldo."""
+    """Cache one configuration instance per process; configuration is not reloaded live."""
     return Settings()

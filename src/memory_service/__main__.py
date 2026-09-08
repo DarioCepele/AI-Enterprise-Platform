@@ -1,4 +1,4 @@
-"""Avvio locale: `uv run python -m memory_service`."""
+"""Local entry point: uv run python -m memory_service."""
 from __future__ import annotations
 
 import logging

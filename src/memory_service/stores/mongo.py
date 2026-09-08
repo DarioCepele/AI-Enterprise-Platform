@@ -1,13 +1,4 @@
-"""Memoria durevole: i transcript delle conversazioni su MongoDB.
-
-Questo e' l'unico posto dove un turno esiste davvero. Redis tiene una copia
-calda, e ogni cosa che sta in Redis deve poter essere ricostruita da qui.
-
-**Vincolo del deployment, non preferenza.** L'istanza e' un nodo singolo senza
-replica set: niente transazioni multi-documento. Quindi ogni scrittura che deve
-essere atomica sta dentro **un solo documento**, e il codice non usa mai una
-sequenza di scritture che, interrotta a meta', lascerebbe uno stato illegale.
-"""
+"""Durable conversation transcripts in MongoDB. Redis data must be reconstructible from this store. Deployment uses a single node without a replica set, so atomic operations must fit within one document and never rely on multi-document transactions."""
 from __future__ import annotations
 
 import logging
@@ -28,13 +19,7 @@ FACTS = "scope_facts"
 
 
 def build_client(uri: str) -> AsyncMongoClient:
-    """Il client Mongo del processo. Uno solo, condiviso, mai per richiesta.
-
-    Aprire una connessione costa: TCP, TLS e autenticazione. I valori sotto
-    valgono per **questo** profilo -- un container di laboratorio, un'istanza
-    sola dell'applicazione, operazioni brevi, concorrenza di poche richieste --
-    e vanno rialzati se il servizio viene replicato o messo sotto carico vero.
-    """
+    """Build one shared Mongo client per process. Pool settings target a single laboratory instance with short operations and low concurrency; increase them for replicated or production workloads."""
     return AsyncMongoClient(
         uri,
         maxPoolSize=20,
@@ -48,52 +33,41 @@ def build_client(uri: str) -> AsyncMongoClient:
 
 
 class MongoTranscripts:
-    """I transcript, in documenti bucket da `bucket_size` messaggi l'uno."""
+    """Store transcripts in buckets of bucket_size messages."""
 
     def __init__(self, client: AsyncMongoClient, database: str, bucket_size: int) -> None:
         self._db = client[database]
         self._bucket_size = bucket_size
 
     async def ensure_indexes(self) -> None:
-        """Indici idempotenti, creati all'avvio.
-
-        L'unicita' di (scope, thread, bucket) non e' un dettaglio: e' cio' che
-        rende sicura la creazione di un bucket nuovo senza transazioni. Due
-        scritture in corsa sullo stesso bucket nuovo non possono riuscire
-        entrambe, e la perdente ritenta.
-        """
+        """Create indexes idempotently on startup. Unique scope/thread/bucket keys allow safe concurrent bucket creation without transactions; losing writers retry."""
         await self._db[TURNS].create_index(
             [("scope", ASCENDING), ("thread_id", ASCENDING), ("bucket", ASCENDING)],
             unique=True,
-            name="thread_bucket_unico",
+            name="unique_thread_bucket",
         )
         await self._db[TURNS].create_index(
             [("scope", ASCENDING), ("thread_id", ASCENDING), ("last_seq", DESCENDING)],
-            name="coda_del_thread",
+            name="thread_tail",
         )
         await self._db[THREADS].create_index(
             [("scope", ASCENDING), ("thread_id", ASCENDING)],
             unique=True,
-            name="thread_unico",
+            name="unique_thread",
         )
         await self._db[FACTS].create_index(
-            [("scope", ASCENDING), ("chiave", ASCENDING)],
+            [("scope", ASCENDING), ("key", ASCENDING)],
             unique=True,
-            name="fatto_unico",
+            name="unique_fact",
         )
         await self._db[SUMMARIES].create_index(
             [("scope", ASCENDING), ("thread_id", ASCENDING), ("covers_to_seq", DESCENDING)],
             unique=True,
-            name="riassunto_unico",
+            name="unique_summary",
         )
 
     async def _next_seq(self, scope: str, thread_id: str) -> int:
-        """Numero di posizione del prossimo messaggio.
-
-        `$inc` su un solo documento e' atomico anche senza transazioni. Se la
-        scrittura del messaggio poi fallisce, resta un numero saltato: una
-        lacuna nella numerazione, non un messaggio perso o duplicato.
-        """
+        """Allocate the next position with atomic single-document $inc. A later failed append may leave a numbering gap, but never a lost or duplicated message."""
         now = datetime.now(UTC)
         document = await self._db[THREADS].find_one_and_update(
             {"scope": scope, "thread_id": thread_id},
@@ -108,7 +82,7 @@ class MongoTranscripts:
         return int(document["next_seq"])
 
     async def append(self, scope: str, thread_id: str, message: NewMessage) -> StoredMessage:
-        """Aggiunge un turno in coda e restituisce come e' stato scritto."""
+        """Append a turn and return its stored representation."""
         seq = await self._next_seq(scope, thread_id)
         stored = StoredMessage(
             **message.model_dump(),
@@ -155,7 +129,7 @@ class MongoTranscripts:
                 }
             )
         except DuplicateKeyError:
-            logger.info("Bucket %d gia' creato da un'altra scrittura, ritento in coda.", bucket)
+            logger.info("Bucket %d already created by another write, retrying at the tail.", bucket)
             await self._db[TURNS].update_one(
                 {"scope": scope, "thread_id": thread_id, "bucket": bucket},
                 {
@@ -175,11 +149,7 @@ class MongoTranscripts:
         interrupt: list[dict[str, Any]] | None,
         session_state: dict[str, Any] | None,
     ) -> None:
-        """Lo stato del thread che non sono i messaggi.
-
-        Sta nel documento contatore, non nei bucket: e' un valore solo, sempre
-        l'ultimo, e riscriverlo non deve toccare la conversazione.
-        """
+        """Store non-message thread state in the counter document without rewriting conversation buckets."""
         await self._db[THREADS].update_one(
             {"scope": scope, "thread_id": thread_id},
             {
@@ -201,13 +171,7 @@ class MongoTranscripts:
         )
 
     async def history(self, scope: str, thread_id: str) -> list[StoredMessage]:
-        """Tutta la conversazione, dal primo turno all'ultimo.
-
-        La usa la ricostruzione dello snapshot, che deve restituire il thread
-        intero. Quando arrivera' la compattazione, sara' questa a diventare
-        "riassunto piu' coda" -- ed e' il motivo per cui e' una funzione a se'
-        e non una `tail` con un limite grande.
-        """
+        """Return the entire conversation in chronological order for snapshot reconstruction and compaction."""
         messages: list[StoredMessage] = []
         cursor = (
             self._db[TURNS]
@@ -219,11 +183,7 @@ class MongoTranscripts:
         return messages
 
     async def tail(self, scope: str, thread_id: str, limit: int) -> list[StoredMessage]:
-        """Gli ultimi `limit` messaggi, dal piu' vecchio al piu' recente.
-
-        Si leggono i bucket dal fondo e ci si ferma appena bastano: una coda di
-        venti messaggi non deve leggere una conversazione di mille.
-        """
+        """Return the latest limit messages, oldest first. Read buckets backwards until enough messages are available."""
         collected: list[dict[str, Any]] = []
         cursor = (
             self._db[TURNS]
@@ -246,12 +206,7 @@ class MongoTranscripts:
         message_count: int,
         model: str,
     ) -> None:
-        """Registra un riassunto dei turni fino a `covers_to_seq`.
-
-        I riassunti si accumulano invece di sostituirsi: quello vecchio dice
-        cosa sapeva l'agente allora, e quando un riassunto perde qualcosa e'
-        l'unico modo di risalire a dove si e' perso.
-        """
+        """Store a summary through covers_to_seq. Preserve earlier summaries to trace what the agent knew and diagnose information lost during compaction."""
         await self._db[SUMMARIES].update_one(
             {"scope": scope, "thread_id": thread_id, "covers_to_seq": covers_to_seq},
             {
@@ -266,7 +221,7 @@ class MongoTranscripts:
         )
 
     async def latest_summary(self, scope: str, thread_id: str) -> dict[str, Any] | None:
-        """Il riassunto piu' avanzato del thread, se ce n'e' uno."""
+        """Return the most advanced summary for a thread, if available."""
         return await self._db[SUMMARIES].find_one(
             {"scope": scope, "thread_id": thread_id},
             sort=[("covers_to_seq", DESCENDING)],
@@ -280,19 +235,14 @@ class MongoTranscripts:
         *,
         thread_id: str,
     ) -> int:
-        """Scrive i fatti dello scope. Restituisce quanti ne sono cambiati.
-
-        Chiave sola per scope: lo stesso fatto ridetto **aggiorna** invece di
-        duplicare. Un agente che crede due valori diversi della stessa cosa e'
-        peggio di uno che non la sa.
-        """
+        """Upsert scope facts and return the number changed. A stable key updates an existing fact instead of creating conflicting duplicates."""
         changed = 0
-        for chiave, valore in facts:
+        for key, value in facts:
             result = await self._db[FACTS].update_one(
-                {"scope": scope, "chiave": chiave},
+                {"scope": scope, "key": key},
                 {
                     "$set": {
-                        "valore": valore,
+                        "value": value,
                         "updated_at": datetime.now(UTC),
                         "thread_id": thread_id,
                     },
@@ -305,14 +255,10 @@ class MongoTranscripts:
         return changed
 
     async def facts_of(self, scope: str, limit: int) -> list[dict[str, Any]]:
-        """I fatti dello scope, dai piu' recenti.
-
-        Il limite non e' un dettaglio: senza, il contesto di ogni run
-        crescerebbe con tutto quello che si e' mai saputo dell'utente.
-        """
+        """Return recent scope facts, bounded to prevent unbounded context growth."""
         cursor = (
             self._db[FACTS]
-            .find({"scope": scope}, projection={"chiave": 1, "valore": 1, "_id": 0})
+            .find({"scope": scope}, projection={"key": 1, "value": 1, "_id": 0})
             .sort("updated_at", DESCENDING)
             .limit(limit)
         )
@@ -323,11 +269,7 @@ class MongoTranscripts:
         return int(result.deleted_count)
 
     async def indexed_upto(self, scope: str, thread_id: str) -> int:
-        """Fino a quale posizione i ricordi di questo thread sono gia' indicizzati.
-
-        Segnato sul durevole e non su Redis: l'indice vettoriale e' ricostruibile
-        e puo' sparire, il punto a cui si era arrivati no.
-        """
+        """Read the durable indexing checkpoint. The vector index is reconstructible and may disappear, but progress is stored durably."""
         document = await self._db[THREADS].find_one(
             {"scope": scope, "thread_id": thread_id}, projection={"indexed_upto": 1, "_id": 0}
         )
@@ -339,20 +281,20 @@ class MongoTranscripts:
         )
 
     async def seqs_of(self, scope: str, thread_id: str) -> list[int]:
-        """Le posizioni dei messaggi di un thread, per toglierli dall'indice."""
+        """Return message positions for removing a thread from the index."""
         return [message.seq for message in await self.history(scope, thread_id)]
 
     async def threads_of(self, scope: str) -> list[str]:
-        """Gli id dei thread di uno scope."""
+        """Return thread identifiers within a scope."""
         return [str(value) for value in await self._db[THREADS].distinct('thread_id', {'scope': scope})]
 
     async def forget(self, scope: str, thread_id: str) -> int:
-        """Cancella una conversazione. Restituisce i bucket rimossi."""
+        """Delete a conversation and return the number of removed buckets."""
         result = await self._db[TURNS].delete_many({"scope": scope, "thread_id": thread_id})
         await self._db[THREADS].delete_one({"scope": scope, "thread_id": thread_id})
         await self._db[SUMMARIES].delete_many({"scope": scope, "thread_id": thread_id})
         return int(result.deleted_count)
 
     async def ping(self) -> None:
-        """Solleva se il database non risponde."""
+        """Raise if the database does not respond."""
         await self._db.command("ping")

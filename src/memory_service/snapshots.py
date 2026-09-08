@@ -1,10 +1,4 @@
-"""Da snapshot a turni: cosa di questo snapshot non e' ancora stato scritto.
-
-Chi chiama manda lo **stato completo** del thread a ogni run, non il delta. Il
-delta lo calcola qui il servizio, che e' l'unico posto che ha sotto gli occhi
-sia quello che era gia' scritto sia quello che arriva: farlo calcolare al
-chiamante significherebbe riscriverlo in ogni chiamante.
-"""
+"""Compute new turns from full thread snapshots. The service owns delta detection because it can compare incoming messages with durable history."""
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -28,21 +22,7 @@ def new_messages(
     stored: Sequence[StoredMessage],
     incoming: Sequence[dict[str, Any]],
 ) -> list[NewMessage]:
-    """I messaggi dello snapshot che non risultano gia' scritti.
-
-    Due criteri, in quest'ordine:
-
-    1. **Per identificativo**, quando c'e'. E' l'unico affidabile: regge il
-       riordino, la riscrittura di un turno e gli snapshot che ripartono da
-       capo.
-    2. **Per posizione**, per i messaggi senza id. Non tutti i protocolli ne
-       danno uno; senza questo ripiego un messaggio anonimo verrebbe riscritto
-       a ogni snapshot, e la conversazione si moltiplicherebbe da sola.
-
-    Il ripiego posizionale e' volutamente prudente: conta *tutti* i messaggi
-    gia' scritti, quindi in caso di dubbio scrive di meno, non di piu'. Un
-    turno mancante si nota; un turno duplicato nel contesto del modello no.
-    """
+    """Find messages not yet stored. Prefer external identifiers, which survive reordering and rewritten snapshots. For anonymous messages, use position and conservatively count every stored message to avoid duplicates."""
     known_ids = {message.external_id for message in stored if message.external_id}
     fresh: list[NewMessage] = []
 

@@ -1,4 +1,4 @@
-"""La memoria durevole: bucket, ordine, coda, cancellazione."""
+"""Durable memory tests covering buckets, order, tails, and deletion."""
 from __future__ import annotations
 
 import asyncio
@@ -74,7 +74,7 @@ async def test_threads_are_separate(transcripts, scope):
 
 async def test_scopes_are_separate(transcripts, scope):
     await write(transcripts, scope, "t1", "mio")
-    await write(transcripts, f"{scope}-altro", "t1", "di un altro")
+    await write(transcripts, f"{scope}-other", "t1", "di un other")
 
     assert [m.content for m in await transcripts.tail(scope, "t1", limit=10)] == ["mio"]
 

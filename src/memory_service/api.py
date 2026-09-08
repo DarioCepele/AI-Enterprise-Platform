@@ -1,12 +1,4 @@
-"""API HTTP del servizio di memoria.
-
-**Servizio interno.** Non va esposto al browser ne' a internet: chi lo chiama
-dichiara lo scope, e il servizio si fida. E' lo stesso modello di un database --
-la fiducia sta nella rete e nell'autenticazione fra servizi, non nel client.
-Chi lo mette in produzione lo tiene su rete privata e davanti gli mette mTLS o
-un token di servizio; lo scope resta l'identita' verificata dal chiamante, mai
-un valore scelto dall'utente finale.
-"""
+"""HTTP API for the internal memory service. Callers supply a verified scope. Deploy on a private network with service authentication; never expose it directly to browsers or accept an end-user scope."""
 from __future__ import annotations
 
 import logging
@@ -31,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_app(memory: ThreadMemory | None = None, settings: Settings | None = None) -> FastAPI:
-    """Costruisce l'app. `memory` va passato nei test."""
+    """Build the application. Pass memory explicitly in tests."""
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -56,8 +48,8 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         )
         if memories is None:
             logger.warning(
-                "Nessun modello di embedding (MEMORY_EMBEDDING_MODEL): la ricerca "
-                "semantica nei ricordi non sara' disponibile."
+                "No embedding model (MEMORY_EMBEDDING_MODEL): semantic search over "
+                "memories will not be available."
             )
         durable = MongoTranscripts(client, config.mongo_database, config.bucket_size)
         await durable.ensure_indexes()
@@ -67,13 +59,13 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 config.summary_base_url, config.summary_api_key, config.summary_model
             )
             logger.info(
-                "Compattazione e fatti duraturi attivi con il modello %s.", config.summary_model
+                "Compaction and durable facts active with model %s.", config.summary_model
             )
         else:
             logger.warning(
-                "Nessun modello per i riassunti (MEMORY_SUMMARY_MODEL): i turni "
-                "fuori dalla finestra usciranno dal contesto senza riassunto, e "
-                "non si imparera' nessun fatto duraturo."
+                "No model for summaries (MEMORY_SUMMARY_MODEL): turns leaving the "
+                "window will drop out of the context unsummarized, and no "
+                "durable fact will be learned."
             )
         state["memory"] = ThreadMemory(
             durable,
@@ -100,14 +92,14 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     def current_memory() -> ThreadMemory:
         instance = state.get("memory")
         if instance is None:
-            raise HTTPException(status_code=503, detail="servizio non inizializzato")
+            raise HTTPException(status_code=503, detail="service not initialized")
         return instance
 
     def current_scope(
         scope: str = Header(
             ...,
             alias="X-Memory-Scope",
-            description="Confine di autorizzazione: l'identita' verificata dal chiamante.",
+            description="Authorization boundary: the identity verified by the caller.",
         ),
     ) -> str:
         if not scope.strip():
@@ -118,12 +110,12 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     async def health(
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, str]:
-        """Stato reale delle dipendenze, non un 200 di cortesia."""
+        """Report the actual health of dependencies."""
         try:
             return await memory_instance.check()
         except Exception as error:
             raise HTTPException(
-                status_code=503, detail=f"memoria durevole non raggiungibile: {error}"
+                status_code=503, detail=f"durable memory unreachable: {error}"
             ) from error
 
     @app.post("/threads/{thread_id}/messages", status_code=201)
@@ -152,22 +144,17 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
-        """Assorbe lo stato completo del thread. I turni gia' visti non tornano.
-
-        La compattazione parte **dopo** la risposta: e' una chiamata a un
-        modello, e tenerla qui dentro manda in timeout il client -- misurato
-        sul campo, non temuto. Il riassunto serve al turno successivo.
-        """
+        """Store the full thread state without duplicating turns. Run compaction after responding: model latency can otherwise time out the client, and the summary is needed only on the next turn."""
         written = await memory_instance.save_snapshot(scope, thread_id, snapshot)
         background.add_task(memory_instance.compact_if_needed, scope, thread_id)
-        return {"turni_nuovi": written}
+        return {"new_turns": written}
 
     @app.get("/threads/{thread_id}/snapshot")
     async def read_snapshot(
         thread_id: str,
         raw: bool = Query(
             default=False,
-            description="Transcript integrale invece del contesto potato.",
+            description="The full transcript instead of the pruned context.",
         ),
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
@@ -183,7 +170,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
-        return {"buckets_rimossi": await memory_instance.forget(scope, thread_id)}
+        return {"buckets_removed": await memory_instance.forget(scope, thread_id)}
 
     @app.post("/search")
     async def search(
@@ -191,21 +178,17 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, list[dict[str, object]]]:
-        """Cerca nei ricordi dello scope per significato.
-
-        POST e non GET con la domanda nell'URL: le domande finiscono nei log di
-        accesso dei proxy, e qui la domanda e' contenuto di una conversazione.
-        """
-        trovati = await memory_instance.search_memories(scope, query.query, query.limit)
+        """Search memories within the scope by meaning. Use POST to keep conversation content out of proxy URL access logs."""
+        found = await memory_instance.search_memories(scope, query.query, query.limit)
         return {
-            "ricordi": [
+            "memories": [
                 {
-                    "thread_id": ricordo.thread_id,
-                    "seq": ricordo.seq,
-                    "testo": ricordo.testo,
-                    "somiglianza": round(ricordo.somiglianza, 4),
+                    "thread_id": memory.thread_id,
+                    "seq": memory.seq,
+                    "text": memory.text,
+                    "similarity": round(memory.similarity, 4),
                 }
-                for ricordo in trovati
+                for memory in found
             ]
         }
 
@@ -214,12 +197,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
-        """Dimentica tutti i thread di uno scope.
-
-        Non esiste un modo di cancellare piu' scope in una chiamata sola, ed e'
-        voluto: cancellare attraverso un confine di autorizzazione e' proprio
-        l'operazione che quel confine esiste per impedire.
-        """
-        return {"thread_rimossi": await memory_instance.forget_scope(scope)}
+        """Forget every thread in one scope. Cross-scope deletion is intentionally unavailable to preserve authorization boundaries."""
+        return {"threads_removed": await memory_instance.forget_scope(scope)}
 
     return app

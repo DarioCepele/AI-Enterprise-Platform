@@ -1,14 +1,4 @@
-"""Ricordi cercabili per significato, sui vector set di Redis 8.
-
-Perche' qui e non su Mongo: `$vectorSearch` esiste solo su Atlas, mentre da
-Redis 8 il Query Engine -- vector set compresi -- sta nella distribuzione open
-source. Redis c'e' gia' per la coda calda, quindi la ricerca per significato
-non aggiunge un terzo datastore.
-
-Vale la regola di sempre: qui non vive l'unica copia di nulla. L'indice si
-ricostruisce dai transcript su Mongo; perderlo costa una reindicizzazione, non
-una conversazione.
-"""
+"""Semantic memory search using Redis 8 vector sets. Redis already serves the hot cache, avoiding another datastore. The index is reconstructible from Mongo transcripts; losing it requires reindexing rather than losing conversations."""
 from __future__ import annotations
 
 import json
@@ -23,23 +13,23 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Memory:
-    """Un ricordo trovato: da dove viene, cosa diceva, quanto somiglia."""
+    """A retrieved memory with its source, text, and similarity score."""
 
     thread_id: str
     seq: int
-    testo: str
-    somiglianza: float
+    text: str
+    similarity: float
 
 
 class RedisMemories:
-    """Un vector set per scope. Lo scope e' nella chiave, non nel filtro."""
+    """Use one vector set per scope; scope isolation is encoded in the key."""
 
     def __init__(self, redis: Redis) -> None:
         self._redis = redis
 
     @staticmethod
     def _key(scope: str) -> str:
-        return f"ricordi:{scope}"
+        return f"memories:{scope}"
 
     @staticmethod
     def _element(thread_id: str, seq: int) -> str:
@@ -51,11 +41,11 @@ class RedisMemories:
         entries: list[tuple[str, int, str]],
         vectors: list[list[float]],
     ) -> int:
-        """Aggiunge ricordi all'indice. `entries` e' (thread_id, seq, testo)."""
+        """Index entries containing thread_id, seq, and text."""
         added = 0
-        for (thread_id, seq, testo), vector in zip(entries, vectors, strict=True):
+        for (thread_id, seq, text), vector in zip(entries, vectors, strict=True):
             attributes = json.dumps(
-                {"thread_id": thread_id, "seq": seq, "testo": testo}, ensure_ascii=False
+                {"thread_id": thread_id, "seq": seq, "text": text}, ensure_ascii=False
             )
             await self._redis.execute_command(
                 "VADD",
@@ -71,7 +61,7 @@ class RedisMemories:
         return added
 
     async def search(self, scope: str, vector: list[float], limit: int) -> list[Memory]:
-        """I ricordi piu' vicini al vettore della domanda."""
+        """Find memories closest to the query vector."""
         raw: list[Any] = await self._redis.execute_command(
             "VSIM",
             self._key(scope),
@@ -99,18 +89,14 @@ class RedisMemories:
                 Memory(
                     thread_id=str(data.get("thread_id", "")),
                     seq=int(data.get("seq", 0)),
-                    testo=str(data.get("testo", "")),
-                    somiglianza=float(score),
+                    text=str(data.get("text", "")),
+                    similarity=float(score),
                 )
             )
         return found
 
     async def forget_thread(self, scope: str, thread_id: str, seqs: list[int]) -> int:
-        """Toglie dall'indice i ricordi di un thread cancellato.
-
-        Serve la lista delle posizioni perche' un vector set non si scandisce
-        per prefisso: chi cancella il thread le ha appena lette dal durevole.
-        """
+        """Remove a deleted thread from the index using positions read from durable storage; vector sets cannot be scanned by prefix."""
         removed = 0
         for seq in seqs:
             gone = await self._redis.execute_command(

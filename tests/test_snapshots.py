@@ -1,4 +1,4 @@
-"""Il calcolo del delta: funzione pura, nessun database."""
+"""Pure snapshot delta tests without a database."""
 from __future__ import annotations
 
 from datetime import UTC, datetime

@@ -1,4 +1,4 @@
-"""La potatura del contesto: funzione pura, nessun database."""
+"""Pure context-curation tests without a database."""
 from __future__ import annotations
 
 from memory_service.curation import CLEARED, ContextPolicy, curate
@@ -9,12 +9,12 @@ def msg(role: str, content: str = "x", **extra) -> dict:
 
 
 def turn(user: str = "domanda") -> list[dict]:
-    """Un turno completo come lo produce l'agente."""
+    """Build a complete agent turn."""
     return [
         msg("user", user),
         msg("reasoning", "", encrypted_value="[molto lungo]"),
         msg("assistant", "", toolCalls=[{"id": "c1"}]),
-        msg("tool", "risultato del tool"),
+        msg("tool", "tool result"),
         msg("assistant", "risposta"),
     ]
 
@@ -26,11 +26,11 @@ def test_nothing_to_curate_is_left_alone():
 
     assert curated == messages
     assert report.as_dict() == {
-        "conservati": 2,
-        "ragionamenti_tolti": 0,
-        "risultati_svuotati": 0,
-        "messaggi_scartati": 0,
-        "riassunti": 0,
+        "kept": 2,
+        "reasoning_removed": 0,
+        "results_emptied": 0,
+        "messages_dropped": 0,
+        "summarized": 0,
     }
 
 
@@ -38,14 +38,14 @@ def test_reasoning_of_past_turns_does_not_come_back():
     curated, report = curate(turn(), ContextPolicy())
 
     assert [m["role"] for m in curated] == ["user", "assistant", "tool", "assistant"]
-    assert report.ragionamenti_tolti == 1
+    assert report.reasoning_removed == 1
 
 
 def test_reasoning_can_be_kept_when_asked():
     curated, report = curate(turn(), ContextPolicy(drop_reasoning=False))
 
     assert any(m["role"] == "reasoning" for m in curated)
-    assert report.ragionamenti_tolti == 0
+    assert report.reasoning_removed == 0
 
 
 def test_old_tool_results_are_emptied_but_the_call_stays():
@@ -55,15 +55,15 @@ def test_old_tool_results_are_emptied_but_the_call_stays():
 
     assert [m["content"] for m in curated] == [CLEARED] * 4 + ["risultato 4", "risultato 5"]
     assert len(curated) == 6
-    assert report.risultati_svuotati == 4
+    assert report.results_emptied == 4
 
 
 def test_the_most_recent_results_survive_whole():
-    messages = [msg("tool", "vecchio"), msg("tool", "recente")]
+    messages = [msg("tool", "old"), msg("tool", "recent")]
 
     curated, _ = curate(messages, ContextPolicy(keep_tool_results=1))
 
-    assert curated[-1]["content"] == "recente"
+    assert curated[-1]["content"] == "recent"
 
 
 def test_the_window_cuts_on_a_turn_boundary():
@@ -75,7 +75,7 @@ def test_the_window_cuts_on_a_turn_boundary():
 
     assert curated[0]["role"] == "user"
     assert curated[0]["content"] == "secondo"
-    assert report.messaggi_scartati == 5
+    assert report.messages_dropped == 5
 
 
 def test_a_conversation_without_turn_boundaries_is_kept_whole():
@@ -84,31 +84,31 @@ def test_a_conversation_without_turn_boundaries_is_kept_whole():
     curated, report = curate(messages, ContextPolicy(max_messages=3))
 
     assert len(curated) == 10
-    assert report.messaggi_scartati == 0
+    assert report.messages_dropped == 0
 
 
 def test_the_last_user_message_is_never_dropped():
-    messages = turn("vecchio") + [msg("user", "ultimo")]
+    messages = turn("old") + [msg("user", "last")]
 
     curated, _ = curate(messages, ContextPolicy(max_messages=1))
 
-    assert curated[-1]["content"] == "ultimo"
+    assert curated[-1]["content"] == "last"
 
 
 def test_the_original_messages_are_not_modified():
-    messages = [msg("tool", "risultato"), msg("tool", "altro"), msg("tool", "terzo")]
+    messages = [msg("tool", "risultato"), msg("tool", "other"), msg("tool", "terzo")]
 
     curate(messages, ContextPolicy(keep_tool_results=1))
 
-    assert [m["content"] for m in messages] == ["risultato", "altro", "terzo"]
+    assert [m["content"] for m in messages] == ["risultato", "other", "terzo"]
 
 
 def test_curation_counts_what_survived():
     curated, report = curate(turn() + turn(), ContextPolicy(keep_tool_results=1))
 
-    assert report.conservati == len(curated)
-    assert report.ragionamenti_tolti == 2
-    assert report.risultati_svuotati == 1
+    assert report.kept == len(curated)
+    assert report.reasoning_removed == 2
+    assert report.results_emptied == 1
 
 
 def test_the_summary_goes_on_top_only_when_something_was_dropped():
@@ -118,13 +118,13 @@ def test_the_summary_goes_on_top_only_when_something_was_dropped():
     messages = turn("primo") + turn("secondo") + turn("terzo")
 
     con_taglio, report = curate(messages, ContextPolicy(max_messages=7), summary)
-    senza_taglio, report_intero = curate(turn(), ContextPolicy(max_messages=60), summary)
+    senza_taglio, whole_report = curate(turn(), ContextPolicy(max_messages=60), summary)
 
     assert con_taglio[0]["role"] == "system"
     assert "Python e Go" in con_taglio[0]["content"]
-    assert report.riassunti is True
+    assert report.summarized is True
     assert all(m["role"] != "system" for m in senza_taglio)
-    assert report_intero.riassunti is False
+    assert whole_report.summarized is False
 
 
 def test_a_dropped_prefix_without_a_summary_is_declared_as_such():
@@ -132,5 +132,5 @@ def test_a_dropped_prefix_without_a_summary_is_declared_as_such():
 
     _, report = curate(messages, ContextPolicy(max_messages=7))
 
-    assert report.messaggi_scartati > 0
-    assert report.riassunti is False
+    assert report.messages_dropped > 0
+    assert report.summarized is False
