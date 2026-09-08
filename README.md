@@ -162,3 +162,19 @@ richiede autenticazione, il che è falso: interrogarlo è pubblico, è la vista
 estesa a non esserlo. Il token viaggia come parametro della singola chiamata.
 Conseguenza pratica: l'`AuthInterceptor` dell'SDK, che si attiva proprio su
 `security_requirements`, qui non serve a niente.
+
+## Contratti fra i repo
+
+I campioni di ciò che questo repo mette sul filo — o legge da un altro — stanno
+in `demo-infra/contracts`, versionati e in copia unica. I test di contratto li
+caricano da lì: se manca la cartella **falliscono**, invece di saltarsi da soli.
+Un test di contratto silenzioso quando la controparte non c'è è esattamente il
+silenzio che i contratti tolgono.
+
+```bash
+# i quattro repo come cloni fratelli: nessuna configurazione
+# altrove: AGUI_LAB_CONTRACTS=/percorso/a/demo-infra/contracts
+```
+
+Quando un campione cambia, cambia insieme in tutti i repo elencati nel suo
+`produced_by` e `consumed_by`. Il messaggio di fallimento dice quali sono.
