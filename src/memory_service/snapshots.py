@@ -49,10 +49,6 @@ def new_messages(
     for index, raw in enumerate(incoming):
         external_id = raw.get("id")
         if isinstance(external_id, str) and external_id.startswith(MEMORY_ID_PREFIX):
-            # Riassunto e fatti li ha messi questo servizio ricomponendo il
-            # contesto, e tornano indietro dentro lo snapshot successivo.
-            # Scriverli come turni veri significherebbe riassumere i propri
-            # riassunti, a ogni giro, per sempre.
             continue
         if isinstance(external_id, str) and external_id:
             if external_id in known_ids:

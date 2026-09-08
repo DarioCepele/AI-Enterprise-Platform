@@ -19,10 +19,12 @@ from redis.asyncio import Redis
 
 from .config import Settings, get_settings
 from .curation import ContextPolicy
-from .models import NewMessage, Snapshot, StoredMessage, Transcript
+from .models import NewMessage, SearchQuery, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
 from .stores.hot import HotTail
+from .embedder import OpenAICompatibleEmbedder
 from .stores.mongo import MongoTranscripts, build_client
+from .stores.vectors import RedisMemories
 from .summarizer import OpenAICompatibleSummarizer
 
 logger = logging.getLogger(__name__)
@@ -30,16 +32,10 @@ logger = logging.getLogger(__name__)
 
 def create_app(memory: ThreadMemory | None = None, settings: Settings | None = None) -> FastAPI:
     """Costruisce l'app. `memory` va passato nei test."""
-    # Uvicorn configura i propri logger, non quelli dell'applicazione: senza
-    # questa riga, in container si vedono solo le righe di accesso HTTP e ogni
-    # diagnostica del servizio sparisce. Ha gia' nascosto un guasto vero --
-    # l'estrazione dei fatti che falliva in silenzio.
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     config = settings or get_settings()
-    # Il servizio iniettato e' pronto subito, senza aspettare il lifespan: i
-    # test lo montano su un transport ASGI che il lifespan non lo esegue.
     state: dict[str, object] = {"memory": memory} if memory is not None else {}
 
     @asynccontextmanager
@@ -48,10 +44,21 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             yield
             return
 
-        # Un client per processo, aperto all'avvio e chiuso allo spegnimento:
-        # aprirne uno per richiesta pagherebbe l'handshake ogni volta.
         client: AsyncMongoClient = build_client(config.mongo_uri)
         redis = Redis.from_url(config.redis_uri, decode_responses=True)
+        memories = RedisMemories(redis) if config.embedding_model else None
+        embedder = (
+            OpenAICompatibleEmbedder(
+                config.summary_base_url, config.summary_api_key, config.embedding_model
+            )
+            if config.embedding_model
+            else None
+        )
+        if memories is None:
+            logger.warning(
+                "Nessun modello di embedding (MEMORY_EMBEDDING_MODEL): la ricerca "
+                "semantica nei ricordi non sara' disponibile."
+            )
         durable = MongoTranscripts(client, config.mongo_database, config.bucket_size)
         await durable.ensure_indexes()
         summarizer = None
@@ -63,8 +70,6 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 "Compattazione e fatti duraturi attivi con il modello %s.", config.summary_model
             )
         else:
-            # Detto una volta all'avvio invece che a ogni taglio: e' una scelta
-            # di configurazione, non un evento.
             logger.warning(
                 "Nessun modello per i riassunti (MEMORY_SUMMARY_MODEL): i turni "
                 "fuori dalla finestra usciranno dal contesto senza riassunto, e "
@@ -79,10 +84,10 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 max_messages=config.max_context_messages,
             ),
             summarizer,
-            # Stesso oggetto per riassumere ed estrarre: stesso endpoint,
-            # stesso modello, due lavori diversi.
             summarizer,
             config.max_facts,
+            embedder,
+            memories,
         )
         try:
             yield
@@ -96,7 +101,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         instance = state.get("memory")
         if instance is None:
             raise HTTPException(status_code=503, detail="servizio non inizializzato")
-        return instance  # type: ignore[return-value]
+        return instance
 
     def current_scope(
         scope: str = Header(
@@ -169,8 +174,6 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     ) -> Snapshot:
         snapshot = await memory_instance.read_snapshot(scope, thread_id, raw=raw)
         if snapshot is None:
-            # 404 e non uno snapshot vuoto: "non so nulla di questo thread" e
-            # "questo thread e' vuoto" portano il chiamante a decisioni diverse.
             raise HTTPException(status_code=404, detail="thread sconosciuto")
         return snapshot
 
@@ -181,6 +184,30 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
         return {"buckets_rimossi": await memory_instance.forget(scope, thread_id)}
+
+    @app.post("/search")
+    async def search(
+        query: SearchQuery,
+        scope: str = Depends(current_scope),
+        memory_instance: ThreadMemory = Depends(current_memory),
+    ) -> dict[str, list[dict[str, object]]]:
+        """Cerca nei ricordi dello scope per significato.
+
+        POST e non GET con la domanda nell'URL: le domande finiscono nei log di
+        accesso dei proxy, e qui la domanda e' contenuto di una conversazione.
+        """
+        trovati = await memory_instance.search_memories(scope, query.query, query.limit)
+        return {
+            "ricordi": [
+                {
+                    "thread_id": ricordo.thread_id,
+                    "seq": ricordo.seq,
+                    "testo": ricordo.testo,
+                    "somiglianza": round(ricordo.somiglianza, 4),
+                }
+                for ricordo in trovati
+            ]
+        }
 
     @app.delete("/scope")
     async def forget_scope(

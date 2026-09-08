@@ -37,7 +37,6 @@ async def test_sequence_numbers_grow_within_the_thread(transcripts, scope):
 
 
 async def test_messages_overflow_into_a_new_bucket(transcripts, scope, mongo_client):
-    # bucket_size = 3 nella fixture: il quarto messaggio apre il bucket 1.
     await write(transcripts, scope, "t1", "uno", "due", "tre", "quattro")
 
     buckets = await mongo_client["demo_memory_test"][TURNS].count_documents(
@@ -54,8 +53,6 @@ async def test_the_tail_keeps_the_order_across_buckets(transcripts, scope):
 
 
 async def test_concurrent_writes_do_not_lose_messages(transcripts, scope):
-    # Senza transazioni, la corsa su un bucket nuovo e' il punto fragile:
-    # l'indice unico ne fa passare uno solo e l'altro rientra in coda.
     await asyncio.gather(
         *(
             transcripts.append(scope, "t1", NewMessage(role="user", content=str(i)))

@@ -20,8 +20,6 @@ from .curation import MEMORY_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 
-# Una chiave e' un'etichetta breve, non una frase: serve a riconoscere lo
-# stesso fatto quando viene ridetto, per aggiornarlo invece di duplicarlo.
 _KEY = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 
 
@@ -67,8 +65,6 @@ def parse_facts(raw: str) -> list[Fact]:
         if not _KEY.match(chiave) or not valore:
             continue
         if chiave in seen:
-            # Due valori per la stessa chiave nella stessa estrazione: vince il
-            # primo, e si dice. Sceglierne uno a caso sarebbe peggio.
             logger.info("Chiave '%s' ripetuta nell'estrazione: tengo il primo valore.", chiave)
             continue
         seen.add(chiave)

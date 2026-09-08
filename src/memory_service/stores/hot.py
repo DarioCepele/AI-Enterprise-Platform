@@ -30,8 +30,6 @@ class HotTail:
 
     @staticmethod
     def _key(scope: str, thread_id: str) -> str:
-        # Lo scope sta nella chiave, non nel valore: due scope non possono
-        # leggersi a vicenda nemmeno per errore di query.
         return f"tail:{scope}:{thread_id}"
 
     async def append(self, scope: str, thread_id: str, message: StoredMessage) -> None:

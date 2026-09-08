@@ -193,6 +193,7 @@ riassunti — uno sopravvissuto racconterebbe una conversazione cancellata.
 | `MEMORY_SUMMARY_BASE_URL` | endpoint Chat Completions del riassuntore |
 | `MEMORY_SUMMARY_API_KEY` | credenziale del riassuntore |
 | `MEMORY_MAX_FACTS` | quanti fatti duraturi entrano nel contesto (default 30) |
+| `MEMORY_EMBEDDING_MODEL` | modello degli embedding; vuoto = nessuna ricerca semantica |
 
 ## Fatti duraturi: cosa resta vero fuori dalla conversazione
 
@@ -249,6 +250,56 @@ Il tetto non è un dettaglio: senza, il contesto di ogni run crescerebbe con
 tutto ciò che si è mai saputo dell'utente. Manca ancora il **decadimento**: un
 fatto vecchio e mai più confermato pesa quanto uno di ieri.
 
+## Ricerca semantica: raggiungere quello che non è più nel contesto
+
+Riassunto e fatti sono compressione: tengono il poco che vale sempre. La
+ricerca serve al caso opposto — un dettaglio preciso di sei conversazioni fa,
+che non merita di stare nel contesto di ogni run ma serve *adesso*.
+
+**Su Redis, non su Mongo.** `$vectorSearch` esiste solo su Atlas; da Redis 8 il
+Query Engine con i vector set sta nella distribuzione open source. Redis c'era
+già per la coda calda, quindi la ricerca per significato non aggiunge un terzo
+datastore — il *tech sprawl* è uno dei tranelli elencati da MongoDB stessa.
+
+**Si indicizza solo ciò che esce dalla finestra.** Quello che è ancora nel
+contesto il modello ce l'ha già davanti, e ritrovarglielo sarebbe ripetizione.
+Fuori anche ragionamento e risultati di tool: il primo è il modello che parla
+con sé stesso, i secondi si riottengono richiamando il tool.
+
+**Un tool, non un'iniezione automatica.** Infilare a ogni run i ricordi
+«probabilmente pertinenti» li paga sempre e li azzecca a volte, e più roba c'è
+nel contesto meno il modello ne recupera con precisione. Con `cerca_nei_ricordi`
+la memoria si raggiunge quando serve, e a decidere è il modello, che la domanda
+ce l'ha davanti.
+
+Misurato con `openai/text-embedding-3-small` su una conversazione reale:
+
+| domanda | ricordo trovato | somiglianza |
+| --- | --- | --- |
+| «dove gira il cluster?» | «abbiamo scelto Kubernetes su Hetzner invece di ECS» | 0,697 |
+| «quanto conserviamo i log?» | «la retention dei log la teniamo a 14 giorni» | 0,839 |
+| «che vino beviamo?» | «Domanda 3 su un argomento qualunque» | 0,645 |
+
+La prima riga è il punto: nessuna parola in comune fra domanda e ricordo.
+La terza è il limite da conoscere — **la ricerca restituisce sempre qualcosa**.
+Non c'è una soglia fissa perché il valore giusto cambia col modello di
+embedding, e su questi dati taglierebbe la riga buona (0,697) insieme alla
+spazzatura (0,645). Il segnale utile è il *distacco*: punteggi bassi e tutti
+uguali significano «niente di pertinente». Per questo il tool restituisce le
+somiglianze e dice al modello che sono frammenti da verificare, non certezze.
+
+La ricerca è `POST /search` e non una GET con la domanda nell'URL: le domande
+finiscono nei log di accesso dei proxy, e qui la domanda è contenuto di una
+conversazione.
+
+Cancellare un thread toglie i suoi ricordi dall'indice — le posizioni si
+leggono prima di cancellare il durevole, perché dopo non ci sono più e un
+ricordo rimasto sarebbe cercabile per sempre.
+
+| Variabile | Cosa decide |
+| --- | --- |
+| `MEMORY_EMBEDDING_MODEL` | modello degli embedding; vuoto = nessuna ricerca semantica |
+
 ## Lo scope, e di chi ci si fida
 
 Ogni chiamata dichiara `X-Memory-Scope`: e' il confine di autorizzazione, e
@@ -267,6 +318,7 @@ valore che arriva dall'utente finale.
 | --- | --- | --- |
 | `GET` | `/health` | stato delle due memorie |
 | `POST` | `/threads/{id}/messages` | appende un turno, restituisce `seq` e `ts` |
+| `POST` | `/search` | cerca nei ricordi dello scope per significato |
 | `GET` | `/threads/{id}/messages?limit=N` | ultimi N turni, in ordine, con `source` (`hot`/`durable`) |
 | `DELETE` | `/threads/{id}` | dimentica il thread, durevole e cache |
 
@@ -315,7 +367,5 @@ loro. Senza `.env` configurato i test si saltano invece di fallire.
 - **Decadimento dei fatti**: un fatto vecchio e mai piu' confermato pesa quanto
   uno di ieri. L'articolo di riferimento suggerisce di abbassare una forza
   invece di cancellare.
-- **Ricerca semantica**: `$vectorSearch` e' solo su Atlas. Redis 8 include il
-  Query Engine e i vector set (`FT.CREATE`, `VADD` verificati sull'istanza),
-  quindi la ricerca per significato puo' vivere dove sta gia' la coda calda,
-  senza aggiungere un terzo datastore.
+- **Reindicizzazione**: se l'indice dei ricordi va perso si ricostruisce dai
+  transcript, ma non c'e' ancora un comando che lo faccia.

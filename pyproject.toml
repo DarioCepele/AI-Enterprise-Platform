@@ -11,8 +11,6 @@ dependencies = [
     "pydantic>=2.12",
     "pydantic-settings>=2.12",
     "python-dotenv>=1.1",
-    # Runtime e non solo dev: il riassuntore parla con un endpoint Chat
-    # Completions, quindi httpx serve anche in produzione.
     "httpx>=0.28",
 ]
 

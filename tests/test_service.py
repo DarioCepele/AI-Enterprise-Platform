@@ -56,7 +56,6 @@ async def test_without_redis_it_still_answers_from_the_durable_store(transcripts
     await degraded.append(scope, "t1", NewMessage(role="user", content="scritto comunque"))
     result = await degraded.tail(scope, "t1", limit=10)
 
-    # Il messaggio e' al sicuro anche se la cache non ha mai visto nulla.
     assert result.source == "durable"
     assert [m.content for m in result.messages] == ["scritto comunque"]
 
@@ -90,8 +89,6 @@ async def test_the_api_refuses_a_request_without_scope(memory):
     async with await client_for(memory) as client:
         response = await client.get("/threads/t1/messages")
 
-    # Senza scope non esiste un confine: meglio un errore di una lettura
-    # su un ambito indovinato.
     assert response.status_code == 422
 
 
@@ -133,7 +130,6 @@ async def test_health_says_degraded_when_redis_is_down(transcripts):
     async with await client_for(ThreadMemory(transcripts, BrokenHot())) as client:
         response = await client.get("/health")
 
-    # Degradato, non guasto: i messaggi si scrivono e si leggono lo stesso.
     assert response.status_code == 200
     assert response.json()["status"] == "degraded"
 
@@ -162,7 +158,6 @@ async def test_resending_the_same_snapshot_writes_nothing(memory, scope):
     await memory.save_snapshot(scope, "t1", snapshot)
     again = await memory.save_snapshot(scope, "t1", snapshot)
 
-    # E' cio' che rende sicuro rimandare lo stato completo a ogni run.
     assert again == 0
     assert len((await memory.tail(scope, "t1", limit=10)).messages) == 1
 
@@ -203,8 +198,6 @@ async def test_the_snapshot_comes_back_whole(memory, scope):
 
     rebuilt = await memory.read_snapshot(scope, "t1")
 
-    # Le chiamate ai tool devono tornare identiche: un thread ricostruito a
-    # meta' e' una conversazione che al modello non risulta.
     assert rebuilt.messages == original.messages
     assert rebuilt.state == original.state
     assert rebuilt.session_state == original.session_state
@@ -252,7 +245,6 @@ async def test_the_returned_context_is_pruned_but_the_transcript_is_whole(memory
     potato = await memory.read_snapshot(scope, "t1")
     integrale = await memory.read_snapshot(scope, "t1", raw=True)
 
-    # Conservare tutto e restituire il necessario sono due decisioni diverse.
     assert [m["role"] for m in potato.messages] == ["user", "assistant"]
     assert [m["role"] for m in integrale.messages] == ["user", "reasoning", "assistant"]
     assert potato.curation["ragionamenti_tolti"] == 1
@@ -324,7 +316,6 @@ async def test_a_short_thread_is_not_summarized(compacting, summarizer, scope):
     await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(2)))
     await compacting.compact_if_needed(scope, "t1")
 
-    # Nulla esce dalla finestra: riassumere sarebbe spesa senza guadagno.
     assert summarizer.calls == []
 
 
@@ -333,7 +324,6 @@ async def test_crossing_the_window_produces_a_summary(compacting, summarizer, sc
     await compacting.compact_if_needed(scope, "t1")
 
     assert len(summarizer.calls) == 1
-    # Riassume esattamente cio' che la lettura lascera' fuori.
     assert [m["content"] for m in summarizer.calls[0]][:2] == ["domanda 0", "risposta 0"]
 
 
@@ -355,7 +345,6 @@ async def test_the_whole_transcript_has_no_summary_in_it(compacting, scope):
 
     integrale = await compacting.read_snapshot(scope, "t1", raw=True)
 
-    # Il riassunto e' una ricomposizione, non un turno: nel transcript non c'e'.
     assert all(m.get("role") != "system" for m in integrale.messages)
 
 
@@ -365,7 +354,6 @@ async def test_the_summary_does_not_get_rewritten_at_every_run(compacting, summa
     await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await compacting.compact_if_needed(scope, "t1")
 
-    # Stesso taglio, stesso riassunto: rifarlo sarebbe un'inferenza a vuoto.
     assert len(summarizer.calls) == 1
 
 
@@ -374,7 +362,6 @@ async def test_the_summary_returned_does_not_become_a_turn(compacting, scope):
     await compacting.compact_if_needed(scope, "t1")
     context = await compacting.read_snapshot(scope, "t1")
 
-    # Il client rimanda indietro cio' che ha ricevuto, riassunto compreso.
     await compacting.save_snapshot(scope, "t1", Snapshot(messages=context.messages))
     integrale = await compacting.read_snapshot(scope, "t1", raw=True)
 
@@ -393,8 +380,6 @@ async def test_a_broken_summarizer_does_not_break_the_conversation(transcripts, 
         await memory.compact_if_needed(scope, "t1")
     snapshot = await memory.read_snapshot(scope, "t1")
 
-    # Si continua piu' smemorati, e il log lo dice: quei turni sono usciti
-    # senza lasciare un riassunto al loro posto.
     assert snapshot.curation["riassunti"] == 0
     assert "Riassunto NON prodotto" in caplog.text
 
@@ -417,7 +402,6 @@ async def test_forgetting_a_thread_takes_its_summaries_too(compacting, transcrip
 
     await compacting.forget(scope, "t1")
 
-    # Un riassunto sopravvissuto racconterebbe una conversazione cancellata.
     assert await transcripts.latest_summary(scope, "t1") is None
 
 
@@ -445,8 +429,6 @@ async def test_saving_does_not_wait_for_the_summary(transcripts, hot, scope):
     slow = SlowSummarizer()
     memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), slow)
 
-    # Misurato sul campo: con il riassunto dentro la PUT, il client dell'agente
-    # va in timeout e la memoria di quel turno si perde.
     async with asyncio.timeout(3):
         await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
 
@@ -465,10 +447,6 @@ async def test_the_api_compacts_after_answering(transcripts, hot, summarizer, sc
         )
         context = await client.get("/threads/t1/snapshot", headers=headers)
 
-    # Che il riassunto arrivi *dopo* la risposta qui non si vede: il transport
-    # ASGI dei test aspetta anche i task di sfondo prima di restituire. Lo
-    # garantisce il test sopra, sul servizio; qui si verifica che il giro
-    # completo -- salva, compatta, ricomponi -- funzioni davvero.
     assert response.status_code == 200
     assert context.json()["curation"]["riassunti"] == 1
 
@@ -510,8 +488,6 @@ async def test_a_fact_learned_in_one_thread_shows_up_in_another(learning, scope)
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t1")
 
-    # Thread nuovo, nessuna conversazione da riassumere: e' qui che si vede la
-    # differenza fra un agente con memoria e uno che ricomincia ogni volta.
     await learning.save_snapshot(
         scope, "t2", Snapshot(messages=[{"id": "x", "role": "user", "content": "ciao"}])
     )
@@ -545,8 +521,6 @@ async def test_the_same_fact_updated_does_not_become_two(learning, extractor, tr
     await learning.compact_if_needed(scope, "t2")
 
     facts = await transcripts.facts_of(scope, limit=10)
-    # Un agente che crede due valori diversi della stessa cosa e' peggio di uno
-    # che non la sa.
     assert facts == [{"chiave": "referente", "valore": "Giulio"}]
 
 
@@ -556,8 +530,6 @@ async def test_deleting_a_thread_keeps_the_facts(learning, transcripts, scope):
 
     await learning.forget(scope, "t1")
 
-    # I fatti stanno sullo scope: cancellare una conversazione non cancella
-    # cio' che si e' imparato dell'utente.
     assert await transcripts.facts_of(scope, limit=10) != []
 
 
@@ -582,7 +554,6 @@ async def test_unreadable_facts_do_not_break_the_compaction(
     await memory.compact_if_needed(scope, "t1")
 
     snapshot = await memory.read_snapshot(scope, "t1")
-    # I fatti sono un di piu': il riassunto e la conversazione restano interi.
     assert snapshot.curation["fatti"] == 0
     assert snapshot.curation["riassunti"] == 1
 
@@ -602,8 +573,6 @@ async def test_a_brand_new_thread_still_gets_the_facts(learning, scope):
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t1")
 
-    # Thread mai visto: nessuna conversazione, ma i fatti stanno sullo scope.
-    # Rispondere "non so nulla" qui rendeva inutile la memoria a lungo termine.
     vergine = await learning.read_snapshot(scope, "mai-aperto-prima")
 
     assert vergine is not None
@@ -612,7 +581,6 @@ async def test_a_brand_new_thread_still_gets_the_facts(learning, scope):
 
 
 async def test_a_brand_new_thread_without_facts_is_still_unknown(memory, scope):
-    # Senza fatti non c'e' nulla da dire: 404, come prima.
     assert await memory.read_snapshot(scope, "mai-aperto-prima") is None
 
 
@@ -620,5 +588,106 @@ async def test_the_whole_transcript_of_an_unknown_thread_stays_unknown(learning,
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t1")
 
-    # I fatti sono una ricomposizione, non un transcript: con raw non entrano.
     assert await learning.read_snapshot(scope, "mai-aperto-prima", raw=True) is None
+
+
+class WordEmbedder:
+    """Embedder finto e deterministico: un asse per parola chiave.
+
+    Non simula la semantica -- quella la verifica la prova con il modello vero.
+    Qui si verifica il giro: cosa si indicizza, cosa si ritrova, cosa sparisce.
+    """
+
+    PAROLE = ("go", "python", "carbonara")
+
+    @property
+    def dimensions(self) -> int:
+        return len(self.PAROLE)
+
+    async def embed(self, texts):
+        return [
+            [1.0 if parola in testo.lower() else 0.0 for parola in self.PAROLE] for testo in texts
+        ]
+
+
+@pytest.fixture
+def searchable(transcripts, hot, summarizer, extractor, redis_client, scope):
+    from memory_service.curation import ContextPolicy
+    from memory_service.stores.vectors import RedisMemories
+
+    memories = RedisMemories(redis_client)
+    yield ThreadMemory(
+        transcripts,
+        hot,
+        ContextPolicy(max_messages=6),
+        summarizer,
+        extractor,
+        30,
+        WordEmbedder(),
+        memories,
+    )
+
+
+def thread_about(*topics: str) -> list[dict]:
+    messages = []
+    for i, topic in enumerate(topics):
+        messages.append({"id": f"u{i}", "role": "user", "content": f"parliamo di {topic}"})
+        messages.append({"id": f"a{i}", "role": "assistant", "content": f"ecco su {topic}"})
+    return messages
+
+
+async def test_what_leaves_the_window_becomes_searchable(searchable, scope):
+    await searchable.save_snapshot(
+        scope, "t1", Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go"))
+    )
+    await searchable.compact_if_needed(scope, "t1")
+
+    trovati = await searchable.search_memories(scope, "carbonara", limit=3)
+
+    assert trovati
+    assert "carbonara" in trovati[0].testo
+
+
+async def test_a_memory_says_which_thread_it_came_from(searchable, scope):
+    await searchable.save_snapshot(
+        scope, "t1", Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go"))
+    )
+    await searchable.compact_if_needed(scope, "t1")
+
+    trovato = (await searchable.search_memories(scope, "python", limit=1))[0]
+
+    assert trovato.thread_id == "t1"
+    assert trovato.seq > 0
+
+
+async def test_nothing_is_indexed_twice(searchable, transcripts, redis_client, scope):
+    from memory_service.stores.vectors import RedisMemories
+
+    messages = thread_about("go", "python", "carbonara", "go", "go", "go")
+    await searchable.save_snapshot(scope, "t1", Snapshot(messages=messages))
+    await searchable.compact_if_needed(scope, "t1")
+    prima = await RedisMemories(redis_client).count(scope)
+
+    await searchable.compact_if_needed(scope, "t1")
+
+    assert await RedisMemories(redis_client).count(scope) == prima
+
+
+async def test_forgetting_a_thread_makes_its_memories_unsearchable(searchable, scope):
+    await searchable.save_snapshot(
+        scope, "t1", Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go"))
+    )
+    await searchable.compact_if_needed(scope, "t1")
+
+    await searchable.forget(scope, "t1")
+
+    assert await searchable.search_memories(scope, "carbonara", limit=3) == []
+
+
+async def test_searching_without_an_embedder_returns_nothing_and_says_so(memory, scope, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        assert await memory.search_memories(scope, "qualsiasi cosa", limit=3) == []
+
+    assert "non configurata" in caplog.text

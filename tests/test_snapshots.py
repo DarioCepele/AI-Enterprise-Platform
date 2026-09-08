@@ -56,8 +56,6 @@ def test_the_original_shape_is_kept_verbatim():
 
     fresh = new_messages([], incoming)
 
-    # Ricostruire la conversazione senza le chiamate ai tool significherebbe
-    # restituire al modello qualcosa che non e' mai successo.
     assert fresh[0].payload == incoming[0]
     assert fresh[0].role == "assistant"
 
@@ -75,7 +73,6 @@ def test_messages_without_an_id_fall_back_to_position():
 
 
 def test_an_unknown_role_is_kept_not_refused():
-    # Un servizio di memoria che rifiuta un ruolo nuovo perde il messaggio.
     fresh = new_messages([], [{"id": "m1", "role": "developer", "content": "x"}])
 
     assert fresh[0].role == "developer"
@@ -104,5 +101,4 @@ def test_the_summary_does_not_come_back_as_a_turn():
 
     fresh = new_messages(stored(("user", "m1")), incoming)
 
-    # Altrimenti il servizio finirebbe per riassumere i propri riassunti.
     assert [m.external_id for m in fresh] == ["m5"]

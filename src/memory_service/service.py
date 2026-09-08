@@ -5,14 +5,28 @@ import logging
 from dataclasses import replace
 
 from .curation import ContextPolicy, curate, summary_message, window_start
+from .embedder import Embedder
 from .facts import facts_message, parse_facts
 from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .snapshots import new_messages
 from .stores.hot import HotTail
 from .stores.mongo import MongoTranscripts
+from .stores.vectors import Memory, RedisMemories
 from .summarizer import FactExtractor, Summarizer
 
 logger = logging.getLogger(__name__)
+
+
+def _searchable_text(payload: dict) -> str:
+    """Il testo di un messaggio, se ne ha uno che valga la pena cercare.
+
+    Ragionamento e risultati di tool restano fuori: il primo e' il modello che
+    parla con se stesso, i secondi si riottengono richiamando il tool.
+    """
+    if payload.get("role") not in {"user", "assistant"}:
+        return ""
+    content = payload.get("content")
+    return content.strip() if isinstance(content, str) else ""
 
 
 def _payload_of(message: StoredMessage) -> dict:
@@ -39,6 +53,8 @@ class ThreadMemory:
         summarizer: Summarizer | None = None,
         extractor: FactExtractor | None = None,
         max_facts: int = 30,
+        embedder: Embedder | None = None,
+        memories: RedisMemories | None = None,
     ) -> None:
         self._durable = durable
         self._hot = hot
@@ -46,7 +62,8 @@ class ThreadMemory:
         self._summarizer = summarizer
         self._extractor = extractor
         self._max_facts = max_facts
-        # Thread con una compattazione gia' in corso.
+        self._embedder = embedder
+        self._memories = memories
         self._compacting: set[tuple[str, str]] = set()
 
     async def append(self, scope: str, thread_id: str, message: NewMessage) -> StoredMessage:
@@ -54,8 +71,6 @@ class ThreadMemory:
         try:
             await self._hot.append(scope, thread_id, stored)
         except Exception:
-            # Redis giu' non e' una perdita di dati: il messaggio e' gia' al
-            # sicuro. Si perde velocita', non memoria.
             logger.warning("Coda calda non aggiornata per il thread %s.", thread_id, exc_info=True)
         return stored
 
@@ -102,22 +117,74 @@ class ThreadMemory:
         misurato, non temuto. Il riassunto serve al turno successivo, non a
         questo, quindi puo' benissimo arrivare dopo.
         """
-        if (self._summarizer is None and self._extractor is None) or not self._policy.max_messages:
+        nulla_da_fare = (
+            self._summarizer is None and self._extractor is None and self._memories is None
+        )
+        if nulla_da_fare or not self._policy.max_messages:
             return
 
         key = (scope, thread_id)
         if key in self._compacting:
-            # Due run ravvicinate sullo stesso thread: la seconda troverebbe il
-            # lavoro gia' in corso e pagherebbe una seconda inferenza per lo
-            # stesso taglio.
             logger.info("Compattazione del thread %s gia' in corso, salto.", thread_id)
             return
         self._compacting.add(key)
         try:
             await self._compact(scope, thread_id)
             await self._learn_facts(scope, thread_id)
+            await self._index_memories(scope, thread_id)
         finally:
             self._compacting.discard(key)
+
+    async def _index_memories(self, scope: str, thread_id: str) -> None:
+        """Rende cercabili per significato i turni usciti dalla finestra.
+
+        Si indicizza **solo** quello che esce: cio' che e' ancora nella
+        finestra il modello ce l'ha gia' davanti, e ritrovarglielo sarebbe
+        ripetizione. La ricerca serve a raggiungere quello che non c'e' piu'.
+        """
+        if self._embedder is None or self._memories is None or not self._policy.max_messages:
+            return
+
+        history = await self._durable.history(scope, thread_id)
+        payloads = [_payload_of(message) for message in history]
+        cut = window_start(payloads, self._policy.max_messages)
+        if cut == 0:
+            return
+
+        indicizzati = await self._durable.indexed_upto(scope, thread_id)
+        entries = [
+            (thread_id, message.seq, _searchable_text(payload))
+            for message, payload in zip(history[:cut], payloads[:cut], strict=True)
+            if message.seq > indicizzati and _searchable_text(payload)
+        ]
+        if not entries:
+            return
+
+        try:
+            vectors = await self._embedder.embed([testo for _, _, testo in entries])
+            await self._memories.index(scope, entries, vectors)
+        except Exception:
+            logger.error(
+                "Ricordi NON indicizzati per il thread %s: la ricerca semantica "
+                "non li trovera'.",
+                thread_id,
+                exc_info=True,
+            )
+            return
+
+        await self._durable.set_indexed_upto(scope, thread_id, entries[-1][1])
+        logger.info("Dal thread %s: %d ricordi indicizzati.", thread_id, len(entries))
+
+    async def search_memories(self, scope: str, query: str, limit: int) -> list[Memory]:
+        """Cerca nei ricordi dello scope per significato, non per parole."""
+        if self._embedder is None or self._memories is None:
+            logger.warning("Ricerca semantica non configurata: nessun ricordo restituito.")
+            return []
+
+        vectors = await self._embedder.embed([query])
+        if not vectors:
+            return []
+        return await self._memories.search(scope, vectors[0], limit)
 
     async def _learn_facts(self, scope: str, thread_id: str) -> None:
         """Distilla i fatti duraturi dai turni che stanno uscendo.
@@ -179,8 +246,6 @@ class ThreadMemory:
         try:
             text = await self._summarizer.summarize(payloads[:cut])
         except Exception:
-            # Senza riassunto quei turni escono comunque dalla finestra: la
-            # conversazione continua, piu' smemorata, e il log lo dice.
             logger.error(
                 "Riassunto NON prodotto per il thread %s: i turni fuori finestra "
                 "restano fuori dal contesto.",
@@ -225,10 +290,6 @@ class ThreadMemory:
         head = await self._durable.read_head(scope, thread_id)
         messages = await self._durable.history(scope, thread_id)
         if head is None and not messages:
-            # Thread mai visto: niente conversazione, ma i fatti duraturi
-            # valgono comunque -- stanno sullo scope, non qui. Rispondere 404
-            # rendeva inutile l'intera memoria a lungo termine: il primo
-            # messaggio in una scheda nuova ripartiva senza saper nulla.
             if raw:
                 return None
             facts = await self._durable.facts_of(scope, self._max_facts)
@@ -247,8 +308,6 @@ class ThreadMemory:
             )
 
         head = head or {}
-        # Si restituisce la forma originale quando c'e': un messaggio
-        # ricostruito da ruolo e testo perderebbe le chiamate ai tool.
         payloads = [_payload_of(message) for message in messages]
 
         report = None
@@ -261,13 +320,6 @@ class ThreadMemory:
             )
             policy = self._policy
             if summary is None and self._summarizer is not None:
-                # Il riassunto si produce in sfondo e per il turno successivo:
-                # al primo turno oltre la soglia non c'e' ancora. Buttare quei
-                # messaggi adesso sarebbe amnesia -- misurata sul campo, con
-                # l'agente che rispondeva "non ho informazioni" su un fatto che
-                # aveva in memoria. La finestra si sospende finche' il
-                # riassunto non c'e': il contesto resta lungo un turno in piu',
-                # e nulla sparisce senza lasciare traccia di se'.
                 logger.info(
                     "Finestra sospesa sul thread %s: riassunto non ancora pronto.", thread_id
                 )
@@ -275,9 +327,6 @@ class ThreadMemory:
             payloads, curation = curate(payloads, policy, summary)
             report = curation.as_dict()
 
-            # I fatti entrano sempre, anche in un thread appena aperto dove non
-            # c'e' niente da riassumere: e' esattamente li' che si vede la
-            # differenza fra un agente con memoria e uno che ricomincia.
             facts = await self._durable.facts_of(scope, self._max_facts)
             report["fatti"] = len(facts)
             if facts:
@@ -306,9 +355,9 @@ class ThreadMemory:
         threads = await self._durable.threads_of(scope)
         for thread_id in threads:
             await self.forget(scope, thread_id)
-        # Anche i fatti: sono l'unica cosa che sopravvive alla cancellazione di
-        # un thread, ma non deve sopravvivere alla cancellazione dello scope.
         await self._durable.forget_facts(scope)
+        if self._memories:
+            await self._memories.forget_scope(scope)
         return len(threads)
 
     async def check(self) -> dict[str, str]:
@@ -326,13 +375,22 @@ class ThreadMemory:
         return {"status": "ok", "durable": "ok", "hot": "ok"}
 
     async def forget(self, scope: str, thread_id: str) -> int:
-        """Cancella davvero: durevole prima, cache dopo."""
+        """Cancella davvero: durevole prima, cache e indice dopo."""
+        seqs = await self._durable.seqs_of(scope, thread_id) if self._memories else []
         removed = await self._durable.forget(scope, thread_id)
+        if self._memories and seqs:
+            try:
+                await self._memories.forget_thread(scope, thread_id, seqs)
+            except Exception:
+                logger.error(
+                    "Ricordi NON rimossi dall'indice per il thread %s: restano cercabili.",
+                    thread_id,
+                    exc_info=True,
+                )
+                raise
         try:
             await self._hot.forget(scope, thread_id)
         except Exception:
-            # Una cancellazione che lascia la cache viva e' un dato cancellato
-            # che continua a rispondere fino alla scadenza: va detto forte.
             logger.error("Coda calda NON cancellata per il thread %s.", thread_id, exc_info=True)
             raise
         return removed

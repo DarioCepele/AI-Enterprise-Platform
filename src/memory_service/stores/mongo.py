@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 TURNS = "thread_turns"
 THREADS = "threads"
 SUMMARIES = "thread_summaries"
-# I fatti stanno sullo scope e non sul thread: cancellare una conversazione non
-# cancella cio' che si e' imparato dell'utente.
 FACTS = "scope_facts"
 
 
@@ -39,15 +37,9 @@ def build_client(uri: str) -> AsyncMongoClient:
     """
     return AsyncMongoClient(
         uri,
-        # Una manciata di richieste in volo: 20 lascia margine abbondante senza
-        # tenere occupata memoria sul server (circa 1 MB per connessione).
         maxPoolSize=20,
-        # Due connessioni gia' pronte: evitano l'handshake sulla prima richiesta
-        # dopo un periodo di quiete, che nel laboratorio e' la norma.
         minPoolSize=2,
         maxIdleTimeMS=300_000,
-        # Fallire in fretta e dirlo: un DB che non risponde deve diventare un
-        # errore visibile, non una richiesta appesa.
         connectTimeoutMS=5_000,
         serverSelectionTimeoutMS=5_000,
         socketTimeoutMS=30_000,
@@ -125,7 +117,6 @@ class MongoTranscripts:
         )
         entry = stored.model_dump()
 
-        # Prima strada: c'e' gia' un bucket con posto. Un solo update atomico.
         updated = await self._db[TURNS].find_one_and_update(
             {
                 "scope": scope,
@@ -143,9 +134,6 @@ class MongoTranscripts:
         if updated is not None:
             return stored
 
-        # Seconda strada: serve un bucket nuovo. Se due richieste ci arrivano
-        # insieme, l'indice unico ne lascia passare una sola; l'altra rientra
-        # dalla prima strada, dove ora il posto c'e'.
         last = await self._db[TURNS].find_one(
             {"scope": scope, "thread_id": thread_id},
             sort=[("bucket", DESCENDING)],
@@ -334,6 +322,26 @@ class MongoTranscripts:
         result = await self._db[FACTS].delete_many({"scope": scope})
         return int(result.deleted_count)
 
+    async def indexed_upto(self, scope: str, thread_id: str) -> int:
+        """Fino a quale posizione i ricordi di questo thread sono gia' indicizzati.
+
+        Segnato sul durevole e non su Redis: l'indice vettoriale e' ricostruibile
+        e puo' sparire, il punto a cui si era arrivati no.
+        """
+        document = await self._db[THREADS].find_one(
+            {"scope": scope, "thread_id": thread_id}, projection={"indexed_upto": 1, "_id": 0}
+        )
+        return int((document or {}).get("indexed_upto") or 0)
+
+    async def set_indexed_upto(self, scope: str, thread_id: str, seq: int) -> None:
+        await self._db[THREADS].update_one(
+            {"scope": scope, "thread_id": thread_id}, {"$set": {"indexed_upto": seq}}
+        )
+
+    async def seqs_of(self, scope: str, thread_id: str) -> list[int]:
+        """Le posizioni dei messaggi di un thread, per toglierli dall'indice."""
+        return [message.seq for message in await self.history(scope, thread_id)]
+
     async def threads_of(self, scope: str) -> list[str]:
         """Gli id dei thread di uno scope."""
         return [str(value) for value in await self._db[THREADS].distinct('thread_id', {'scope': scope})]
@@ -342,8 +350,6 @@ class MongoTranscripts:
         """Cancella una conversazione. Restituisce i bucket rimossi."""
         result = await self._db[TURNS].delete_many({"scope": scope, "thread_id": thread_id})
         await self._db[THREADS].delete_one({"scope": scope, "thread_id": thread_id})
-        # Anche i riassunti: dimenticare a meta' lascerebbe in giro il
-        # racconto di una conversazione che l'utente ha chiesto di cancellare.
         await self._db[SUMMARIES].delete_many({"scope": scope, "thread_id": thread_id})
         return int(result.deleted_count)
 

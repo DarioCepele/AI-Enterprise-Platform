@@ -15,9 +15,6 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Cosa tenere e cosa buttare. E' la parte piu' delicata del servizio: un
-# riassunto che perde una decisione presa fa ripartire l'agente da capo, e chi
-# legge non ha modo di accorgersene finche' il danno non e' fatto.
 INSTRUCTIONS = """Riassumi la conversazione qui sotto per un agente che deve continuarla.
 
 Conserva:
@@ -35,9 +32,6 @@ Scrivi in italiano, in prosa asciutta, al massimo dieci righe. Non inventare
 nulla che non sia nella conversazione: se un punto non e' chiaro, dillo."""
 
 
-# Cosa e' un fatto e cosa non lo e'. La differenza che conta: un fatto resta
-# vero anche fuori da questa conversazione. "Preferisce Go" e' un fatto,
-# "sta aspettando la risposta" no.
 FACTS_INSTRUCTIONS = """Estrai dalla conversazione i fatti duraturi sull'utente e sul suo lavoro.
 
 Un fatto duraturo resta vero anche in una conversazione diversa, domani:
@@ -97,8 +91,6 @@ class OpenAICompatibleSummarizer:
         self._client = client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
-            # Generoso: e' fuori dal percorso di risposta all'utente, e un
-            # riassunto tagliato a meta' e' peggio di un riassunto lento.
             timeout=timeout,
         )
 
@@ -123,7 +115,6 @@ class OpenAICompatibleSummarizer:
                     {"role": "system", "content": instructions},
                     {"role": "user", "content": transcript},
                 ],
-                # Ne' un riassunto ne' un'estrazione devono essere creativi.
                 "temperature": 0,
             },
         )

@@ -24,14 +24,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-# Il testo che prende il posto di un risultato svuotato. Dice che c'era
-# qualcosa, invece di far credere al modello che il tool non abbia risposto.
 CLEARED = "[risultato rimosso per fare spazio nel contesto]"
 
-# Prefisso degli id dei messaggi che questo servizio inietta ricomponendo il
-# contesto -- riassunto e fatti. Riconoscerli quando tornano indietro dentro lo
-# snapshot successivo evita che diventino turni veri: senza, il servizio
-# finirebbe per riassumere i propri riassunti, a ogni giro, per sempre.
 MEMORY_ID_PREFIX = "memoria:"
 SUMMARY_ID_PREFIX = f"{MEMORY_ID_PREFIX}riassunto"
 
@@ -40,15 +34,8 @@ SUMMARY_ID_PREFIX = f"{MEMORY_ID_PREFIX}riassunto"
 class ContextPolicy:
     """Le regole con cui si ricompone il contesto."""
 
-    # Il ragionamento di un turno passato non serve a continuare quello nuovo:
-    # il modello lo rifa'. Dentro una run resta intatto, perche' li' il ciclo
-    # non passa da qui.
     drop_reasoning: bool = True
-    # Quanti risultati di tool restano per intero, dal fondo. Gli altri si
-    # svuotano tenendo la traccia della chiamata: e' la potatura a rischio piu'
-    # basso, perche' quei risultati sono ri-ottenibili chiamando di nuovo.
     keep_tool_results: int = 4
-    # Tetto di messaggi restituiti. None = nessun tetto.
     max_messages: int | None = 60
 
 
@@ -60,8 +47,6 @@ class Curation:
     ragionamenti_tolti: int
     risultati_svuotati: int
     messaggi_scartati: int
-    # Se i messaggi scartati sono arrivati fin qui come riassunto o se sono
-    # semplicemente spariti: e' la differenza fra memoria compattata e amnesia.
     riassunti: bool = False
 
     def as_dict(self) -> dict[str, int]:
@@ -135,22 +120,16 @@ def curate(
     else:
         ragionamenti = 0
 
-    # I risultati piu' recenti restano interi: sono quelli su cui il modello
-    # sta ancora ragionando.
     tool_indexes = [index for index, m in enumerate(window) if _role(m) == "tool"]
     to_clear = set(tool_indexes[: max(len(tool_indexes) - policy.keep_tool_results, 0)])
 
     curated: list[dict[str, Any]] = []
     for index, message in enumerate(window):
         if index in to_clear:
-            # Si sostituisce il contenuto, non il messaggio: la traccia della
-            # chiamata resta, e il modello vede che quel passo e' avvenuto.
             curated.append({**message, "content": CLEARED})
         else:
             curated.append(message)
 
-    # Il riassunto va in testa e solo se qualcosa e' davvero uscito: metterlo
-    # quando non manca niente raddoppierebbe cio' che il modello legge.
     riassunti = bool(summary and scartati)
     if riassunti:
         curated = [summary, *curated]
