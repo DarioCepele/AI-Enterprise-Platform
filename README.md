@@ -101,3 +101,33 @@ argomenti finché non diventano JSON valido.
 **Un task fallito è meglio di un task vuoto.** Se l'agente non produce testo, il
 task va in `FAILED` invece di completarsi senza artefatto: chi lo ha chiesto
 deve poter distinguere "non ho trovato nulla" da "è andato tutto bene".
+
+## Fermarsi e chiedere
+
+Se la domanda è ambigua al punto che rispondere sarebbe indovinare — «come
+funziona la concorrenza?», col catalogo che ha Go, Python e Rust — l'agente
+risponde con la sola riga `[SERVE-CHIARIMENTO] <domanda>`. L'executor la
+riconosce e mette il task in `INPUT_REQUIRED` invece di completarlo: il task
+resta **aperto**, e chi lo ha chiesto può riprenderlo mandando un messaggio con
+lo stesso `task_id`.
+
+È human-in-the-loop attraverso gli agenti: la domanda risale dal sottoagente al
+master, dal master alla persona, e la risposta torna giù per lo stesso task
+invece di aprirne uno nuovo che avrebbe perso il contesto.
+
+Il marcatore è testuale di proposito: un tool `chiedi_chiarimento` sarebbe
+sembrato più pulito, ma l'agente lo avrebbe chiamato *e poi* continuato a
+rispondere, perché per il modello un tool è un passo intermedio. La riga sola è
+un punto di uscita.
+
+## Le notifiche push si mandano ai punti di svolta
+
+`BasePushNotificationSender` notifica **ogni** evento della coda. In streaming
+sono decine di aggiornamenti di stato per task: 196 POST verso il master per due
+domande, tutti scartati da chi li riceveva. `NotificheEssenziali` (in
+`knowledge/push.py`) filtra sugli stati in cui il chiamante ha davvero qualcosa
+da fare — fine del task (`COMPLETED`, `FAILED`, `CANCELED`, `REJECTED`) e
+`INPUT_REQUIRED`. Stesso ciclo, 2 POST.
+
+Gli artefatti non viaggiano nella notifica: dice che il task è finito, non cosa
+ha prodotto. Il risultato si va a rileggere con `get_task`.

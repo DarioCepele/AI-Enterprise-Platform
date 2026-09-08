@@ -238,3 +238,33 @@ async def test_another_tools_arguments_are_not_mistaken_for_ours():
 
     dati = MessageToDict(next(p.data for p in artefatti(eventi)[0].parts if p.HasField("data")))
     assert dati.get("documenti", []) == []
+
+
+@pytest.mark.asyncio
+async def test_an_ambiguous_question_leaves_the_task_waiting_for_input():
+    eventi = await esegui(
+        FakeAgent([Update("[SERVE-CHIARIMENTO] Di quale linguaggio parli?")]),
+        domanda="come funziona la concorrenza?",
+    )
+
+    # Non completato e non fallito: il task resta aperto, in attesa che qualcuno
+    # risponda. E' l'aggancio dell'human-in-the-loop fra agenti.
+    assert stati(eventi)[-1] == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert artefatti(eventi) == []
+
+
+@pytest.mark.asyncio
+async def test_the_question_travels_with_the_state():
+    eventi = await esegui(FakeAgent([Update("[SERVE-CHIARIMENTO] Di quale linguaggio parli?")]))
+
+    ultimo = [e for e in eventi if isinstance(e, TaskStatusUpdateEvent)][-1]
+    testo = "".join(part.text for part in ultimo.status.message.parts)
+    assert testo == "Di quale linguaggio parli?"
+
+
+@pytest.mark.asyncio
+async def test_a_marker_without_a_question_still_asks_something():
+    eventi = await esegui(FakeAgent([Update("[SERVE-CHIARIMENTO]")]))
+
+    ultimo = [e for e in eventi if isinstance(e, TaskStatusUpdateEvent)][-1]
+    assert "precisare" in "".join(part.text for part in ultimo.status.message.parts)

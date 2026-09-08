@@ -13,13 +13,13 @@ from a2a.server.routes import (
 )
 import httpx
 from a2a.server.tasks import (
-    BasePushNotificationSender,
     InMemoryPushNotificationConfigStore,
     InMemoryTaskStore,
 )
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 from agent_framework import Agent
 from .executor import KnowledgeExecutor
+from .push import NotificheEssenziali
 from fastapi import FastAPI
 
 from .agent import build_knowledge_agent, catalogue
@@ -62,7 +62,7 @@ def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastA
         task_store=InMemoryTaskStore(),
         agent_card=card,
         push_config_store=push_store,
-        push_sender=BasePushNotificationSender(httpx.AsyncClient(timeout=10.0), push_store),
+        push_sender=NotificheEssenziali(httpx.AsyncClient(timeout=10.0), push_store),
     )
 
     app = FastAPI(title="Knowledge agent")

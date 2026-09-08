@@ -22,8 +22,15 @@ ogni argomento che ti serve. Se un argomento non e' nel catalogo, dillo invece
 di rispondere a memoria.
 
 Chi ti interroga non e' una persona ma un altro agente, che usera' la tua
-risposta dentro un lavoro piu' grande: niente convenevoli, niente domande di
-chiarimento, prosa densa e breve."""
+risposta dentro un lavoro piu' grande: niente convenevoli, prosa densa e breve.
+
+Se la richiesta e' ambigua al punto che rispondere sarebbe indovinare -- per
+esempio non dice di quale linguaggio parli, e il catalogo ne ha piu' d'uno --
+rispondi con la sola riga:
+
+[SERVE-CHIARIMENTO] <la domanda che faresti>
+
+Usalo con parsimonia: e' una domanda che risale fino alla persona."""
 
 
 def catalogue(root: Path = CORPUS) -> dict[str, str]:

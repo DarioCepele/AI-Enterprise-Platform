@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 ARTEFATTO = "scheda"
 
+# Marcatore che il modello mette quando la domanda non basta a se stessa.
+CHIEDE = "[SERVE-CHIARIMENTO]"
+
 
 class LettureDocumenti:
     """Quali documenti ha letto l'agente, dagli argomenti che arrivano a delta.
@@ -123,6 +126,15 @@ class KnowledgeExecutor(AgentExecutor):
             return
 
         risposta = "".join(pezzi).strip()
+
+        if risposta.startswith(CHIEDE):
+            domanda_di_ritorno = risposta[len(CHIEDE) :].strip() or "Puoi precisare la richiesta?"
+            await updater.requires_input(
+                message=updater.new_agent_message([Part(text=domanda_di_ritorno)])
+            )
+            logger.info("Task %s in attesa di un chiarimento.", task.id)
+            return
+
         if not risposta:
             await updater.failed(
                 message=updater.new_agent_message(
