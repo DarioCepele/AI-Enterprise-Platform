@@ -30,6 +30,7 @@ def test_nothing_to_curate_is_left_alone():
         "ragionamenti_tolti": 0,
         "risultati_svuotati": 0,
         "messaggi_scartati": 0,
+        "riassunti": 0,
     }
 
 
@@ -116,3 +117,30 @@ def test_curation_counts_what_survived():
     assert report.conservati == len(curated)
     assert report.ragionamenti_tolti == 2
     assert report.risultati_svuotati == 1
+
+
+def test_the_summary_goes_on_top_only_when_something_was_dropped():
+    from memory_service.curation import summary_message
+
+    summary = summary_message("si parlava di Python e Go", covers_to_seq=12)
+    messages = turn("primo") + turn("secondo") + turn("terzo")
+
+    con_taglio, report = curate(messages, ContextPolicy(max_messages=7), summary)
+    senza_taglio, report_intero = curate(turn(), ContextPolicy(max_messages=60), summary)
+
+    assert con_taglio[0]["role"] == "system"
+    assert "Python e Go" in con_taglio[0]["content"]
+    assert report.riassunti is True
+    # Nulla e' uscito: aggiungere il riassunto raddoppierebbe cio' che si legge.
+    assert all(m["role"] != "system" for m in senza_taglio)
+    assert report_intero.riassunti is False
+
+
+def test_a_dropped_prefix_without_a_summary_is_declared_as_such():
+    messages = turn("primo") + turn("secondo") + turn("terzo")
+
+    _, report = curate(messages, ContextPolicy(max_messages=7))
+
+    # Memoria compattata e amnesia si distinguono guardando questo campo.
+    assert report.messaggi_scartati > 0
+    assert report.riassunti is False

@@ -2,14 +2,23 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
-from .curation import ContextPolicy, curate
+from .curation import ContextPolicy, curate, summary_message, window_start
 from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .snapshots import new_messages
 from .stores.hot import HotTail
 from .stores.mongo import MongoTranscripts
+from .summarizer import Summarizer
 
 logger = logging.getLogger(__name__)
+
+
+def _payload_of(message: StoredMessage) -> dict:
+    """La forma originale del messaggio, o una minima se non c'era."""
+    if message.payload is not None:
+        return message.payload
+    return {"role": message.role, "content": message.content}
 
 
 class ThreadMemory:
@@ -26,10 +35,14 @@ class ThreadMemory:
         durable: MongoTranscripts,
         hot: HotTail,
         policy: ContextPolicy | None = None,
+        summarizer: Summarizer | None = None,
     ) -> None:
         self._durable = durable
         self._hot = hot
         self._policy = policy or ContextPolicy()
+        self._summarizer = summarizer
+        # Thread con una compattazione gia' in corso.
+        self._compacting: set[tuple[str, str]] = set()
 
     async def append(self, scope: str, thread_id: str, message: NewMessage) -> StoredMessage:
         stored = await self._durable.append(scope, thread_id, message)
@@ -75,6 +88,76 @@ class ThreadMemory:
         )
         return len(fresh)
 
+    async def compact_if_needed(self, scope: str, thread_id: str) -> None:
+        """Riassume i turni che stanno per uscire dalla finestra.
+
+        **Va invocata dopo aver risposto, mai dentro una richiesta.** Un
+        riassunto costa un'inferenza -- decine di secondi nel caso peggiore --
+        e tenerla dentro la PUT dello snapshot manda in timeout il client:
+        misurato, non temuto. Il riassunto serve al turno successivo, non a
+        questo, quindi puo' benissimo arrivare dopo.
+        """
+        if self._summarizer is None or not self._policy.max_messages:
+            return
+
+        key = (scope, thread_id)
+        if key in self._compacting:
+            # Due run ravvicinate sullo stesso thread: la seconda troverebbe il
+            # lavoro gia' in corso e pagherebbe una seconda inferenza per lo
+            # stesso taglio.
+            logger.info("Compattazione del thread %s gia' in corso, salto.", thread_id)
+            return
+        self._compacting.add(key)
+        try:
+            await self._compact(scope, thread_id)
+        finally:
+            self._compacting.discard(key)
+
+    async def _compact(self, scope: str, thread_id: str) -> None:
+        """Il lavoro vero: taglio, riassunto, scrittura."""
+        history = await self._durable.history(scope, thread_id)
+        payloads = [_payload_of(message) for message in history]
+        cut = window_start(payloads, self._policy.max_messages)
+        if cut == 0:
+            return
+
+        covers_to_seq = history[cut - 1].seq
+        existing = await self._durable.latest_summary(scope, thread_id)
+        if existing and int(existing.get("covers_to_seq", 0)) >= covers_to_seq:
+            return
+
+        try:
+            text = await self._summarizer.summarize(payloads[:cut])
+        except Exception:
+            # Senza riassunto quei turni escono comunque dalla finestra: la
+            # conversazione continua, piu' smemorata, e il log lo dice.
+            logger.error(
+                "Riassunto NON prodotto per il thread %s: i turni fuori finestra "
+                "restano fuori dal contesto.",
+                thread_id,
+                exc_info=True,
+            )
+            return
+
+        if not text:
+            return
+
+        await self._durable.save_summary(
+            scope,
+            thread_id,
+            text=text,
+            covers_to_seq=covers_to_seq,
+            message_count=cut,
+            model=getattr(self._summarizer, "_model", "?"),
+        )
+        logger.info(
+            "Thread %s compattato: %d messaggi fino a seq %d in %d caratteri di riassunto.",
+            thread_id,
+            cut,
+            covers_to_seq,
+            len(text),
+        )
+
     async def read_snapshot(
         self,
         scope: str,
@@ -97,16 +180,30 @@ class ThreadMemory:
         head = head or {}
         # Si restituisce la forma originale quando c'e': un messaggio
         # ricostruito da ruolo e testo perderebbe le chiamate ai tool.
-        payloads = [
-            message.payload
-            if message.payload is not None
-            else {"role": message.role, "content": message.content}
-            for message in messages
-        ]
+        payloads = [_payload_of(message) for message in messages]
 
         report = None
         if not raw:
-            payloads, curation = curate(payloads, self._policy)
+            stored_summary = await self._durable.latest_summary(scope, thread_id)
+            summary = (
+                summary_message(stored_summary["text"], stored_summary["covers_to_seq"])
+                if stored_summary
+                else None
+            )
+            policy = self._policy
+            if summary is None and self._summarizer is not None:
+                # Il riassunto si produce in sfondo e per il turno successivo:
+                # al primo turno oltre la soglia non c'e' ancora. Buttare quei
+                # messaggi adesso sarebbe amnesia -- misurata sul campo, con
+                # l'agente che rispondeva "non ho informazioni" su un fatto che
+                # aveva in memoria. La finestra si sospende finche' il
+                # riassunto non c'e': il contesto resta lungo un turno in piu',
+                # e nulla sparisce senza lasciare traccia di se'.
+                logger.info(
+                    "Finestra sospesa sul thread %s: riassunto non ancora pronto.", thread_id
+                )
+                policy = replace(policy, max_messages=None)
+            payloads, curation = curate(payloads, policy, summary)
             report = curation.as_dict()
             logger.info(
                 "Contesto del thread %s ricomposto: %d messaggi su %d "

@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     hot_tail_seconds: int = Field(default=1800, ge=1)
     hot_tail_messages: int = Field(default=100, ge=1)
 
+    # Il modello che riassume. Vuoto = nessuna compattazione, dichiarata
+    # all'avvio: i turni fuori finestra escono senza lasciare un riassunto.
+    # E' un modello a parte da quello dell'agente: riassumere e' un lavoro
+    # diverso dal rispondere, e puo' meritare un modello piu' piccolo.
+    summary_model: str = ""
+    summary_base_url: str = "https://openrouter.ai/api/v1"
+    summary_api_key: str = ""
+
     # Potatura del contesto restituito. Non tocca cio' che e' scritto: si
     # conserva tutto e si restituisce il necessario.
     drop_reasoning: bool = True

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 TURNS = "thread_turns"
 THREADS = "threads"
+SUMMARIES = "thread_summaries"
 
 
 def build_client(uri: str) -> AsyncMongoClient:
@@ -79,6 +80,11 @@ class MongoTranscripts:
             [("scope", ASCENDING), ("thread_id", ASCENDING)],
             unique=True,
             name="thread_unico",
+        )
+        await self._db[SUMMARIES].create_index(
+            [("scope", ASCENDING), ("thread_id", ASCENDING), ("covers_to_seq", DESCENDING)],
+            unique=True,
+            name="riassunto_unico",
         )
 
     async def _next_seq(self, scope: str, thread_id: str) -> int:
@@ -234,6 +240,43 @@ class MongoTranscripts:
                 break
         return [StoredMessage(**entry) for entry in collected[-limit:]]
 
+    async def save_summary(
+        self,
+        scope: str,
+        thread_id: str,
+        *,
+        text: str,
+        covers_to_seq: int,
+        message_count: int,
+        model: str,
+    ) -> None:
+        """Registra un riassunto dei turni fino a `covers_to_seq`.
+
+        I riassunti si accumulano invece di sostituirsi: quello vecchio dice
+        cosa sapeva l'agente allora, e quando un riassunto perde qualcosa e'
+        l'unico modo di risalire a dove si e' perso.
+        """
+        await self._db[SUMMARIES].update_one(
+            {"scope": scope, "thread_id": thread_id, "covers_to_seq": covers_to_seq},
+            {
+                "$set": {
+                    "text": text,
+                    "message_count": message_count,
+                    "model": model,
+                    "created_at": datetime.now(UTC),
+                }
+            },
+            upsert=True,
+        )
+
+    async def latest_summary(self, scope: str, thread_id: str) -> dict[str, Any] | None:
+        """Il riassunto piu' avanzato del thread, se ce n'e' uno."""
+        return await self._db[SUMMARIES].find_one(
+            {"scope": scope, "thread_id": thread_id},
+            sort=[("covers_to_seq", DESCENDING)],
+            projection={"text": 1, "covers_to_seq": 1, "_id": 0},
+        )
+
     async def threads_of(self, scope: str) -> list[str]:
         """Gli id dei thread di uno scope."""
         return [str(value) for value in await self._db[THREADS].distinct('thread_id', {'scope': scope})]
@@ -242,6 +285,9 @@ class MongoTranscripts:
         """Cancella una conversazione. Restituisce i bucket rimossi."""
         result = await self._db[TURNS].delete_many({"scope": scope, "thread_id": thread_id})
         await self._db[THREADS].delete_one({"scope": scope, "thread_id": thread_id})
+        # Anche i riassunti: dimenticare a meta' lascerebbe in giro il
+        # racconto di una conversazione che l'utente ha chiesto di cancellare.
+        await self._db[SUMMARIES].delete_many({"scope": scope, "thread_id": thread_id})
         return int(result.deleted_count)
 
     async def ping(self) -> None:

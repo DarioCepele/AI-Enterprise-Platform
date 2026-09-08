@@ -28,6 +28,11 @@ from typing import Any
 # qualcosa, invece di far credere al modello che il tool non abbia risposto.
 CLEARED = "[risultato rimosso per fare spazio nel contesto]"
 
+# Prefisso dell'id del messaggio di riassunto. Serve a riconoscerlo quando
+# torna indietro dentro lo snapshot successivo: senza, il riassunto verrebbe
+# scritto come un turno vero e finirebbe nel riassunto dopo, all'infinito.
+SUMMARY_ID_PREFIX = "memoria:riassunto"
+
 
 @dataclass(frozen=True)
 class ContextPolicy:
@@ -53,6 +58,9 @@ class Curation:
     ragionamenti_tolti: int
     risultati_svuotati: int
     messaggi_scartati: int
+    # Se i messaggi scartati sono arrivati fin qui come riassunto o se sono
+    # semplicemente spariti: e' la differenza fra memoria compattata e amnesia.
+    riassunti: bool = False
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -60,6 +68,7 @@ class Curation:
             "ragionamenti_tolti": self.ragionamenti_tolti,
             "risultati_svuotati": self.risultati_svuotati,
             "messaggi_scartati": self.messaggi_scartati,
+            "riassunti": int(self.riassunti),
         }
 
 
@@ -68,8 +77,12 @@ def _role(message: dict[str, Any]) -> str:
     return role if isinstance(role, str) else ""
 
 
-def _window_start(messages: list[dict[str, Any]], max_messages: int) -> int:
+def window_start(messages: list[dict[str, Any]], max_messages: int) -> int:
     """Da dove far partire la finestra, tagliando su un confine di turno.
+
+    Pubblica perche' la usa anche la compattazione: il riassunto deve coprire
+    esattamente i messaggi che la lettura lascera' fuori, e due regole diverse
+    lascerebbero un buco fra cio' che e' riassunto e cio' che si vede.
 
     Tagliare a un indice qualsiasi lascerebbe orfano il risultato di un tool la
     cui chiamata e' finita fuori: una conversazione che al modello non torna.
@@ -89,12 +102,27 @@ def _window_start(messages: list[dict[str, Any]], max_messages: int) -> int:
     return 0
 
 
+def summary_message(text: str, covers_to_seq: int) -> dict[str, Any]:
+    """Il riassunto come messaggio di sistema, riconoscibile al ritorno."""
+    return {
+        "id": f"{SUMMARY_ID_PREFIX}:{covers_to_seq}",
+        "role": "system",
+        "content": f"Riassunto della conversazione precedente:\n{text}",
+    }
+
+
 def curate(
     messages: list[dict[str, Any]],
     policy: ContextPolicy,
+    summary: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], Curation]:
-    """Il contesto da restituire, e il conto di cio' che non c'e' piu'."""
-    start = _window_start(messages, policy.max_messages) if policy.max_messages else 0
+    """Il contesto da restituire, e il conto di cio' che non c'e' piu'.
+
+    `summary` e' il riassunto dei turni che escono dalla finestra, gia' pronto:
+    qui non si chiama nessun modello. La compattazione costa un'inferenza e sta
+    fuori dal percorso di lettura, che deve restare veloce e prevedibile.
+    """
+    start = window_start(messages, policy.max_messages) if policy.max_messages else 0
     window = messages[start:]
     scartati = start
 
@@ -119,9 +147,16 @@ def curate(
         else:
             curated.append(message)
 
+    # Il riassunto va in testa e solo se qualcosa e' davvero uscito: metterlo
+    # quando non manca niente raddoppierebbe cio' che il modello legge.
+    riassunti = bool(summary and scartati)
+    if riassunti:
+        curated = [summary, *curated]
+
     return curated, Curation(
         conservati=len(curated),
         ragionamenti_tolti=ragionamenti,
         risultati_svuotati=len(to_clear),
         messaggi_scartati=scartati,
+        riassunti=riassunti,
     )

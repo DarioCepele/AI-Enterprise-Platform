@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from .curation import SUMMARY_ID_PREFIX
 from .models import NewMessage, StoredMessage
 
 
@@ -47,6 +48,12 @@ def new_messages(
 
     for index, raw in enumerate(incoming):
         external_id = raw.get("id")
+        if isinstance(external_id, str) and external_id.startswith(SUMMARY_ID_PREFIX):
+            # Il riassunto lo ha messo questo servizio ricomponendo il contesto,
+            # e torna indietro dentro lo snapshot successivo. Scriverlo come un
+            # turno vero significherebbe riassumere i propri riassunti, a ogni
+            # giro, per sempre.
+            continue
         if isinstance(external_id, str) and external_id:
             if external_id in known_ids:
                 continue

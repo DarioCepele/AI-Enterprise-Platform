@@ -13,7 +13,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from pymongo import AsyncMongoClient
 from redis.asyncio import Redis
 
@@ -23,6 +23,7 @@ from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
 from .stores.hot import HotTail
 from .stores.mongo import MongoTranscripts, build_client
+from .summarizer import OpenAICompatibleSummarizer
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,19 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         redis = Redis.from_url(config.redis_uri, decode_responses=True)
         durable = MongoTranscripts(client, config.mongo_database, config.bucket_size)
         await durable.ensure_indexes()
+        summarizer = None
+        if config.summary_model:
+            summarizer = OpenAICompatibleSummarizer(
+                config.summary_base_url, config.summary_api_key, config.summary_model
+            )
+            logger.info("Compattazione attiva con il modello %s.", config.summary_model)
+        else:
+            # Detto una volta all'avvio invece che a ogni taglio: e' una scelta
+            # di configurazione, non un evento.
+            logger.warning(
+                "Nessun modello per i riassunti (MEMORY_SUMMARY_MODEL): i turni "
+                "fuori dalla finestra usciranno dal contesto senza riassunto."
+            )
         state["memory"] = ThreadMemory(
             durable,
             HotTail(redis, config.hot_tail_seconds, config.hot_tail_messages),
@@ -54,6 +68,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 keep_tool_results=config.keep_tool_results,
                 max_messages=config.max_context_messages,
             ),
+            summarizer,
         )
         try:
             yield
@@ -114,11 +129,19 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     async def save_snapshot(
         thread_id: str,
         snapshot: Snapshot,
+        background: BackgroundTasks,
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
-        """Assorbe lo stato completo del thread. I turni gia' visti non tornano."""
-        return {"turni_nuovi": await memory_instance.save_snapshot(scope, thread_id, snapshot)}
+        """Assorbe lo stato completo del thread. I turni gia' visti non tornano.
+
+        La compattazione parte **dopo** la risposta: e' una chiamata a un
+        modello, e tenerla qui dentro manda in timeout il client -- misurato
+        sul campo, non temuto. Il riassunto serve al turno successivo.
+        """
+        written = await memory_instance.save_snapshot(scope, thread_id, snapshot)
+        background.add_task(memory_instance.compact_if_needed, scope, thread_id)
+        return {"turni_nuovi": written}
 
     @app.get("/threads/{thread_id}/snapshot")
     async def read_snapshot(

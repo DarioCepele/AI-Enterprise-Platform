@@ -277,3 +277,197 @@ async def test_the_api_can_ask_for_the_whole_transcript(memory, scope):
 
     assert [m["role"] for m in potato.json()["messages"]] == ["user"]
     assert [m["role"] for m in integrale.json()["messages"]] == ["user", "reasoning"]
+
+
+class RecordingSummarizer:
+    """Riassuntore finto: registra cosa gli e' stato dato da riassumere."""
+
+    _model = "finto"
+
+    def __init__(self, text: str = "si parlava del codice ORCHIDEA-77") -> None:
+        self.text = text
+        self.calls: list[list[dict]] = []
+
+    async def summarize(self, messages):
+        self.calls.append(messages)
+        return self.text
+
+
+class BrokenSummarizer:
+    _model = "rotto"
+
+    async def summarize(self, messages):
+        raise RuntimeError("modello irraggiungibile")
+
+
+def long_thread(turns: int) -> list[dict]:
+    messages = []
+    for i in range(turns):
+        messages.append({"id": f"u{i}", "role": "user", "content": f"domanda {i}"})
+        messages.append({"id": f"a{i}", "role": "assistant", "content": f"risposta {i}"})
+    return messages
+
+
+@pytest.fixture
+def summarizer() -> RecordingSummarizer:
+    return RecordingSummarizer()
+
+
+@pytest.fixture
+def compacting(transcripts, hot, summarizer) -> ThreadMemory:
+    from memory_service.curation import ContextPolicy
+
+    return ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer)
+
+
+async def test_a_short_thread_is_not_summarized(compacting, summarizer, scope):
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(2)))
+    await compacting.compact_if_needed(scope, "t1")
+
+    # Nulla esce dalla finestra: riassumere sarebbe spesa senza guadagno.
+    assert summarizer.calls == []
+
+
+async def test_crossing_the_window_produces_a_summary(compacting, summarizer, scope):
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await compacting.compact_if_needed(scope, "t1")
+
+    assert len(summarizer.calls) == 1
+    # Riassume esattamente cio' che la lettura lascera' fuori.
+    assert [m["content"] for m in summarizer.calls[0]][:2] == ["domanda 0", "risposta 0"]
+
+
+async def test_the_summary_arrives_at_the_head_of_the_context(compacting, scope):
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await compacting.compact_if_needed(scope, "t1")
+
+    snapshot = await compacting.read_snapshot(scope, "t1")
+
+    assert snapshot.messages[0]["role"] == "system"
+    assert "ORCHIDEA-77" in snapshot.messages[0]["content"]
+    assert snapshot.curation["riassunti"] == 1
+    assert snapshot.curation["messaggi_scartati"] > 0
+
+
+async def test_the_whole_transcript_has_no_summary_in_it(compacting, scope):
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await compacting.compact_if_needed(scope, "t1")
+
+    integrale = await compacting.read_snapshot(scope, "t1", raw=True)
+
+    # Il riassunto e' una ricomposizione, non un turno: nel transcript non c'e'.
+    assert all(m.get("role") != "system" for m in integrale.messages)
+
+
+async def test_the_summary_does_not_get_rewritten_at_every_run(compacting, summarizer, scope):
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await compacting.compact_if_needed(scope, "t1")
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await compacting.compact_if_needed(scope, "t1")
+
+    # Stesso taglio, stesso riassunto: rifarlo sarebbe un'inferenza a vuoto.
+    assert len(summarizer.calls) == 1
+
+
+async def test_the_summary_returned_does_not_become_a_turn(compacting, scope):
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await compacting.compact_if_needed(scope, "t1")
+    context = await compacting.read_snapshot(scope, "t1")
+
+    # Il client rimanda indietro cio' che ha ricevuto, riassunto compreso.
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=context.messages))
+    integrale = await compacting.read_snapshot(scope, "t1", raw=True)
+
+    assert all(m.get("role") != "system" for m in integrale.messages)
+
+
+async def test_a_broken_summarizer_does_not_break_the_conversation(transcripts, hot, scope, caplog):
+    import logging
+
+    from memory_service.curation import ContextPolicy
+
+    memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), BrokenSummarizer())
+
+    with caplog.at_level(logging.ERROR):
+        await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+        await memory.compact_if_needed(scope, "t1")
+    snapshot = await memory.read_snapshot(scope, "t1")
+
+    # Si continua piu' smemorati, e il log lo dice: quei turni sono usciti
+    # senza lasciare un riassunto al loro posto.
+    assert snapshot.curation["riassunti"] == 0
+    assert "Riassunto NON prodotto" in caplog.text
+
+
+async def test_without_a_summarizer_nothing_is_compacted(transcripts, hot, scope):
+    from memory_service.curation import ContextPolicy
+
+    memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6))
+
+    await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await memory.compact_if_needed(scope, "t1")
+    snapshot = await memory.read_snapshot(scope, "t1")
+
+    assert snapshot.curation["riassunti"] == 0
+
+
+async def test_forgetting_a_thread_takes_its_summaries_too(compacting, transcripts, scope):
+    await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await compacting.compact_if_needed(scope, "t1")
+
+    await compacting.forget(scope, "t1")
+
+    # Un riassunto sopravvissuto racconterebbe una conversazione cancellata.
+    assert await transcripts.latest_summary(scope, "t1") is None
+
+
+class SlowSummarizer:
+    """Un modello lento. E' il caso normale, non quello patologico."""
+
+    _model = "lento"
+
+    def __init__(self) -> None:
+        self.called = False
+
+    async def summarize(self, messages):
+        import asyncio
+
+        self.called = True
+        await asyncio.sleep(5)
+        return "riassunto tardivo"
+
+
+async def test_saving_does_not_wait_for_the_summary(transcripts, hot, scope):
+    import asyncio
+
+    from memory_service.curation import ContextPolicy
+
+    slow = SlowSummarizer()
+    memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), slow)
+
+    # Misurato sul campo: con il riassunto dentro la PUT, il client dell'agente
+    # va in timeout e la memoria di quel turno si perde.
+    async with asyncio.timeout(3):
+        await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+
+    assert slow.called is False
+
+
+async def test_the_api_compacts_after_answering(transcripts, hot, summarizer, scope):
+    from memory_service.curation import ContextPolicy
+
+    memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer)
+
+    async with await client_for(memory) as client:
+        headers = {"X-Memory-Scope": scope}
+        response = await client.put(
+            "/threads/t1/snapshot", json={"messages": long_thread(6)}, headers=headers
+        )
+        context = await client.get("/threads/t1/snapshot", headers=headers)
+
+    # Che il riassunto arrivi *dopo* la risposta qui non si vede: il transport
+    # ASGI dei test aspetta anche i task di sfondo prima di restituire. Lo
+    # garantisce il test sopra, sul servizio; qui si verifica che il giro
+    # completo -- salva, compatta, ricomponi -- funzioni davvero.
+    assert response.status_code == 200
+    assert context.json()["curation"]["riassunti"] == 1

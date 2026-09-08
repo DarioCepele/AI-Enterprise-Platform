@@ -92,3 +92,17 @@ def test_non_textual_content_does_not_become_a_wrong_string():
 
     assert fresh[0].content == ""
     assert fresh[0].payload == {"id": "m1", "role": "user", "content": [{"type": "image"}]}
+
+
+def test_the_summary_does_not_come_back_as_a_turn():
+    from memory_service.curation import summary_message
+
+    incoming = [
+        summary_message("cosa si era detto", covers_to_seq=9),
+        {"id": "m5", "role": "user", "content": "nuova domanda"},
+    ]
+
+    fresh = new_messages(stored(("user", "m1")), incoming)
+
+    # Altrimenti il servizio finirebbe per riassumere i propri riassunti.
+    assert [m.external_id for m in fresh] == ["m5"]

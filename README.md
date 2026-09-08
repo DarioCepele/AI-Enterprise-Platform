@@ -134,6 +134,65 @@ indistinguibile da una perdita di memoria.
 | `MEMORY_KEEP_TOOL_RESULTS` | `4` | quanti risultati di tool restano interi |
 | `MEMORY_MAX_CONTEXT_MESSAGES` | `60` | tetto di messaggi restituiti |
 
+## Riassunti: cosa resta quando i turni escono dalla finestra
+
+Senza riassunto, i messaggi che superano il tetto **spariscono**. Con il
+riassunto diventano dieci righe in testa al contesto. È l'unica potatura che
+costa un'inferenza, e da questo discendono tutte le scelte qui sotto.
+
+**Si compatta dopo aver risposto, mai dentro una richiesta.** Prima non era
+così, e il difetto si è visto subito: la `PUT` dello snapshot restava aperta
+per tutta la durata della chiamata al modello, il client dell'agente andava in
+timeout a 5 secondi e la memoria di quel turno andava persa. Ora la
+compattazione è un task di sfondo: la `PUT` torna in **0,14 s** e il riassunto
+arriva dopo, per il turno successivo. Due run ravvicinate sullo stesso thread
+non pagano due inferenze per lo stesso taglio.
+
+**La finestra si sospende finché il riassunto non c'è.** Conseguenza del punto
+precedente: al primo turno oltre la soglia il riassunto non è ancora pronto.
+Tagliare comunque sarebbe amnesia — misurata, con l'agente che rispondeva *«non
+ho informazioni»* su un fatto che aveva in memoria. Quindi finché manca il
+riassunto il contesto resta intero; quando arriva, il taglio avviene. Se invece
+nessun modello è configurato il riassunto non arriverà mai, e la finestra
+applica il taglio: aspettare per sempre farebbe crescere il contesto senza
+limite. Il campo `riassunti` distingue i due casi.
+
+**Il riassunto non è un turno.** Entra nel contesto come messaggio di sistema
+con un id riconoscibile (`memoria:riassunto:<seq>`) e viene scartato quando
+torna indietro dentro lo snapshot successivo. Senza quel filtro il servizio
+finirebbe per riassumere i propri riassunti, a ogni giro, per sempre.
+
+Prova reale su un thread di 80 messaggi con la finestra a 60:
+
+```
+PUT /threads/…/snapshot          → 80 turni scritti in 0,14 s
+GET subito dopo                  → 80 messaggi, 0 scartati   (finestra sospesa)
+GET dopo la compattazione        → 61 messaggi, 20 scartati, riassunti: 1
+```
+
+Il riassunto prodotto dal modello, dai 20 messaggi usciti:
+
+> Progetto GINESTRA-42, referente Marta, budget 18k. Sono state poste nove
+> domande sul deploy. Le risposte riportate non contengono informazioni
+> rilevanti. Non risultano altre richieste o decisioni aperte.
+
+E la domanda che chiude il cerchio, fatta all'agente sul thread compattato —
+il messaggio originale con quei dati era fra i 20 usciti:
+
+> **Chi è il referente e qual è il budget?**
+> Referente: Marta; budget: 18k (progetto GINESTRA-42).
+
+I riassunti si accumulano invece di sostituirsi (`thread_summaries`, chiave
+`covers_to_seq`): quando un riassunto perde qualcosa, è l'unico modo di
+risalire a dove si è perso. Cancellare un thread cancella anche i suoi
+riassunti — uno sopravvissuto racconterebbe una conversazione cancellata.
+
+| Variabile | Cosa decide |
+| --- | --- |
+| `MEMORY_SUMMARY_MODEL` | il modello che riassume; vuoto = nessuna compattazione, detto all'avvio |
+| `MEMORY_SUMMARY_BASE_URL` | endpoint Chat Completions del riassuntore |
+| `MEMORY_SUMMARY_API_KEY` | credenziale del riassuntore |
+
 ## Lo scope, e di chi ci si fida
 
 Ogni chiamata dichiara `X-Memory-Scope`: e' il confine di autorizzazione, e
@@ -173,6 +232,9 @@ Variabili con prefisso `MEMORY_`, dal `.env` locale non versionato:
 | `MEMORY_DROP_REASONING` | togliere il ragionamento passato dal contesto (default true) |
 | `MEMORY_KEEP_TOOL_RESULTS` | risultati di tool lasciati interi (default 4) |
 | `MEMORY_MAX_CONTEXT_MESSAGES` | tetto di messaggi restituiti (default 60) |
+| `MEMORY_SUMMARY_MODEL` | modello che riassume; vuoto = nessuna compattazione |
+| `MEMORY_SUMMARY_BASE_URL` | endpoint Chat Completions del riassuntore |
+| `MEMORY_SUMMARY_API_KEY` | credenziale del riassuntore |
 
 I due database si alzano dal compose di `demo-infra`:
 
@@ -194,9 +256,6 @@ loro. Senza `.env` configurato i test si saltano invece di fallire.
 
 ## Cosa non c'e' ancora
 
-- **Riassunti**: i turni scartati dalla finestra spariscono dal contesto invece
-  di diventare un riassunto. La collezione dei riassunti sara' separata dai
-  transcript, che restano integrali.
 - **Fatti duraturi per utente** (preferenze, entita').
 - **Ricerca semantica**: `$vectorSearch` e' solo su Atlas. Redis 8 include il
   Query Engine e i vector set (`FT.CREATE`, `VADD` verificati sull'istanza),
