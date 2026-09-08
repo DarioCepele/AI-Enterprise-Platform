@@ -26,6 +26,9 @@ class Settings:
     model: str
     use_fake_client: bool
     allowed_origins: tuple[str, ...]
+    # Vuoto = memoria dei thread in memoria di processo, come prima: il
+    # laboratorio deve restare avviabile senza tirare su Mongo e Redis.
+    memory_service_url: str
 
 
 def _read_origins() -> tuple[str, ...]:
@@ -43,4 +46,5 @@ def get_settings() -> Settings:
         model=os.getenv("OPENAI_CHAT_COMPLETION_MODEL", "anthropic/claude-sonnet-5"),
         use_fake_client=os.getenv("DEMO_FAKE_CLIENT", "false").lower() == "true",
         allowed_origins=_read_origins(),
+        memory_service_url=os.getenv("DEMO_MEMORY_SERVICE_URL", "").strip(),
     )

@@ -139,3 +139,23 @@ leggibili dal frontend.
 I client finti dei test ereditano da `ChatMiddlewareLayer` come il client
 OpenAI vero. Senza quel livello il middleware non verrebbe eseguito nei test, e
 la telemetria risulterebbe verde in laboratorio e assente in produzione.
+
+## Dove vive la memoria dei thread
+
+Con `DEMO_MEMORY_SERVICE_URL` impostata, gli snapshot dei thread stanno nel
+[servizio di memoria](../demo-memory-service/README.md): la conversazione
+sopravvive al riavvio dell'agente. Senza quella variabile si torna allo store
+in memoria di processo, e il laboratorio resta avviabile senza Mongo e Redis.
+Quale dei due sia attivo si legge nel tab LOG all'avvio — la differenza si
+noterebbe altrimenti solo quando è troppo tardi.
+
+L'agente non conosce Mongo né Redis: implementa il protocollo
+`AGUIThreadSnapshotStore` chiamando il servizio in HTTP, e lo scope del
+resolver diventa l'header `X-Memory-Scope` della chiamata.
+
+**Politica di guasto, dichiarata perché non è ovvia.** Un servizio di memoria
+irraggiungibile non fa fallire la conversazione: in lettura si degrada a
+«thread sconosciuto» e la run riparte senza storia, in scrittura si registra
+l'errore — sollevare a run conclusa romperebbe una risposta già consegnata. In
+entrambi i casi la riga finisce su `demo.*`, quindi sotto gli occhi nel tab
+LOG: un'amnesia silenziosa è il difetto peggiore che questo pezzo possa avere.

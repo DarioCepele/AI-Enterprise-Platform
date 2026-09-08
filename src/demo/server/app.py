@@ -1,6 +1,7 @@
 """App FastAPI: espone il master agent via AG-UI su SSE, piu' i log operativi."""
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -16,10 +17,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..agents.master import build_master_agent
 from ..config import get_settings
 from ..logging_bridge import LogCollector
+from ..memory.remote_store import MemoryServiceSnapshotStore
+
+logger = logging.getLogger(__name__)
 
 # La forma iniziale dello stato condiviso. `plan` c'e' gia' vuoto perche' il
 # pannello del frontend possa renderlo prima del primo todo_write, invece di
 # doverne indovinare la forma.
+
 DEFAULT_STATE = {"artifacts": [], "plan": {"status": "idle", "steps": []}}
 
 # Confine di autorizzazione degli snapshot. Il framework rifiuta uno store senza
@@ -37,6 +42,23 @@ SINGLE_TENANT_SCOPE = "laboratorio-locale"
 def _resolve_snapshot_scope(request: object) -> str:
     """Lo scope entro cui vivono i thread. Vedi SINGLE_TENANT_SCOPE."""
     return SINGLE_TENANT_SCOPE
+
+
+def _default_snapshot_store() -> AGUIThreadSnapshotStore:
+    """Lo store dei thread: il servizio di memoria se configurato, altrimenti RAM.
+
+    Il ripiego in memoria non e' pigrizia: tiene il laboratorio avviabile con
+    il solo master agent, senza dover alzare Mongo e Redis per fare due domande.
+    Quale dei due sia attivo si legge nei log all'avvio, perche' la differenza
+    -- la conversazione sopravvive al riavvio, oppure no -- e' visibile solo
+    quando e' troppo tardi per accorgersene.
+    """
+    url = get_settings().memory_service_url
+    if not url:
+        logger.info("Memoria dei thread in RAM: si perde al riavvio del processo.")
+        return InMemoryAGUIThreadSnapshotStore()
+    logger.info("Memoria dei thread nel servizio di memoria: %s", url)
+    return MemoryServiceSnapshotStore(url)
 
 
 def create_app(
@@ -88,16 +110,13 @@ def create_app(
 
     # La conversazione la possiede il server. Il client manda solo il turno
     # nuovo: l'adattatore ricompone la storia dallo snapshot del thread.
-    # Store in memoria: un solo snapshot per (scope, thread), niente durata oltre
-    # il processo. In produzione si sostituisce con uno store durevole senza
-    # toccare l'agente -- la firma e' il protocollo AGUIThreadSnapshotStore.
     add_agent_framework_fastapi_endpoint(
         app,
         agent or build_master_agent(),
         "/agui",
         allow_origins=allowed_origins,
         default_state=DEFAULT_STATE,
-        snapshot_store=snapshot_store or InMemoryAGUIThreadSnapshotStore(),
+        snapshot_store=snapshot_store or _default_snapshot_store(),
         snapshot_scope_resolver=_resolve_snapshot_scope,
     )
     return app

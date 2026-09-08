@@ -33,7 +33,9 @@ def test_logs_endpoint_returns_collected_lines(make_app):
         logging.getLogger("demo.tools").info("piano scritto")
         body = client.get("/logs").json()
 
-    assert [e["message"] for e in body["entries"]] == ["piano scritto"]
+    # L'app registra all'avvio quale memoria dei thread e' attiva: si filtra
+    # per sorgente invece di pretendere che nessun altro logghi mai.
+    assert [e["message"] for e in body["entries"] if e["source"] == "tools"] == ["piano scritto"]
     assert body["cursor"] > 0
     assert body["dropped"] == 0
 
@@ -57,7 +59,7 @@ def test_logs_endpoint_never_leaks_library_logs(make_app):
         logging.getLogger("httpx").info("POST https://api.example/v1?key=segreto")
         body = client.get("/logs").json()
 
-    assert body["entries"] == []
+    assert [e for e in body["entries"] if "httpx" in e["source"]] == []
 
 
 def test_cors_allows_the_browser_to_read_logs(make_app):
