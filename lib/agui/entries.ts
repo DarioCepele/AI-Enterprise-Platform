@@ -7,12 +7,12 @@ export type Artifact =
       rows: string[][];
     }
   | {
-      component: "scheda";
+      component: "briefing";
       id: string;
-      agente: string;
-      domanda: string;
-      documenti: string[];
-      estratto: string;
+      agent: string;
+      question: string;
+      documents: string[];
+      summary: string;
     }
   | { component: "unknown"; id: string; raw: unknown };
 
@@ -26,8 +26,8 @@ export type Entry =
       id: string;
       name: string;
       description: string;
-      stato: "in corso" | "concluso" | "errore";
-      errore?: string;
+      status: "running" | "done" | "failed";
+      error?: string;
     }
   | { kind: "artifact"; id: string; artifact: Artifact };
 
@@ -37,11 +37,11 @@ export function parseReasoningDelta(encryptedValue: string): string {
     fragments = JSON.parse(encryptedValue);
   } catch {
     throw new Error(
-      `payload di ragionamento non interpretabile: ${encryptedValue.slice(0, 80)}`,
+      `unreadable reasoning payload: ${encryptedValue.slice(0, 80)}`,
     );
   }
   if (!Array.isArray(fragments)) {
-    throw new Error("payload di ragionamento: attesa una lista di frammenti");
+    throw new Error("reasoning payload: expected a list of fragments");
   }
   return fragments
     .filter(
@@ -89,17 +89,17 @@ export function parseArtifact(content: unknown): Artifact | null {
   }
 
   if (
-    shape.component === "scheda" &&
-    typeof shape.estratto === "string" &&
-    isStringArray(shape.documenti)
+    shape.component === "briefing" &&
+    typeof shape.summary === "string" &&
+    isStringArray(shape.documents)
   ) {
     return {
-      component: "scheda",
+      component: "briefing",
       id,
-      agente: typeof shape.agente === "string" ? shape.agente : "sottoagente",
-      domanda: typeof shape.domanda === "string" ? shape.domanda : "",
-      documenti: shape.documenti,
-      estratto: shape.estratto,
+      agent: typeof shape.agent === "string" ? shape.agent : "subagent",
+      question: typeof shape.question === "string" ? shape.question : "",
+      documents: shape.documents,
+      summary: shape.summary,
     };
   }
 

@@ -20,14 +20,14 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("LogPanel", () => {
-  it("non interroga il server a riposo", async () => {
+  it("does not poll the server at rest", async () => {
     render(<LogPanel running={false} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByText("nessun log")).toBeInTheDocument();
   });
 
-  it("avanza il cursore, raccoglie la coda e poi si ferma", async () => {
+  it("advances the cursor, collects the tail and then stops", async () => {
     fetchMock.mockResolvedValueOnce(page(1)).mockResolvedValueOnce(page(2)).mockResolvedValueOnce(page(3));
     const { rerender } = render(<LogPanel running />);
     await settle();
@@ -45,7 +45,7 @@ describe("LogPanel", () => {
     expect(fetchMock.mock.calls[3][0]).toBe(3);
   });
 
-  it("attende una risposta lenta prima di pianificare il prossimo poll", async () => {
+  it("waits for a slow answer before scheduling the next poll", async () => {
     let resolve!: (value: LogPage) => void;
     fetchMock.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
     render(<LogPanel running />);
@@ -57,7 +57,7 @@ describe("LogPanel", () => {
     expect(fetchMock.mock.calls[1][0]).toBe(1);
   });
 
-  it("annulla e ignora risposte obsolete durante cambio run e smontaggio", async () => {
+  it("cancels and ignores stale answers across run changes and unmount", async () => {
     let resolve!: (value: LogPage) => void;
     fetchMock.mockReturnValueOnce(new Promise((done) => { resolve = done; })).mockResolvedValueOnce(page(2, "coda"));
     const { rerender, unmount } = render(<LogPanel running />);
@@ -75,7 +75,7 @@ describe("LogPanel", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("mostra un errore e recupera al poll successivo senza perdere righe", async () => {
+  it("shows an error and recovers on the next poll without losing lines", async () => {
     fetchMock.mockRejectedValueOnce(new Error("503")).mockResolvedValueOnce(page(1));
     render(<LogPanel running />);
     await settle();
@@ -85,7 +85,7 @@ describe("LogPanel", () => {
     expect(screen.getByText("riga 1")).toBeInTheDocument();
   });
 
-  it("segnala le righe perse dal buffer", async () => {
+  it("reports the lines the buffer dropped", async () => {
     fetchMock.mockResolvedValueOnce(page(8, "disponibile", 7));
     render(<LogPanel running />);
     await settle();

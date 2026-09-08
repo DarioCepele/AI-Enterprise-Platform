@@ -6,7 +6,7 @@ import type { Entry } from "@/lib/agui/entries";
 import { EntryView } from "./index";
 
 describe("EntryView", () => {
-  it("blocca script e URL pericolosi nella risposta del modello", () => {
+  it("blocks scripts and dangerous URLs in the model's answer", () => {
     const text = '<script>alert(1)</script><a href="javascript:alert(1)">click</a>';
     const { container } = render(<EntryView entry={{ kind: "assistant", id: "a", text }} />);
 
@@ -15,7 +15,7 @@ describe("EntryView", () => {
     expect(container.textContent).not.toContain("alert(1)");
   });
 
-  it("rende il Markdown della risposta: enfasi, elenco, codice e tabella", () => {
+  it("renders the answer's Markdown: emphasis, list, code and table", () => {
     const text = [
       "Confronto **netto**:",
       "",
@@ -34,20 +34,20 @@ describe("EntryView", () => {
     expect(container.querySelector("table")).not.toBeNull();
   });
 
-  it("non mostra la sintassi ancora aperta durante lo streaming", () => {
+  it("does not show still-open syntax while streaming", () => {
     const { container } = render(<EntryView entry={{ kind: "assistant", id: "a", text: "Confronto **net" }} />);
 
     expect(container.textContent).not.toContain("**");
     expect(container.querySelector('[data-streamdown="strong"]')?.textContent).toBe("net");
   });
-  it("rende il messaggio dell'utente", () => {
+  it("renders the user's message", () => {
     const entry: Entry = { kind: "user", id: "1", text: "ciao" };
     render(<EntryView entry={entry} />);
 
     expect(screen.getByText("ciao")).toBeInTheDocument();
   });
 
-  it("rende il ragionamento chiuso, non aperto", () => {
+  it("renders reasoning collapsed, not expanded", () => {
     const entry: Entry = { kind: "reasoning", id: "2", text: "penso", done: true };
     const { container } = render(<EntryView entry={entry} />);
 
@@ -56,7 +56,7 @@ describe("EntryView", () => {
     expect(screen.getByText("Ragionamento")).toBeInTheDocument();
   });
 
-  it("mostra il nome del tool e tiene chiusi gli argomenti", () => {
+  it("shows the tool name and keeps the arguments collapsed", () => {
     const entry: Entry = {
       kind: "tool",
       id: "3",
@@ -73,21 +73,21 @@ describe("EntryView", () => {
     );
   });
 
-  it("mostra gli argomenti grezzi quando non sono JSON completo", () => {
+  it("shows raw arguments when they are not complete JSON", () => {
     const entry: Entry = { kind: "tool", id: "3b", name: "ui_table", args: '{"title":"Conf', done: false };
     const { container } = render(<EntryView entry={entry} />);
 
     expect(container.querySelector("pre")?.textContent).toBe('{"title":"Conf');
   });
 
-  it("dichiara i tool senza argomenti invece di mostrare un riquadro vuoto", () => {
+  it("declares argument-less tools instead of showing an empty box", () => {
     const entry: Entry = { kind: "tool", id: "3c", name: "list_skills", args: "", done: true };
     render(<EntryView entry={entry} />);
 
     expect(screen.getByText("nessun argomento")).toBeInTheDocument();
   });
 
-  it("rende una ui-table come tabella vera", () => {
+  it("renders a ui-table as a real table", () => {
     const entry: Entry = {
       kind: "artifact",
       id: "4",
@@ -106,7 +106,7 @@ describe("EntryView", () => {
     expect(screen.getByText("statici")).toBeInTheDocument();
   });
 
-  it("degrada visibilmente su un artefatto sconosciuto", () => {
+  it("degrades visibly on an unknown artifact", () => {
     const entry: Entry = {
       kind: "artifact",
       id: "5",
@@ -119,29 +119,29 @@ describe("EntryView", () => {
 });
 
 describe("Chat", () => {
-  it("mantiene l'ordine delle entry e invia il testo azzerando il campo", () => {
+  it("keeps the entry order and sends the text, clearing the field", () => {
     const onSend = vi.fn();
     const entries: Entry[] = [
-      { kind: "user", id: "u", text: "domanda" },
-      { kind: "assistant", id: "a", text: "risposta" },
+      { kind: "user", id: "u", text: "question" },
+      { kind: "assistant", id: "a", text: "answer" },
     ];
     const { container } = render(<Chat entries={entries} running={false} error={null} onSend={onSend} />);
-    expect(container.textContent?.indexOf("domanda")).toBeLessThan(container.textContent!.indexOf("risposta"));
+    expect(container.textContent?.indexOf("question")).toBeLessThan(container.textContent!.indexOf("answer"));
     const input = screen.getByRole("textbox", { name: "Messaggio" });
-    fireEvent.change(input, { target: { value: "prossima domanda" } });
+    fireEvent.change(input, { target: { value: "next question" } });
     fireEvent.click(screen.getByRole("button", { name: "invia" }));
-    expect(onSend).toHaveBeenCalledExactlyOnceWith("prossima domanda");
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("next question");
     expect(input).toHaveValue("");
   });
 
-  it("ignora testo vuoto e blocca l'invio durante una run", () => {
+  it("ignores empty text and blocks sending during a run", () => {
     const onSend = vi.fn();
     const { container, rerender } = render(<Chat entries={[]} running={false} error={null} onSend={onSend} />);
     const input = screen.getByRole("textbox", { name: "Messaggio" });
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.submit(container.querySelector("form")!);
     expect(onSend).not.toHaveBeenCalled();
-    fireEvent.change(input, { target: { value: "non inviare" } });
+    fireEvent.change(input, { target: { value: "do not send" } });
     rerender(<Chat entries={[]} running={true} error={null} onSend={onSend} />);
     expect(input).toBeDisabled();
     expect(screen.getByRole("button", { name: "invia" })).toBeDisabled();
@@ -150,7 +150,7 @@ describe("Chat", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("permette di interrompere la run mentre e' in corso", () => {
+  it("allows stopping the run while it is going", () => {
     const onStop = vi.fn();
     const { rerender } = render(
       <Chat entries={[]} running={false} error={null} onSend={vi.fn()} onStop={onStop} />,
@@ -162,7 +162,7 @@ describe("Chat", () => {
     expect(onStop).toHaveBeenCalledOnce();
   });
 
-  it("segue lo stream in fondo, ma non se si sta rileggendo piu' su", () => {
+  it("follows the stream at the bottom, but not while reading further up", () => {
     const entry = (i: number): Entry => ({ kind: "assistant", id: `a${i}`, text: `riga ${i}` });
     const { container, rerender } = render(
       <Chat entries={[entry(1)]} running error={null} onSend={vi.fn()} />,
@@ -180,20 +180,20 @@ describe("Chat", () => {
     expect(scroller.scrollTop).toBe(100);
   });
 
-  it("espone l'errore della run", () => {
+  it("surfaces the run's error", () => {
     render(<Chat entries={[]} running={false} error="connessione interrotta" onSend={vi.fn()} />);
     expect(screen.getByRole("alert")).toHaveTextContent("connessione interrotta");
   });
 });
 
-describe("sottoagenti in timeline", () => {
-  it("mostra nome, stato e domanda del sottoagente", () => {
+describe("subagents in the timeline", () => {
+  it("shows the subagent's name, status and question", () => {
     const entry: Entry = {
       kind: "subagent",
       id: "s1",
       name: "knowledge",
       description: "Come tipizza Rust?",
-      stato: "in corso",
+      status: "running",
     };
     render(<EntryView entry={entry} />);
 
@@ -202,23 +202,23 @@ describe("sottoagenti in timeline", () => {
     expect(screen.getByText("Come tipizza Rust?")).toBeInTheDocument();
   });
 
-  it("distingue concluso da in corso senza affidarsi al colore", () => {
+  it("tells done from running without relying on colour", () => {
     const { container, rerender } = render(
       <EntryView
-        entry={{ kind: "subagent", id: "s1", name: "knowledge", description: "", stato: "in corso" }}
+        entry={{ kind: "subagent", id: "s1", name: "knowledge", description: "", status: "running" }}
       />,
     );
-    expect(container.querySelector('[data-stato="in corso"]')).not.toBeNull();
+    expect(container.querySelector('[data-status="running"]')).not.toBeNull();
 
     rerender(
       <EntryView
-        entry={{ kind: "subagent", id: "s1", name: "knowledge", description: "", stato: "concluso" }}
+        entry={{ kind: "subagent", id: "s1", name: "knowledge", description: "", status: "done" }}
       />,
     );
-    expect(container.querySelector('[data-stato="concluso"]')).not.toBeNull();
+    expect(container.querySelector('[data-status="done"]')).not.toBeNull();
   });
 
-  it("un sottoagente fallito dice cosa e' andato storto", () => {
+  it("a failed subagent says what went wrong", () => {
     render(
       <EntryView
         entry={{
@@ -226,28 +226,28 @@ describe("sottoagenti in timeline", () => {
           id: "s1",
           name: "knowledge",
           description: "",
-          stato: "errore",
-          errore: "knowledge agent giu'",
+          status: "failed",
+          error: "knowledge agent down",
         }}
       />,
     );
 
-    expect(screen.getByText("knowledge agent giu'")).toBeInTheDocument();
+    expect(screen.getByText("knowledge agent down")).toBeInTheDocument();
   });
 });
 
-describe("scheda in timeline", () => {
-  it("mostra estratto, agente e fonti", () => {
+describe("briefing in the timeline", () => {
+  it("shows summary, agent and sources", () => {
     const entry: Entry = {
       kind: "artifact",
       id: "a1",
       artifact: {
-        component: "scheda",
+        component: "briefing",
         id: "kb_1",
-        agente: "knowledge",
-        domanda: "Come tipizza Go?",
-        documenti: ["go", "rust"],
-        estratto: "Statica, verificata dal compilatore.",
+        agent: "knowledge",
+        question: "Come tipizza Go?",
+        documents: ["go", "rust"],
+        summary: "Statica, verificata dal compilatore.",
       },
     };
     render(<EntryView entry={entry} />);

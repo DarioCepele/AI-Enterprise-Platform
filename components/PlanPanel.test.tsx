@@ -8,7 +8,7 @@ const PLAN = {
   steps: [
     {
       id: 1,
-      title: "Carica la skill",
+      title: "Load the skill",
       detail: "Skill di confronto.",
       source: "skill:comparison#1",
       status: "completed",
@@ -18,7 +18,7 @@ const PLAN = {
     },
     {
       id: 2,
-      title: "Produci la tabella",
+      title: "Produce the table",
       detail: "Confronto tabellare.",
       source: "ui_table",
       status: "in_progress",
@@ -30,7 +30,7 @@ const PLAN = {
 };
 
 describe("PlanPanel", () => {
-  it("segue lo snapshot successivo senza mantenere stato locale", () => {
+  it("follows the next snapshot without keeping local state", () => {
     const { rerender } = render(<PlanPanel shared={{ plan: PLAN }} />);
     expect(screen.getByText("1/2")).toBeInTheDocument();
     rerender(<PlanPanel shared={{ plan: {
@@ -41,7 +41,7 @@ describe("PlanPanel", () => {
     expect(screen.queryByText("1/2")).not.toBeInTheDocument();
   });
 
-  it("rende accessibili tutti e quattro gli stati dei passi", () => {
+  it("renders all four step statuses accessibly", () => {
     render(<PlanPanel shared={{ plan: {
       status: "in_progress",
       steps: ["pending", "in_progress", "completed", "failed"].map((status, id) => ({
@@ -56,38 +56,38 @@ describe("PlanPanel", () => {
 
   it.each([null, { status: "in_progress", steps: [null] }, {
     status: "in_progress", steps: [{ ...PLAN.steps[0], title: { invalid: true } }],
-  }])("gestisce uno snapshot del piano malformato: %j", (plan) => {
+  }])("handles a malformed plan snapshot: %j", (plan) => {
     render(<PlanPanel shared={{ plan }} />);
     expect(screen.getByText(/nessun piano/i)).toBeInTheDocument();
   });
 
-  it("conta i passi completati sul totale", () => {
+  it("counts completed steps out of the total", () => {
     render(<PlanPanel shared={{ plan: PLAN }} />);
 
     expect(screen.getByText("1/2")).toBeInTheDocument();
   });
 
-  it("mostra titolo, dettaglio e origine di ogni passo", () => {
+  it("shows title, detail and source of every step", () => {
     render(<PlanPanel shared={{ plan: PLAN }} />);
 
-    expect(screen.getByText("Carica la skill")).toBeInTheDocument();
+    expect(screen.getByText("Load the skill")).toBeInTheDocument();
     expect(screen.getByText("Skill di confronto.")).toBeInTheDocument();
     expect(screen.getByText("skill:comparison#1")).toBeInTheDocument();
   });
 
-  it("dice che non c'e' un piano quando lo stato e' idle", () => {
+  it("says there is no plan when the state is idle", () => {
     render(<PlanPanel shared={{ plan: { status: "idle", steps: [] } }} />);
 
     expect(screen.getByText(/nessun piano/i)).toBeInTheDocument();
   });
 
-  it("regge uno stato condiviso senza piano", () => {
+  it("copes with a shared state that has no plan", () => {
     render(<PlanPanel shared={{}} />);
 
     expect(screen.getByText(/nessun piano/i)).toBeInTheDocument();
   });
 
-  it("mostra la nota di un passo fallito", () => {
+  it("shows the note of a failed step", () => {
     const failed = {
       status: "failed",
       steps: [{ ...PLAN.steps[0], status: "failed", note: "il tool non ha risposto" }],

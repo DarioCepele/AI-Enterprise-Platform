@@ -6,12 +6,15 @@ import type { AGUIEvent } from "@/lib/agui/types";
 import { LogPanel } from "./LogPanel";
 
 const FILTERS = {
-  tutti: () => true,
-  ragionamento: (e: AGUIEvent) => e.type.startsWith("REASONING"),
-  tool: (e: AGUIEvent) => e.type.startsWith("TOOL_CALL"),
-  sottoagenti: (e: AGUIEvent) => e.type.startsWith("SUBAGENT"),
-  stato: (e: AGUIEvent) => e.type.startsWith("STATE") || e.type.startsWith("RUN"),
-  testo: (e: AGUIEvent) => e.type.startsWith("TEXT_MESSAGE"),
+  all: { label: "tutti", match: () => true },
+  reasoning: { label: "ragionamento", match: (e: AGUIEvent) => e.type.startsWith("REASONING") },
+  tools: { label: "tool", match: (e: AGUIEvent) => e.type.startsWith("TOOL_CALL") },
+  subagents: { label: "sottoagenti", match: (e: AGUIEvent) => e.type.startsWith("SUBAGENT") },
+  state: {
+    label: "stato",
+    match: (e: AGUIEvent) => e.type.startsWith("STATE") || e.type.startsWith("RUN"),
+  },
+  text: { label: "testo", match: (e: AGUIEvent) => e.type.startsWith("TEXT_MESSAGE") },
 } as const;
 
 const MAX_PAYLOAD = 50;
@@ -55,17 +58,17 @@ const EventRow = memo(function EventRow({ group }: { group: EventGroup }) {
 });
 
 export function Inspector({ events, running }: { events: AGUIEvent[]; running: boolean }) {
-  const [tab, setTab] = useState<"eventi" | "log">("eventi");
-  const [filter, setFilter] = useState<keyof typeof FILTERS>("tutti");
-  const groups = groupEvents(events.filter(FILTERS[filter]));
+  const [tab, setTab] = useState<"events" | "log">("events");
+  const [filter, setFilter] = useState<keyof typeof FILTERS>("all");
+  const groups = groupEvents(events.filter(FILTERS[filter].match));
 
   return (
     <section aria-label="Inspector" className="inspector flex min-h-0 flex-1 flex-col p-4">
       <nav aria-label="Vista inspector" className="inspector-tabs mb-3 flex gap-4">
         <button
           type="button"
-          onClick={() => setTab("eventi")}
-          aria-pressed={tab === "eventi"}
+          onClick={() => setTab("events")}
+          aria-pressed={tab === "events"}
           className="font-mono text-[11px] uppercase tracking-wide"
         >
           Event inspector <span className="tabular-nums">{events.length}</span>
@@ -80,7 +83,7 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
         </button>
       </nav>
 
-      <div hidden={tab !== "eventi"} className={tab === "eventi" ? "flex min-h-0 flex-1 flex-col" : undefined}>
+      <div hidden={tab !== "events"} className={tab === "events" ? "flex min-h-0 flex-1 flex-col" : undefined}>
         <div className="mb-2 flex flex-wrap gap-1">
           {(Object.keys(FILTERS) as (keyof typeof FILTERS)[]).map((name) => (
             <button
@@ -94,7 +97,7 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
                   : "bg-[var(--surface)] text-[var(--muted)]"
               }`}
             >
-              {name}
+              {FILTERS[name].label}
             </button>
           ))}
         </div>

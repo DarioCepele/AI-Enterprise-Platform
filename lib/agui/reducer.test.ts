@@ -9,7 +9,7 @@ function run(events: AGUIEvent[]) {
 }
 
 describe("reduce", () => {
-  it("accumula i delta di testo in un solo messaggio", () => {
+  it("accumulates text deltas into a single message", () => {
     const state = run([
       { type: "RUN_STARTED", threadId: "t", runId: "r" },
       { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant" },
@@ -21,7 +21,7 @@ describe("reduce", () => {
     expect(state.entries).toEqual([{ kind: "assistant", id: "m1", text: "ciao mondo" }]);
   });
 
-  it("segna la run come in corso e poi conclusa", () => {
+  it("marks the run as running and then finished", () => {
     let state = run([{ type: "RUN_STARTED", threadId: "t", runId: "r" }]);
     expect(state.running).toBe(true);
 
@@ -29,7 +29,7 @@ describe("reduce", () => {
     expect(state.running).toBe(false);
   });
 
-  it("registra ogni evento nell'inspector", () => {
+  it("records every event in the inspector", () => {
     const state = run([
       { type: "RUN_STARTED", threadId: "t", runId: "r" },
       { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant" },
@@ -41,7 +41,7 @@ describe("reduce", () => {
     ]);
   });
 
-  it("sostituisce lo stato condiviso su STATE_SNAPSHOT", () => {
+  it("replaces the shared state on STATE_SNAPSHOT", () => {
     const state = run([
       { type: "STATE_SNAPSHOT", snapshot: { artifacts: [{ component: "ui-table" }] } },
     ]);
@@ -49,7 +49,7 @@ describe("reduce", () => {
     expect(state.shared).toEqual({ artifacts: [{ component: "ui-table" }] });
   });
 
-  it("raccoglie i risultati dei tool", () => {
+  it("collects tool results", () => {
     const state = run([
       { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "ui_table" },
       { type: "TOOL_CALL_RESULT", toolCallId: "c1", content: '{"component":"ui-table"}' },
@@ -64,7 +64,7 @@ describe("reduce", () => {
     ]);
   });
 
-  it("accumula i delta degli argomenti di un tool", () => {
+  it("accumulates a tool's argument deltas", () => {
     const state = run([
       { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "ui_table" },
       { type: "TOOL_CALL_ARGS", toolCallId: "c1", delta: '{"title":' },
@@ -77,7 +77,7 @@ describe("reduce", () => {
     });
   });
 
-  it("espone l'errore su RUN_ERROR e ferma la run", () => {
+  it("surfaces the error on RUN_ERROR and stops the run", () => {
     let state = run([{ type: "RUN_STARTED", threadId: "t", runId: "r" }]);
     state = reduce(state, { type: "RUN_ERROR", message: "boom" });
 
@@ -85,7 +85,7 @@ describe("reduce", () => {
     expect(state.error).toBe("boom");
   });
 
-  it("scarta il messaggio vuoto che avvolge una tool call", () => {
+  it("drops the empty message wrapping a tool call", () => {
     const state = run([
       { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant" },
       { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "ui_table" },
@@ -101,7 +101,7 @@ describe("reduce", () => {
     ]);
   });
 
-  it("ignora un evento sconosciuto senza rompersi", () => {
+  it("ignores an unknown event without breaking", () => {
     const futuro = { type: "EVENTO_FUTURO", qualcosa: 1 } as unknown as AGUIEvent;
     const state = run([futuro]);
 
@@ -109,7 +109,7 @@ describe("reduce", () => {
     expect(state.entries).toHaveLength(0);
   });
 
-  it("aggiunge l'utente senza mutare lo stato e azzera l'errore precedente", () => {
+  it("appends the user without mutating state and clears the previous error", () => {
     const before = { ...initialState, error: "boom" };
     const state = withUserMessage(before, "u1", "ciao");
     expect(state.entries).toEqual([{ kind: "user", id: "u1", text: "ciao" }]);
@@ -118,7 +118,7 @@ describe("reduce", () => {
     expect(state.events).toEqual([]);
   });
 
-  it("scarta ragionamento senza testo anche se contiene solo firme", () => {
+  it("drops reasoning without text even when it carries only signatures", () => {
     const state = run([
       { type: "REASONING_MESSAGE_START", messageId: "r1", role: "reasoning" },
       {
@@ -131,7 +131,7 @@ describe("reduce", () => {
     expect(state.events).toHaveLength(3);
   });
 
-  it("non aggiunge artefatti per i risultati del piano", () => {
+  it("adds no artifacts for plan results", () => {
     const state = run([
       { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "todo_set_status" },
       { type: "TOOL_CALL_END", toolCallId: "c1" },
@@ -144,7 +144,7 @@ describe("reduce", () => {
 });
 
 describe("parseReasoningDelta", () => {
-  it("estrae e concatena i frammenti di testo del ragionamento", () => {
+  it("extracts and joins the reasoning text fragments", () => {
     expect(parseReasoningDelta(JSON.stringify([
       { type: "reasoning.text", text: " user", format: "unknown", index: 0 },
       { type: "reasoning.signature", value: "abc" },
@@ -152,26 +152,26 @@ describe("parseReasoningDelta", () => {
     ]))).toBe(" user request");
   });
 
-  it("ignora i frammenti che non sono testo di ragionamento", () => {
+  it("ignores fragments that are not reasoning text", () => {
     expect(parseReasoningDelta('[null,42,{"type":"reasoning.signature","value":"abc"},{"type":"reasoning.text","text":42}]')).toBe("");
   });
 
-  it.each(["non e' json", "null", "{}"])("rifiuta un payload malformato: %s", (raw) => {
-    expect(() => parseReasoningDelta(raw)).toThrow(/ragionamento/);
+  it.each(["not json", "null", "{}"])("rejects a malformed payload: %s", (raw) => {
+    expect(() => parseReasoningDelta(raw)).toThrow(/reasoning/);
   });
 });
 
 describe("parseArtifact", () => {
-  it("riconosce una ui-table dentro la stringa JSON del tool result", () => {
+  it("recognizes a ui-table inside the tool result's JSON string", () => {
     const table = { component: "ui-table", id: "art_1", title: "Confronto", columns: ["A"], rows: [["1"]] };
     expect(parseArtifact(JSON.stringify(table))).toEqual(table);
   });
 
-  it("non tratta il risultato dei tool del piano come un artefatto", () => {
+  it("does not treat plan tool results as an artifact", () => {
     expect(parseArtifact(JSON.stringify({ component: "plan", step_id: 1 }))).toBeNull();
   });
 
-  it("degrada su una variante sconosciuta invece di sparire", () => {
+  it("degrades on an unknown variant instead of vanishing", () => {
     const payload = { component: "ui-chart", id: "art_9" };
     expect(parseArtifact(JSON.stringify(payload))).toEqual({ component: "unknown", id: "art_9", raw: payload });
   });
@@ -194,10 +194,10 @@ describe("parseArtifact", () => {
   );
 });
 
-describe("reduce sullo stream reale", () => {
+describe("reduce over the real stream", () => {
   const events = loadFixture("stream-qwen");
 
-  it("aggrega 408 delta di ragionamento in due entry complete", () => {
+  it("aggregates 408 reasoning deltas into two complete entries", () => {
     const state = run(events);
     const reasoning = state.entries.filter((e) => e.kind === "reasoning");
     expect(reasoning).toHaveLength(2);
@@ -207,14 +207,14 @@ describe("reduce sullo stream reale", () => {
     }
   });
 
-  it("non lascia bolle vuote", () => {
+  it("leaves no empty bubbles", () => {
     const empty = run(events).entries.filter(
       (e) => (e.kind === "assistant" || e.kind === "reasoning") && e.text === "",
     );
     expect(empty).toEqual([]);
   });
 
-  it("produce una entry tool e la sua entry artefatto", () => {
+  it("produces a tool entry and its artifact entry", () => {
     const state = run(events);
     const tools = state.entries.filter((e) => e.kind === "tool");
     const artifacts = state.entries.filter((e) => e.kind === "artifact");
@@ -225,24 +225,24 @@ describe("reduce sullo stream reale", () => {
     expect(artifacts[0].artifact.component).toBe("ui-table");
   });
 
-  it("tiene ogni evento nell'inspector, riconosciuto o no", () => {
+  it("keeps every event in the inspector, recognized or not", () => {
     expect(run(events).events).toEqual(events);
   });
 
-  it("chiude la run", () => {
+  it("closes the run", () => {
     const state = run(events);
     expect(state.running).toBe(false);
     expect(state.error).toBeNull();
   });
 
-  it("mantiene l'ordine di arrivo della timeline", () => {
+  it("keeps the timeline's arrival order", () => {
     const kinds = run(events).entries.map((e) => e.kind);
     expect(kinds.indexOf("reasoning")).toBeLessThan(kinds.indexOf("tool"));
     expect(kinds.indexOf("tool")).toBeLessThan(kinds.indexOf("artifact"));
   });
 });
 
-describe("sottoagenti", () => {
+describe("subagents", () => {
   const avvio = (id: string, name = "knowledge", description = "domanda"): AGUIEvent => ({
     type: "SUBAGENT_STARTED",
     subagentRunId: id,
@@ -250,48 +250,48 @@ describe("sottoagenti", () => {
     description,
   });
 
-  it("un sottoagente avviato compare in timeline come in corso", () => {
+  it("a started subagent appears in the timeline as running", () => {
     const state = reduce(initialState, avvio("s1"));
 
     expect(state.entries).toEqual([
-      { kind: "subagent", id: "s1", name: "knowledge", description: "domanda", stato: "in corso" },
+      { kind: "subagent", id: "s1", name: "knowledge", description: "domanda", status: "running" },
     ]);
   });
 
-  it("la chiusura aggiorna quel sottoagente e non gli altri", () => {
+  it("finishing updates that subagent and not the others", () => {
     let state = reduce(initialState, avvio("s1", "knowledge", "prima"));
     state = reduce(state, avvio("s2", "knowledge", "seconda"));
     state = reduce(state, { type: "SUBAGENT_FINISHED", subagentRunId: "s2" });
 
-    expect(state.entries.map((e) => e.kind === "subagent" && e.stato)).toEqual([
-      "in corso",
-      "concluso",
+    expect(state.entries.map((e) => e.kind === "subagent" && e.status)).toEqual([
+      "running",
+      "done",
     ]);
   });
 
-  it("due avvii senza chiusura in mezzo restano due voci parallele", () => {
+  it("two starts with no finish in between stay two parallel entries", () => {
     let state = reduce(initialState, avvio("s1"));
     state = reduce(state, avvio("s2"));
 
     expect(state.entries).toHaveLength(2);
-    expect(state.entries.every((e) => e.kind === "subagent" && e.stato === "in corso")).toBe(true);
+    expect(state.entries.every((e) => e.kind === "subagent" && e.status === "running")).toBe(true);
   });
 
-  it("un errore del sottoagente resta visibile con il suo messaggio", () => {
+  it("a subagent error stays visible with its message", () => {
     let state = reduce(initialState, avvio("s1"));
     state = reduce(state, {
       type: "SUBAGENT_ERROR",
       subagentRunId: "s1",
-      message: "knowledge agent giu'",
+      message: "knowledge agent down",
       code: "ConnectionError",
     });
 
     const entry = state.entries[0];
-    expect(entry.kind === "subagent" && entry.stato).toBe("errore");
-    expect(entry.kind === "subagent" && entry.errore).toBe("knowledge agent giu'");
+    expect(entry.kind === "subagent" && entry.status).toBe("failed");
+    expect(entry.kind === "subagent" && entry.error).toBe("knowledge agent down");
   });
 
-  it("una chiusura senza avvio non inventa una voce", () => {
+  it("a finish without a start invents no entry", () => {
     const state = reduce(initialState, { type: "SUBAGENT_FINISHED", subagentRunId: "mai-visto" });
 
     expect(state.entries).toEqual([]);
@@ -299,46 +299,46 @@ describe("sottoagenti", () => {
   });
 });
 
-describe("scheda del sottoagente", () => {
-  const scheda = {
-    component: "scheda",
+describe("the subagent's briefing", () => {
+  const briefing = {
+    component: "briefing",
     id: "kb_123",
-    agente: "knowledge",
-    domanda: "Come tipizza Go?",
-    documenti: ["go"],
-    estratto: "Statica, verificata dal compilatore.",
+    agent: "knowledge",
+    question: "Come tipizza Go?",
+    documents: ["go"],
+    summary: "Statica, verificata dal compilatore.",
   };
 
-  it("una scheda diventa un artefatto in timeline, non testo", () => {
+  it("a briefing becomes a timeline artifact, not text", () => {
     const state = reduce(initialState, {
       type: "TOOL_CALL_RESULT",
       toolCallId: "c1",
-      content: JSON.stringify(scheda),
+      content: JSON.stringify(briefing),
     });
 
     const entry = state.entries[0];
     expect(entry.kind).toBe("artifact");
-    expect(entry.kind === "artifact" && entry.artifact.component).toBe("scheda");
+    expect(entry.kind === "artifact" && entry.artifact.component).toBe("briefing");
   });
 
-  it("conserva fonti e domanda, che sono la ragione per cui e' strutturata", () => {
+  it("keeps sources and question, which are why it is structured", () => {
     const state = reduce(initialState, {
       type: "TOOL_CALL_RESULT",
       toolCallId: "c1",
-      content: JSON.stringify(scheda),
+      content: JSON.stringify(briefing),
     });
 
     const entry = state.entries[0];
-    if (entry.kind !== "artifact" || entry.artifact.component !== "scheda") throw new Error("no");
-    expect(entry.artifact.documenti).toEqual(["go"]);
-    expect(entry.artifact.domanda).toBe("Come tipizza Go?");
+    if (entry.kind !== "artifact" || entry.artifact.component !== "briefing") throw new Error("no");
+    expect(entry.artifact.documents).toEqual(["go"]);
+    expect(entry.artifact.question).toBe("Come tipizza Go?");
   });
 
-  it("una scheda senza estratto degrada a fallback invece di fingere", () => {
+  it("a briefing without a summary degrades to the fallback instead of pretending", () => {
     const state = reduce(initialState, {
       type: "TOOL_CALL_RESULT",
       toolCallId: "c1",
-      content: JSON.stringify({ component: "scheda", id: "kb_1", documenti: ["go"] }),
+      content: JSON.stringify({ component: "briefing", id: "kb_1", documents: ["go"] }),
     });
 
     const entry = state.entries[0];

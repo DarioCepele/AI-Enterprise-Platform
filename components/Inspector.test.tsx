@@ -17,13 +17,13 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("Inspector", () => {
-  it("conta tutti gli eventi, anche quelli che non sa interpretare", () => {
+  it("counts every event, including the ones it cannot read", () => {
     render(<Inspector events={EVENTS} running={false} />);
 
     expect(screen.getByText(String(EVENTS.length))).toBeInTheDocument();
   });
 
-  it("il filtro ragionamento mostra solo il ragionamento", () => {
+  it("the reasoning filter shows only reasoning", () => {
     render(<Inspector events={EVENTS} running={false} />);
     fireEvent.click(screen.getByRole("button", { name: "ragionamento" }));
 
@@ -37,7 +37,7 @@ describe("Inspector", () => {
     }
   });
 
-  it("i delta consecutivi diventano una riga sola col conteggio", () => {
+  it("consecutive deltas become one row with a count", () => {
     render(<Inspector events={EVENTS} running={false} />);
     const deltas = EVENTS.filter((e) => e.type === "REASONING_ENCRYPTED_VALUE").length;
     const badges = screen
@@ -49,7 +49,7 @@ describe("Inspector", () => {
     expect(badges.reduce((a, b) => a + b, 0)).toBe(deltas);
   });
 
-  it("il payload compare solo quando la riga viene aperta", () => {
+  it("the payload appears only when the row is opened", () => {
     const events: AGUIEvent[] = [{ type: "RUN_STARTED", threadId: "t", runId: "r" }];
     const { container } = render(<Inspector events={events} running={false} />);
 
@@ -58,7 +58,7 @@ describe("Inspector", () => {
     expect(container.querySelector("pre")?.textContent).toBe(JSON.stringify(events[0], null, 2));
   });
 
-  it("un gruppo aperto mostra l'array dei payload, troncato e dichiarato", () => {
+  it("an opened group shows the payload array, truncated and declared", () => {
     const delta = (i: number): AGUIEvent => ({
       type: "REASONING_ENCRYPTED_VALUE",
       subtype: "reasoning",
@@ -75,7 +75,7 @@ describe("Inspector", () => {
     expect(screen.getByText(/primi 50 di 60 eventi/)).toBeInTheDocument();
   });
 
-  it("il filtro tool mostra solo i TOOL_CALL_*", () => {
+  it("the tool filter shows only TOOL_CALL_*", () => {
     render(<Inspector events={EVENTS} running={false} />);
     fireEvent.click(screen.getByRole("button", { name: "tool" }));
 
@@ -84,14 +84,14 @@ describe("Inspector", () => {
     }
   });
 
-  it("il filtro tutti include il ragionamento", () => {
+  it("the all filter includes reasoning", () => {
     render(<Inspector events={EVENTS} running={false} />);
 
     expect(screen.getAllByRole("group").length).toBe(groupEvents(EVENTS).length);
     expect(screen.getAllByRole("group").some((r) => r.textContent?.startsWith("REASONING_"))).toBe(true);
   });
 
-  it("filtra testo e stato e conserva eventi sconosciuti e payload nel filtro tutti", () => {
+  it("filters text and state and keeps unknown events and payloads under the all filter", () => {
     const events: AGUIEvent[] = [
       { type: "TEXT_MESSAGE_CONTENT", messageId: "m", delta: "ciao" },
       { type: "RUN_STARTED", threadId: "t", runId: "r" },
@@ -116,7 +116,7 @@ describe("Inspector", () => {
     }
   });
 
-  it("mantiene il filtro quando arrivano eventi e gestisce lo stream vuoto", () => {
+  it("keeps the filter as events arrive and handles an empty stream", () => {
     const { rerender } = render(<Inspector events={[]} running={false} />);
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(screen.queryAllByRole("group")).toHaveLength(0);
@@ -130,7 +130,7 @@ describe("Inspector", () => {
     expect(screen.getByRole("group")).toHaveTextContent(/^REASONING_START/);
   });
 
-  it("conserva filtro e log passando tra le due viste", () => {
+  it("keeps filter and logs while switching between the two views", () => {
     render(<Inspector events={[{ type: "REASONING_START", messageId: "r" }]} running={false} />);
     const eventButton = screen.getByRole("button", { name: "Event inspector 1" });
     const logButton = screen.getByRole("button", { name: "Log" });
@@ -147,7 +147,7 @@ describe("Inspector", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("raccoglie i log a vista nascosta e conserva cursore e coda dopo la run", async () => {
+  it("collects logs while hidden and keeps cursor and tail after the run", async () => {
     vi.useFakeTimers();
     const page = (seq: number) => ({
       cursor: seq, dropped: 0,

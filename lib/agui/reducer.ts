@@ -34,7 +34,7 @@ export function reduce(state: LabState, event: AGUIEvent): LabState {
       return { ...next, running: false };
 
     case "RUN_ERROR":
-      return { ...next, running: false, error: String(event.message ?? "errore") };
+      return { ...next, running: false, error: String(event.message ?? "error") };
 
     case "TEXT_MESSAGE_START":
       return {
@@ -140,7 +140,7 @@ export function reduce(state: LabState, event: AGUIEvent): LabState {
             id: event.subagentRunId,
             name: event.name,
             description: event.description ?? "",
-            stato: "in corso",
+            status: "running",
           },
         ],
       };
@@ -149,7 +149,7 @@ export function reduce(state: LabState, event: AGUIEvent): LabState {
       return {
         ...next,
         entries: patch(next.entries, event.subagentRunId, (e) =>
-          e.kind === "subagent" && e.stato === "in corso" ? { ...e, stato: "concluso" } : e,
+          e.kind === "subagent" && e.status === "running" ? { ...e, status: "done" } : e,
         ),
       };
 
@@ -157,7 +157,7 @@ export function reduce(state: LabState, event: AGUIEvent): LabState {
       return {
         ...next,
         entries: patch(next.entries, event.subagentRunId, (e) =>
-          e.kind === "subagent" ? { ...e, stato: "errore", errore: event.message } : e,
+          e.kind === "subagent" ? { ...e, status: "failed", error: event.message } : e,
         ),
       };
 

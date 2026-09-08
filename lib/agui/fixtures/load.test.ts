@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadFixture } from "./load";
 
 describe("loadFixture", () => {
-  it("legge lo stream reale in ordine", () => {
+  it("reads the real stream in order", () => {
     const events = loadFixture("stream-qwen");
 
     expect(events).toHaveLength(486);
@@ -10,7 +10,7 @@ describe("loadFixture", () => {
     expect(events.at(-1)?.type).toBe("RUN_FINISHED");
   });
 
-  it("contiene la sequenza di ragionamento che ci aspettiamo", () => {
+  it("contains the reasoning sequence we expect", () => {
     const events = loadFixture("stream-qwen");
     const types = events.map((event) => event.type);
 
@@ -29,7 +29,7 @@ describe("loadFixture", () => {
     }
   });
 
-  it("contiene un giro completo di tool con il suo risultato", () => {
+  it("contains a full tool round with its result", () => {
     const types = loadFixture("stream-qwen").map((event) => event.type);
 
     expect(types).toContain("TOOL_CALL_START");

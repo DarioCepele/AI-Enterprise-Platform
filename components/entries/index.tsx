@@ -22,13 +22,13 @@ export const EntryView = memo(function EntryView({ entry }: { entry: Entry }) {
         <SubagentEntry
           name={entry.name}
           description={entry.description}
-          stato={entry.stato}
-          errore={entry.errore}
+          status={entry.status}
+          error={entry.error}
         />
       );
     case "artifact":
       return <UiTable artifact={entry.artifact} />;
   }
   const unreachable: never = entry;
-  throw new Error(`Variante di entry non supportata: ${JSON.stringify(unreachable)}`);
+  throw new Error(`Unsupported entry variant: ${JSON.stringify(unreachable)}`);
 });

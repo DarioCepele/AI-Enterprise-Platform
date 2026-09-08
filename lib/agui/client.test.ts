@@ -28,7 +28,7 @@ function mockStream(chunks: Uint8Array[]) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("runAgent", () => {
-  it("invia un solo POST e consegna gli eventi in ordine senza alterare i payload", async () => {
+  it("sends a single POST and delivers events in order without altering payloads", async () => {
     const expected: AGUIEvent[] = [
       { type: "RUN_STARTED", threadId: "t1", runId: "r1" },
       { type: "TOOL_CALL_RESULT", toolCallId: "c1", content: '{"component":"ui-table"}' },
@@ -56,7 +56,7 @@ describe("runAgent", () => {
     expect(body.locked).toBe(false);
   });
 
-  it("passa il segnale di interruzione alla richiesta", async () => {
+  it("passes the abort signal to the request", async () => {
     const { fetchMock } = mockStream([encoder.encode("")]);
     const controller = new AbortController();
 
@@ -65,7 +65,7 @@ describe("runAgent", () => {
     expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
   });
 
-  it("propaga l'interruzione di una run gia' avviata", async () => {
+  it("propagates aborting a run already under way", async () => {
     const controller = new AbortController();
     const body = new ReadableStream<Uint8Array>({
       start(c) {
@@ -90,7 +90,7 @@ describe("runAgent", () => {
     expect(events).toHaveLength(1);
   });
 
-  it.each(["\n", "\r\n", "\r"])("gestisce terminatori %j e UTF-8 divisi byte per byte", async (eol) => {
+  it.each(["\n", "\r\n", "\r"])("handles %j terminators and UTF-8 split byte by byte", async (eol) => {
     const expected = { type: "TEXT_MESSAGE_CONTENT", messageId: "m2", delta: "caffè ☕" };
     const bytes = encoder.encode(`\uFEFFdata:${JSON.stringify(expected)}${eol}${eol}`);
     mockStream(Array.from(bytes, (byte) => Uint8Array.of(byte)));
@@ -101,7 +101,7 @@ describe("runAgent", () => {
     expect(events).toEqual([expected]);
   });
 
-  it("unisce le righe data e ignora commenti e metadati SSE", async () => {
+  it("joins data lines and ignores SSE comments and metadata", async () => {
     mockStream([encoder.encode(
       ': keepalive\r\n\r\nid: 1\nevent: message\nretry: 1000\n' +
       'data: {"type":"RUN_STARTED",\n' +
@@ -115,7 +115,7 @@ describe("runAgent", () => {
     expect(events).toEqual([{ type: "RUN_STARTED", threadId: "t1", runId: "r1" }]);
   });
 
-  it("consegna gli eventi prima della chiusura della connessione", async () => {
+  it("delivers events before the connection closes", async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body)));
@@ -129,7 +129,7 @@ describe("runAgent", () => {
     await run;
   });
 
-  it("non consegna un evento senza la riga vuota finale", async () => {
+  it("does not deliver an event without its final blank line", async () => {
     mockStream([encoder.encode('data: {"type":"RUN_ERROR","message":"incompleto"}\n')]);
     const onEvent = vi.fn();
 
@@ -138,13 +138,13 @@ describe("runAgent", () => {
     expect(onEvent).not.toHaveBeenCalled();
   });
 
-  it.each([503, 204])("segnala la risposta HTTP %i senza uno stream valido", async (status) => {
+  it.each([503, 204])("reports HTTP response %i with no valid stream", async (status) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status })));
 
     await expect(runAgent(input, vi.fn())).rejects.toThrow(`AG-UI ha risposto ${status}`);
   });
 
-  it.each(["json", "callback"])("annulla lo stream e rilascia il reader se fallisce %s", async (failure) => {
+  it.each(["json", "callback"])("cancels the stream and releases the reader when %s fails", async (failure) => {
     const cancel = vi.fn();
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
