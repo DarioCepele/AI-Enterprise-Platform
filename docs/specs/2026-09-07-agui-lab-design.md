@@ -233,7 +233,7 @@ e il laboratorio le esercita tutte.
 | notifiche push | `a2a/push.py`, `/a2a/push/{scope}/{thread_id}` | il lavoro lungo non tiene aperto un socket: l'esito arriva dopo, firmato |
 | artefatti di prima classe | `knowledge/executor.py`, artefatto `scheda` | un output con nome e dati strutturati, non testo indistinguibile |
 | input-required | `[SERVE-CHIARIMENTO]`, `subagent_pending` | il sottoagente si ferma e chiede: human-in-the-loop attraverso gli agenti |
-| extended agent card | -- | capability non pubbliche, dietro autenticazione (§11) |
+| extended agent card | `knowledge/extended.py`, `GET /extendedAgentCard` | il catalogo indicizzato lo vede solo chi presenta un token di servizio |
 
 Due conseguenze di progetto che vale la pena fissare.
 
@@ -243,6 +243,13 @@ finiscono su processi diversi. `subagent_pending` sta nello stato del thread,
 che e' gia' condiviso e gia' durevole; il tool lo legge da una `ContextVar` che
 `LabRunner` popola dallo snapshot store, non dallo stato della richiesta -- che
 il framework fonde dopo quel punto.
+
+**La vista estesa non esiste, per chi non ha diritto.** A chi non presenta il
+token la card estesa risponde come un agente che non ne ha una, invece di
+negare l'accesso a una cosa di cui ha appena confermato l'esistenza. Il 401 con
+`WWW-Authenticate` resta sul percorso REST, dove serve a un client legittimo
+per sapere cosa mandare. Un token non configurato chiude: la dimenticanza deve
+costare una card in meno, non una in piu'.
 
 **Il filtro delle notifiche sta da chi le manda.** `BasePushNotificationSender`
 notifica ogni evento della coda: in streaming erano 196 POST per due domande,
@@ -412,7 +419,7 @@ Ordinate per rischio decrescente, non per area funzionale. Le due cose che posso
 | 1 | walking skeleton | prompt → LLM → `TEXT_MESSAGE_*` + un tool → UI a tre pannelli, piu' le immagini docker e il compose. Niente piano, niente skill, niente tabelle. | **fatto** |
 | 2 | flusso del video | piano di lavoro, `SKILL.md` + `load_skill`, `ui_table`, filtri inspector, tab log | **fatto**, verificato nel browser il 2026-09-08 |
 | 3 | sottoagenti A2A | knowledge agent come processo separato, invocazione parallela, update rilanciati | **fatto**, verificato nel browser il 2026-09-08 |
-| 4 | A2A per intero | ciclo di vita, push firmate, artefatti con nome, input-required end-to-end | **fatto**, verificato dal vivo il 2026-09-08; resta la extended card |
+| 4 | A2A per intero | ciclo di vita, push firmate, artefatti con nome, input-required end-to-end, card estesa dietro token | **fatto**, verificato dal vivo e nel browser il 2026-09-08 |
 
 La tappa 1 esiste per validare che il frontend consumi correttamente ciò che il package AG-UI emette, quando cambiare idea costa poco.
 
@@ -472,10 +479,11 @@ Due vincoli da rispettare quando si farà:
   non più: se un ingegnere umano non sa dire quale agente usare, il modello
   nemmeno.
 
-**Extended agent card dietro autenticazione.** La card pubblica dichiara cosa
-l'agente sa fare per chiunque; A2A prevede una card estesa, servita solo a chi
-si autentica, per le capability che non si vogliono in vetrina. Manca il pezzo
-di autenticazione, rimandato per scelta.
+**Autenticazione vera fra gli agenti.** Il token di servizio della card estesa
+e' un segreto condiviso in ambiente: basta a mostrare la forma del problema, non
+a reggere piu' di due servizi. Il passo successivo sono identita' per agente e
+credenziali a scadenza -- OAuth2 client credentials o mTLS, entrambi gia'
+esprimibili nei `security_schemes` della card.
 
 **Decadimento dei fatti duraturi.** Un fatto vecchio e mai più confermato pesa
 quanto uno di ieri. La pratica consigliata è abbassare una forza nel tempo

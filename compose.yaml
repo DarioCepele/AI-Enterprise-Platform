@@ -13,6 +13,7 @@ services:
       DEMO_KNOWLEDGE_AGENT_URL: http://knowledge-agent:8200/
       DEMO_PUBLIC_URL: http://master-agent:8000
       DEMO_PUSH_SECRET: ${DEMO_PUSH_SECRET:?serve in .env}
+      DEMO_KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?serve in .env}
       DEMO_SUBAGENT_WAIT_SECONDS: ${DEMO_SUBAGENT_WAIT_SECONDS:-60}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -55,6 +56,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_CHAT_COMPLETION_MODEL: ${KNOWLEDGE_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
       KNOWLEDGE_BASE_URL: http://knowledge-agent:8200/
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?serve in .env}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
