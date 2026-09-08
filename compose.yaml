@@ -10,10 +10,13 @@ services:
       DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
       DEMO_ALLOWED_ORIGINS: ${DEMO_ALLOWED_ORIGINS:-}
       DEMO_MEMORY_SERVICE_URL: http://memory-service:8100
+      DEMO_KNOWLEDGE_AGENT_URL: http://knowledge-agent:8200/
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       memory-service:
+        condition: service_healthy
+      knowledge-agent:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -38,6 +41,21 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  knowledge-agent:
+    build: ../demo-knowledge-agent
+    environment:
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_COMPLETION_MODEL: ${KNOWLEDGE_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
+      KNOWLEDGE_BASE_URL: http://knowledge-agent:8200/
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8200/health')"]
       interval: 10s
       timeout: 3s
       retries: 5
