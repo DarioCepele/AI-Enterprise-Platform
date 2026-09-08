@@ -75,6 +75,11 @@ tool e tabella. Nell'Inspector si filtrano gli eventi; LOG mostra orario, sorgen
 e messaggio. Il backend conserva un solo piano per processo: due schede del browser
 lo condividono. I log sono anch'essi del processo, senza isolamento per thread.
 
+La risposta finale e' resa come Markdown mentre arriva; il pulsante `interrompi`
+chiude la run in corso senza segnalare un errore. Nell'inspector gli eventi
+consecutivi dello stesso tipo stanno in una riga sola con il conteggio: il
+contatore in alto resta quello degli eventi, e il payload compare aprendo la riga.
+
 ## Test
 
 ```bash

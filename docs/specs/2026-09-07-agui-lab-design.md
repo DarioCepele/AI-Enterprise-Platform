@@ -217,6 +217,30 @@ Il frontend interroga l'endpoint durante la run e una volta alla fine, conserva
 il cursore tra run e tra cambi di tab, annulla richieste obsolete e non effettua
 polling a riposo. Piano e log sono condivisi nel processo, non isolati per thread.
 
+### 4.5 Resa della timeline e dell'inspector
+
+**Inspector: una riga per gruppo, non per evento.** Gli eventi consecutivi dello
+stesso tipo si accorpano in una riga sola con il conteggio; il payload viene
+serializzato solo quando la riga e' aperta, e l'array e' troncato a 50 elementi
+per gruppo. Motivo misurato: una run reale produce oltre 2500 eventi, di cui
+piu' di 2200 `REASONING_ENCRYPTED_VALUE`. Una riga per evento significa 2500
+`<details>` nel DOM e altrettante `JSON.stringify` a ogni token che arriva.
+Il conteggio totale in cima resta quello degli eventi, non dei gruppi: non si
+nasconde nulla del flusso grezzo, si smette solo di ripeterlo.
+
+**Chat: Markdown, non testo grezzo.** La risposta finale del modello e' Markdown
+e arriva un token alla volta. Si rende con **Streamdown**, un renderer pensato
+per lo streaming: completa da solo la sintassi ancora aperta — grassetto, link,
+blocchi di codice a meta' — invece di mostrare gli asterischi finche' il token
+di chiusura non arriva. Il markup pericoloso resta bloccato: niente `<script>`,
+niente URL `javascript:`, immagini remote non caricate. I nomi di colore che le
+sue classi si aspettano (`muted`, `primary`, `border`) sono mappati sui token del
+laboratorio, cosi' il Markdown non porta una seconda tavolozza.
+
+**Run interrompibile.** `runAgent` accetta un `AbortSignal` e la chat mostra
+"interrompi" mentre lavora. Interrompere e' una scelta dell'utente, non un
+errore: la run si chiude con quello che ha gia' prodotto e nessun riquadro rosso.
+
 ## 5. Vincoli verificati sperimentalmente
 
 Uno spike eseguito il 2026-09-07 ha confermato che lo streaming A2A fra due agenti MAF funziona, e ha isolato **due default che lo disattivano in silenzio**. Entrambi sono obbligatori.
