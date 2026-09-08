@@ -27,6 +27,7 @@ current_run_events: contextvars.ContextVar[asyncio.Queue | None] = contextvars.C
 current_plan: contextvars.ContextVar[PlanStore | None] = contextvars.ContextVar(
     "current_plan", default=None
 )
+current_thread: contextvars.ContextVar[str] = contextvars.ContextVar("current_thread", default="")
 
 PlanLoader = Callable[[str], Awaitable[dict[str, Any] | None]]
 
@@ -35,6 +36,10 @@ _FINE = object()
 
 def plan_of_run() -> PlanStore | None:
     return current_plan.get()
+
+
+def thread_of_run() -> str:
+    return current_thread.get()
 
 
 @asynccontextmanager
@@ -114,6 +119,9 @@ class LabRunner(AgentFrameworkAgent):
         async def pompa() -> None:
             eventi = current_run_events.set(queue)
             piano = current_plan.set(plan)
+            thread = current_thread.set(
+                str(input_data.get("thread_id") or input_data.get("threadId") or "")
+            )
             try:
                 async for event in self._framework_events(input_data):
                     await queue.put(event)
@@ -122,6 +130,7 @@ class LabRunner(AgentFrameworkAgent):
             finally:
                 current_run_events.reset(eventi)
                 current_plan.reset(piano)
+                current_thread.reset(thread)
                 await queue.put(_FINE)
 
         task = asyncio.create_task(pompa())

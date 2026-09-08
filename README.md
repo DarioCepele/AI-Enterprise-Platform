@@ -262,3 +262,35 @@ La scheda del sottoagente arriva in timeline come **artefatto**, con le fonti
 che ha letto — non come testo indistinguibile dal resto della risposta. Nessuno
 dei due repository dipende più da `agent-framework-a2a`: client ed executor
 stanno sull'SDK stabile.
+
+## Lavori lunghi: il push invece del socket aperto
+
+Il master non aspetta un sottoagente all'infinito. Dopo
+`DEMO_SUBAGENT_WAIT_SECONDS` smette di ascoltare e lo dice al modello, che
+risponde con quello che ha; il risultato arriva dopo, come **notifica push**, e
+finisce nella memoria del thread — quindi al turno successivo è nel contesto.
+
+Tre decisioni che meritano una riga.
+
+**La correlazione sta nell'URL.** Il webhook è
+`/a2a/push/{scope}/{thread_id}`: chi riceve sa già a quale conversazione
+appartiene la notifica. L'alternativa — una tabella da task a thread — sarebbe
+stato di processo, cioè sbagliata con due repliche.
+
+**Il token firma il thread, non il task.** Il webhook si registra *prima* che il
+task esista, quindi un token sul task id non si potrebbe calcolare in anticipo.
+È un HMAC del thread con un segreto d'ambiente: verificarlo non richiede
+memoria, così due repliche accettano gli stessi token. Senza token valido si
+risponde 403 — un webhook aperto è un modo per far scrivere a chiunque nella
+memoria di una conversazione.
+
+**La notifica dice "ho finito", non cosa ha prodotto.** Il sottoagente notifica
+*ogni* evento del task: scrivere in memoria a ogni avanzamento riempirebbe la
+conversazione di rumore. Si ignorano gli avanzamenti, e sullo stato terminale si
+va a **rileggere il task** per prenderne gli artefatti. Accumulare le notifiche
+sarebbe di nuovo stato di processo.
+
+Verificato dal vivo con l'attesa a 8 secondi: il tool si stacca, l'agente
+risponde «l'esito arriverà come notifica», e poco dopo nei log compare
+`Il sottoagente ha concluso il task 3f236f2f (TASK_STATE_COMPLETED)` con 916
+caratteri scritti nella memoria del thread.

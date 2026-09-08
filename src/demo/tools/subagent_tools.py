@@ -11,8 +11,12 @@ from a2a.types import AgentCard
 from agent_framework import Content, FunctionTool, tool
 from agent_framework.ag_ui import state_update
 
+import asyncio
+
 from ..a2a.client import A2AClient, Avanzamento, fetch_agent_card
-from ..server.run_context import subagent_run
+from ..a2a.push import token_per, url_webhook
+from ..config import SINGLE_TENANT_SCOPE, get_settings
+from ..server.run_context import subagent_run, thread_of_run
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,17 @@ def build_subagent_tools(
         interrogazioni partono insieme invece che una dopo l'altra.
         """
         start = time.monotonic()
+        impostazioni = get_settings()
+        thread_id = thread_of_run()
+        webhook = (
+            (
+                url_webhook(impostazioni.public_url, SINGLE_TENANT_SCOPE, thread_id),
+                token_per(thread_id),
+            )
+            if impostazioni.public_url and thread_id
+            else None
+        )
+        in_ritardo = False
         pezzi: list[str] = []
         stati: list[str] = []
         artefatti = 0
@@ -59,19 +74,23 @@ def build_subagent_tools(
             remoto = await client()
             async with subagent_run("knowledge", domanda):
                 avanzamento: Avanzamento | None = None
-                async for avanzamento in remoto.chiedi(domanda):
-                    task_id = avanzamento.task_id or task_id
-                    if not stati or stati[-1] != avanzamento.stato:
-                        stati.append(avanzamento.stato)
-                    if avanzamento.testo:
-                        pezzi.append(avanzamento.testo)
-                    if avanzamento.artefatto:
-                        artefatti += 1
-                        schede.append(avanzamento.artefatto)
-                        if avanzamento.artefatto.testo:
-                            pezzi.append(avanzamento.artefatto.testo)
-                    if avanzamento.attende_risposta:
-                        domanda_del_sottoagente = avanzamento.domanda
+                try:
+                    async with asyncio.timeout(impostazioni.subagent_wait_seconds):
+                        async for avanzamento in remoto.chiedi(domanda, webhook=webhook):
+                            task_id = avanzamento.task_id or task_id
+                            if not stati or stati[-1] != avanzamento.stato:
+                                stati.append(avanzamento.stato)
+                            if avanzamento.testo:
+                                pezzi.append(avanzamento.testo)
+                            if avanzamento.artefatto:
+                                artefatti += 1
+                                schede.append(avanzamento.artefatto)
+                                if avanzamento.artefatto.testo:
+                                    pezzi.append(avanzamento.artefatto.testo)
+                            if avanzamento.attende_risposta:
+                                domanda_del_sottoagente = avanzamento.domanda
+                except TimeoutError:
+                    in_ritardo = True
         except Exception:
             logger.error("Knowledge agent non raggiungibile per '%s'.", domanda, exc_info=True)
             return Content.from_text(
@@ -92,6 +111,20 @@ def build_subagent_tools(
             time.monotonic() - start,
             len(risposta),
         )
+
+
+        if in_ritardo:
+            logger.info(
+                "Il task %s del sottoagente supera l'attesa: si prosegue, l'esito arrivera' via webhook.",
+                task_id[:8] or "?",
+            )
+            parziale = f" Finora ha detto: {risposta}" if risposta else ""
+            return Content.from_text(
+                "Il knowledge agent sta ancora lavorando e non ho aspettato oltre."
+                + parziale
+                + " L'esito arrivera' come notifica e sara' disponibile al prossimo turno:"
+                " dillo all'utente invece di inventare la risposta."
+            )
 
         if domanda_del_sottoagente:
             return Content.from_text(

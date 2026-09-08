@@ -27,6 +27,8 @@ class Settings:
 
     memory_service_url: str
     knowledge_agent_url: str
+    public_url: str
+    subagent_wait_seconds: float
 
 def _read_origins() -> tuple[str, ...]:
     raw = os.getenv("DEMO_ALLOWED_ORIGINS", "")
@@ -44,4 +46,6 @@ def get_settings() -> Settings:
         allowed_origins=_read_origins(),
         memory_service_url=os.getenv("DEMO_MEMORY_SERVICE_URL", "").strip(),
         knowledge_agent_url=os.getenv("DEMO_KNOWLEDGE_AGENT_URL", "").strip(),
+        public_url=os.getenv("DEMO_PUBLIC_URL", "").strip(),
+        subagent_wait_seconds=float(os.getenv("DEMO_SUBAGENT_WAIT_SECONDS", "60")),
     )

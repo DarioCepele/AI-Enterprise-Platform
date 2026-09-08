@@ -33,7 +33,7 @@ class FakeRemote:
         self.ritardo = ritardo
         self.domande: list[str] = []
 
-    async def chiedi(self, testo: str, task_id=None, context_id=None):
+    async def chiedi(self, testo: str, task_id=None, context_id=None, webhook=None):
         self.domande.append(testo)
         yield avanzamento(stato="accettato", grezzo=1)
         for pezzo in self.pezzi:
@@ -112,7 +112,7 @@ async def test_two_questions_in_the_same_turn_run_together():
 @pytest.mark.asyncio
 async def test_an_unreachable_subagent_does_not_kill_the_run(caplog):
     class Rotto:
-        async def chiedi(self, testo, task_id=None, context_id=None):
+        async def chiedi(self, testo, task_id=None, context_id=None, webhook=None):
             raise ConnectionError("knowledge agent giu'")
             yield
 
@@ -141,7 +141,7 @@ async def test_an_empty_answer_is_declared_not_faked():
 
 
 class RemoteConArtefatti(FakeRemote):
-    async def chiedi(self, testo, task_id=None, context_id=None):
+    async def chiedi(self, testo, task_id=None, context_id=None, webhook=None):
         from demo.a2a.client import Artefatto
 
         self.domande.append(testo)
@@ -155,7 +155,7 @@ class RemoteConArtefatti(FakeRemote):
 
 
 class RemoteCheChiede(FakeRemote):
-    async def chiedi(self, testo, task_id=None, context_id=None):
+    async def chiedi(self, testo, task_id=None, context_id=None, webhook=None):
         self.domande.append(testo)
         a = avanzamento(stato="attende una risposta", grezzo=6)
         a.domanda = "Su quale versione di Go?"

@@ -9,7 +9,17 @@ from uuid import uuid4
 
 import httpx
 from a2a.client import Client, ClientConfig, ClientFactory
-from a2a.types import AgentCard, Message, Part, Role, SendMessageRequest, TaskState
+from a2a.types import (
+    AgentCard,
+    Message,
+    Part,
+    Role,
+    SendMessageConfiguration,
+    GetTaskRequest,
+    SendMessageRequest,
+    TaskPushNotificationConfig,
+    TaskState,
+)
 from google.protobuf.json_format import ParseDict
 
 logger = logging.getLogger(__name__)
@@ -124,6 +134,7 @@ class A2AClient:
         testo: str,
         task_id: str | None = None,
         context_id: str | None = None,
+        webhook: tuple[str, str] | None = None,
     ) -> AsyncIterator[Avanzamento]:
         """Manda un messaggio e restituisce gli avanzamenti del task.
 
@@ -140,8 +151,17 @@ class A2AClient:
         if context_id:
             message.context_id = context_id
 
+        richiesta = SendMessageRequest(message=message)
+        if webhook:
+            url, token = webhook
+            richiesta.configuration.CopyFrom(
+                SendMessageConfiguration(
+                    task_push_notification_config=TaskPushNotificationConfig(url=url, token=token)
+                )
+            )
+
         corrente = task_id or ""
-        async for response in self._client.send_message(SendMessageRequest(message=message)):
+        async for response in self._client.send_message(richiesta):
             if response.HasField("task"):
                 task = response.task
                 corrente = task.id
@@ -181,6 +201,23 @@ class A2AClient:
                     stato_grezzo=TaskState.TASK_STATE_COMPLETED,
                     testo=_testo_di(response.message.parts),
                 )
+
+    async def esito(self, task_id: str) -> Esito:
+        """Rilegge un task concluso.
+
+        La notifica push dice che il task e' finito, non cosa ha prodotto: il
+        risultato si va a prendere, invece di ricostruirlo accumulando le
+        notifiche -- che sarebbe stato di processo.
+        """
+        task = await self._client.get_task(GetTaskRequest(id=task_id))
+        artefatti = [_artefatto_di(a) for a in task.artifacts]
+        testo = "\n".join(a.testo for a in artefatti if a.testo).strip()
+        return Esito(
+            task_id=task.id,
+            stato=STATI.get(task.status.state, "sconosciuto"),
+            testo=testo,
+            artefatti=artefatti,
+        )
 
     async def aclose(self) -> None:
         await self._http.aclose()
