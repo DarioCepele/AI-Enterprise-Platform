@@ -2821,11 +2821,12 @@ Legge `GET /logs` del Task 5, a cursore, mentre la run va avanti. Il polling par
 - Create: `demo-frontend/lib/agui/logs.ts`
 - Create: `demo-frontend/components/LogPanel.tsx`
 - Test: `demo-frontend/lib/agui/logs.test.ts`
+- Test: `demo-frontend/components/LogPanel.test.tsx` (polling, cursore, coda finale, cleanup ed errori)
 
 **Interfaces:**
 - Consumes: niente
 - Produces:
-  - `fetchLogs(cursor: number): Promise<{entries: LogEntry[]; cursor: number; dropped: number}>` da `lib/agui/logs.ts`
+  - `fetchLogs(cursor: number, signal?: AbortSignal): Promise<{entries: LogEntry[]; cursor: number; dropped: number}>` da `lib/agui/logs.ts`
   - `LogEntry = { seq: number; ts: string; level: string; source: string; message: string }`
   - `LOGS_URL: string` — derivato da `NEXT_PUBLIC_AGUI_URL` sostituendo `/agui` con `/logs`, cosi' non serve una seconda variabile d'ambiente e le due non possono divergere.
   - `LogPanel({ running }: { running: boolean })`
@@ -2903,8 +2904,8 @@ const AGUI_URL = process.env.NEXT_PUBLIC_AGUI_URL ?? "http://127.0.0.1:8000/agui
  */
 export const LOGS_URL = AGUI_URL.replace(/\/agui$/, "/logs");
 
-export async function fetchLogs(cursor: number): Promise<LogPage> {
-  const response = await fetch(`${LOGS_URL}?cursor=${cursor}`);
+export async function fetchLogs(cursor: number, signal?: AbortSignal): Promise<LogPage> {
+  const response = await fetch(`${LOGS_URL}?cursor=${cursor}`, { signal, cache: "no-store" });
   if (!response.ok) {
     throw new Error(`/logs ha risposto ${response.status}`);
   }
@@ -2939,37 +2940,47 @@ export function LogPanel({ running }: { running: boolean }) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const cursor = useRef(0);
+  const wasRunning = useRef(false);
+  const [dropped, setDropped] = useState(0);
 
   useEffect(() => {
+    const shouldPoll = running || wasRunning.current;
+    wasRunning.current = running;
+    if (!shouldPoll) return;
+
     let cancelled = false;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     async function poll() {
       try {
-        const page = await fetchLogs(cursor.current);
+        const page = await fetchLogs(cursor.current, controller.signal);
         if (cancelled) return;
         cursor.current = page.cursor;
         if (page.entries.length > 0) {
           setEntries((current) => [...current, ...page.entries]);
         }
+        setDropped((current) => current + page.dropped);
         setError(null);
       } catch (err) {
         if (!cancelled) setError(String(err));
+      } finally {
+        if (!cancelled && running) timer = setTimeout(poll, 1000);
       }
     }
 
     void poll();
-    if (!running) return;
-
-    const timer = setInterval(poll, 1000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      controller.abort();
+      clearTimeout(timer);
     };
   }, [running]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto font-mono text-[11px]">
-      {error && <p className="py-1 text-red-600">log non raggiungibili: {error}</p>}
+      {error && <p role="alert" className="py-1 text-red-600">log non raggiungibili: {error}</p>}
+      {dropped > 0 && <p role="status" className="py-1 text-amber-600">{dropped} righe di log non più disponibili</p>}
       {entries.length === 0 && !error && (
         <p className="py-1 text-[var(--muted)]">nessun log</p>
       )}
@@ -2987,14 +2998,14 @@ export function LogPanel({ running }: { running: boolean }) {
 
 - [ ] **Step 5: Eseguire i test**
 
-Run: `cd demo-frontend && npx vitest run lib/agui/logs.test.ts && npx tsc --noEmit`
-Expected: PASS, 3 test.
+Run: `cd demo-frontend && npx vitest run lib/agui/logs.test.ts components/LogPanel.test.tsx && npx tsc --noEmit`
+Expected: test PASS. TypeScript segnala soltanto i quattro errori noti in Lab fino al Task 12. Verificare con timer controllati: nessun polling iniziale a riposo, richieste seriali, una lettura finale e cleanup anche dopo la run.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd demo-frontend
-git add lib/agui/logs.ts lib/agui/logs.test.ts components/LogPanel.tsx
+git add lib/agui/logs.ts lib/agui/logs.test.ts components/LogPanel.tsx components/LogPanel.test.tsx
 git commit -m "feat: tab LOG alimentato dall'endpoint /logs"
 ```
 
