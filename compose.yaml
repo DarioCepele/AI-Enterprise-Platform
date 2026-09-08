@@ -12,8 +12,8 @@ services:
       DEMO_MEMORY_SERVICE_URL: http://memory-service:8100
       DEMO_KNOWLEDGE_AGENT_URL: http://knowledge-agent:8200/
       DEMO_PUBLIC_URL: http://master-agent:8000
-      DEMO_PUSH_SECRET: ${DEMO_PUSH_SECRET:?serve in .env}
-      DEMO_KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?serve in .env}
+      DEMO_PUSH_SECRET: ${DEMO_PUSH_SECRET:?required in .env}
+      DEMO_KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?required in .env}
       DEMO_SUBAGENT_WAIT_SECONDS: ${DEMO_SUBAGENT_WAIT_SECONDS:-60}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -56,7 +56,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_CHAT_COMPLETION_MODEL: ${KNOWLEDGE_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
       KNOWLEDGE_BASE_URL: http://knowledge-agent:8200/
-      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?serve in .env}
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?required in .env}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -80,9 +80,9 @@ services:
     image: mongo:8.0.16
     restart: unless-stopped
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?serve in .env}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?serve in .env}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:?serve in .env}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?required in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?required in .env}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:?required in .env}
     ports:
       - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
     volumes:
@@ -97,7 +97,7 @@ services:
   redis:
     image: redis:8.2.3
     restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?serve in .env}", "--appendonly", "no"]
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?required in .env}", "--appendonly", "no"]
     ports:
       - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     healthcheck:
