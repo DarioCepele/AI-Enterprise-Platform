@@ -16,9 +16,17 @@ from a2a.server.tasks import (
     InMemoryPushNotificationConfigStore,
     InMemoryTaskStore,
 )
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
+from a2a.types import (
+    AgentCapabilities,
+    AgentCard,
+    AgentInterface,
+    AgentSkill,
+    HTTPAuthSecurityScheme,
+    SecurityScheme,
+)
 from agent_framework import Agent
 from .executor import KnowledgeExecutor
+from .extended import SCHEMA, SoloConToken, build_extended_card, card_per_chi_chiede
 from .push import NotificheEssenziali
 from fastapi import FastAPI
 
@@ -44,7 +52,17 @@ def build_agent_card(base_url: str) -> AgentCard:
         ],
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
-        capabilities=AgentCapabilities(streaming=True, push_notifications=True),
+        capabilities=AgentCapabilities(
+            streaming=True, push_notifications=True, extended_agent_card=True
+        ),
+        security_schemes={
+            SCHEMA: SecurityScheme(
+                http_auth_security_scheme=HTTPAuthSecurityScheme(
+                    description="Token di servizio per la card estesa.",
+                    scheme="bearer",
+                )
+            )
+        },
         skills=[SKILL],
     )
 
@@ -63,9 +81,12 @@ def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastA
         agent_card=card,
         push_config_store=push_store,
         push_sender=NotificheEssenziali(httpx.AsyncClient(timeout=10.0), push_store),
+        extended_agent_card=build_extended_card(card, sorted(catalogue())),
+        extended_card_modifier=card_per_chi_chiede,
     )
 
     app = FastAPI(title="Knowledge agent")
+    app.add_middleware(SoloConToken)
 
     @app.get("/health")
     async def health() -> dict[str, object]:

@@ -131,3 +131,34 @@ da fare — fine del task (`COMPLETED`, `FAILED`, `CANCELED`, `REJECTED`) e
 
 Gli artefatti non viaggiano nella notifica: dice che il task è finito, non cosa
 ha prodotto. Il risultato si va a rileggere con `get_task`.
+
+## La card estesa: cosa non si mette in vetrina
+
+La card pubblica dice cosa l'agente sa fare. **Quali documenti abbia
+indicizzato** no: l'elenco dice di cosa si occupa chi ci lavora, ed è
+esattamente il dettaglio utile a chi deve usare l'agente e non a chi passa di
+lì. Sta nella card estesa, servita solo a chi presenta un token di servizio.
+
+```
+GET /extendedAgentCard                       401  WWW-Authenticate: Bearer realm="servizio"
+GET /extendedAgentCard  Bearer <sbagliato>   401
+GET /extendedAgentCard  Bearer <giusto>      200  skills: confronto-linguaggi, catalogo
+```
+
+Tre scelte, tutte discutibili e tutte volute.
+
+**A chi non è autenticato la card estesa non esiste.** Sul percorso REST il 401
+serve a un client legittimo, che dall'header impara cosa mandare; sulla via
+JSON-RPC la risposta è `ExtendedAgentCardNotConfiguredError` — la stessa che
+darebbe un agente che non ne ha una. Negare l'esistenza invece dell'accesso non
+conferma a un estraneo che qui ci sia qualcosa di più da chiedere.
+
+**Un token non configurato chiude, non apre.** Se `KNOWLEDGE_SERVICE_TOKEN` è
+vuoto nessuno passa: la dimenticanza deve costare una card in meno, non una
+card in più.
+
+**`security_requirements` resta vuoto.** Metterlo direbbe che *l'agente*
+richiede autenticazione, il che è falso: interrogarlo è pubblico, è la vista
+estesa a non esserlo. Il token viaggia come parametro della singola chiamata.
+Conseguenza pratica: l'`AuthInterceptor` dell'SDK, che si attiva proprio su
+`security_requirements`, qui non serve a niente.
