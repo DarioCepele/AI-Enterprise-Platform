@@ -154,9 +154,16 @@ services:
     environment:
       PROCESS_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       PROCESS_JSON_LOGS: ${JSON_LOGS:-false}
+      PROCESS_PUBLIC_URL: http://process-service:8300
+      PROCESS_PUSH_SECRET: ${DEMO_PUSH_SECRET:?required in .env}
+      PROCESS_AGENTS: '{"knowledge": "http://knowledge-agent:8200/"}'
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    ports:
+      - "127.0.0.1:${PROCESS_HOST_PORT:-8300}:8300"
     depends_on:
       postgres:
+        condition: service_healthy
+      knowledge-agent:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8300/health/ready')"]

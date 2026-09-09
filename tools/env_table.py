@@ -19,6 +19,7 @@ README = ROOT / "README.md"
 SOURCES = (
     ("master agent", "../demo-master-agent", "demo.config"),
     ("memory service", "../demo-memory-service", "memory_service.config"),
+    ("process service", "../demo-process-service", "process_service.config"),
 )
 
 START = "<!-- env-table:start -->"

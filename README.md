@@ -134,6 +134,21 @@ e' una tabella che mente al secondo cambiamento.
 | `MEMORY_MAX_CONTEXT_MESSAGES` | `60` | Window handed back to the agent, in messages. |
 | `MEMORY_MAX_FACTS` | `30` | How many durable facts are injected into a context. |
 
+### process service
+
+| Variable | Default | What it decides |
+|---|---|---|
+| `PROCESS_POSTGRES_DSN` | `postgresql://127.0.0.1:5432/processes` | Where instances live. Durable execution needs real transactions. |
+| `PROCESS_DEFINITIONS_PATH` | `processes` | Folder of process definitions, loaded once at startup. |
+| `PROCESS_DEFAULT_SCOPE` | `local-laboratory` | Authorization boundary used when the header says nothing. |
+| `PROCESS_SCOPE_HEADER` | `X-Process-Scope` | Header carrying the scope of the caller. |
+| `PROCESS_JSON_LOGS` | `False` | Structured logs for a collector instead of the readable line. |
+| `PROCESS_POOL_MIN_SIZE` | `1` | Connections kept open. |
+| `PROCESS_POOL_MAX_SIZE` | `10` | Connections at most. |
+| `PROCESS_PUBLIC_URL` | `http://localhost:8300` | How a remote agent reaches this service back, for notifications. |
+| `PROCESS_PUSH_SECRET` | `laboratory-without-a-secret` | Signs notification tokens. Change it: the default is public. |
+| `PROCESS_AGENTS` | `{}` | Agents a step may delegate to, as JSON: {"knowledge": "http://..."}. |
+
 ### frontend
 
 Read at request time, so the same image serves any environment. The
