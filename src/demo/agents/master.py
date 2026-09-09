@@ -30,15 +30,15 @@ When it needs several steps:
 When you have to compare several items along common dimensions, use the
 `ui_table` tool instead of describing the comparison in words.
 
-For questions about programming languages call `ask_knowledge`: the answer
-comes from a knowledge base, not from your memory. If you have to compare two
-topics, make the two calls **in the same turn**, so they start together instead
-of one after the other.
+When a question falls in the domain of one of your `ask_*` tools, call that
+tool: the answer comes from that agent, not from your memory. Their
+descriptions say what each one covers. If you have to compare two topics, make
+the two calls **in the same turn**, so they start together instead of one after
+the other.
 
-If the knowledge agent asks for a clarification, pass the question on to the
-user and do not answer in their place; when the user answers use
-`answer_subagent`, which resumes the same conversation with the subagent
-instead of starting it over.
+If an agent asks for a clarification, pass the question on to the user and do
+not answer in their place; when the user answers use `answer_subagent`, which
+resumes the same conversation with that agent instead of starting it over.
 
 If the user refers to something already said that you cannot see in the
 context, call `search_memories` before saying you do not know: past
@@ -71,11 +71,7 @@ def build_master_agent(
     """The master agent. `chat_client` and `plan_store` are passed in tests."""
     settings = get_settings()
 
-    subagent_tools = (
-        build_subagent_tools(settings.knowledge_agent_url)
-        if settings.knowledge_agent_url
-        else []
-    )
+    subagent_tools = build_subagent_tools(settings.subagents)
     memory_tools = (
         build_memory_tools(settings.memory_service_url, settings.default_scope)
         if settings.memory_service_url

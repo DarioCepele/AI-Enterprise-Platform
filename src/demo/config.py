@@ -6,10 +6,11 @@ a prompt or in a component: whoever forks this repository changes them here.
 """
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from dotenv import load_dotenv
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 load_dotenv()
@@ -22,6 +23,22 @@ DEFAULT_ORIGINS = (
 )
 
 SINGLE_TENANT_SCOPE = "local-laboratory"
+
+class SubagentConfig(BaseModel):
+    """A remote agent this one may call, named as the model will see it."""
+
+    name: str
+    url: str
+    token: str = ""
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def _identifier(cls, value: str) -> str:
+        """The name becomes part of a tool name, so it has to be one."""
+        cleaned = "".join(char if char.isalnum() else "_" for char in value.strip().lower())
+        if not cleaned or not cleaned[0].isalpha():
+            raise ValueError(f"subagent name '{value}' is not usable as a tool name")
+        return cleaned
 
 class Settings(BaseSettings):
     """Everything the process reads from the environment, validated at once."""
@@ -69,6 +86,9 @@ class Settings(BaseSettings):
     knowledge_service_token: str = Field(
         default="", validation_alias=AliasChoices("DEMO_KNOWLEDGE_SERVICE_TOKEN")
     )
+    subagents: Annotated[tuple[SubagentConfig, ...], NoDecode] = Field(
+        default=(), validation_alias=AliasChoices("DEMO_SUBAGENTS")
+    )
     public_url: str = Field(default="", validation_alias=AliasChoices("DEMO_PUBLIC_URL"))
     subagent_wait_seconds: float = Field(
         default=60.0, validation_alias=AliasChoices("DEMO_SUBAGENT_WAIT_SECONDS")
@@ -93,6 +113,17 @@ class Settings(BaseSettings):
     def _trimmed(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("subagents", mode="before")
+    @classmethod
+    def _subagents(cls, value: object) -> object:
+        """A JSON list, or nothing. An empty variable means nothing, not an error."""
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return ()
+        return json.loads(text)
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _origins(cls, value: object) -> object:
@@ -101,6 +132,29 @@ class Settings(BaseSettings):
             return value
         origins = tuple(part.strip() for part in value.split(",") if part.strip())
         return origins or DEFAULT_ORIGINS
+
+    @model_validator(mode="after")
+    def _knowledge_agent_is_a_subagent(self) -> "Settings":
+        """The single-agent variables stay valid, as one entry in the list.
+
+        A fork that only has one subagent should not have to learn a JSON list
+        to say so, and the compose file that has been passing
+        DEMO_KNOWLEDGE_AGENT_URL for three stages keeps working.
+        """
+        if self.subagents or not self.knowledge_agent_url:
+            return self
+        object.__setattr__(
+            self,
+            "subagents",
+            (
+                SubagentConfig(
+                    name="knowledge",
+                    url=self.knowledge_agent_url,
+                    token=self.knowledge_service_token,
+                ),
+            ),
+        )
+        return self
 
     def require_model_access(self) -> None:
         """Fails now, with the name of what is missing, instead of at the first turn.

@@ -6,7 +6,10 @@ import logging
 import pytest
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
+from demo.config import SubagentConfig
 from demo.tools.subagent_tools import build_subagent_tools
+
+KNOWLEDGE = SubagentConfig(name="knowledge", url="http://kb:8200/")
 
 
 def card(streaming: bool = True) -> AgentCard:
@@ -44,11 +47,11 @@ class FakeRemote:
 
 
 def tool_with(remote: FakeRemote, streaming: bool = True, loader=None):
-    async def load():
+    async def load(config):
         return card(streaming)
 
     return build_subagent_tools(
-        "http://kb:8200/", card_loader=loader or load, client_factory=lambda _card: remote
+        [KNOWLEDGE], card_loader=loader or load, client_factory=lambda config, _card: remote
     )[0]
 
 
@@ -67,7 +70,7 @@ async def test_the_streamed_pieces_become_one_answer():
 async def test_the_card_is_fetched_once_and_reused():
     calls = []
 
-    async def load():
+    async def load(config):
         calls.append(1)
         return card()
 
@@ -116,11 +119,11 @@ async def test_an_unreachable_subagent_does_not_kill_the_run(caplog):
             raise ConnectionError("knowledge agent down")
             yield
 
-    async def load():
+    async def load(config):
         return card()
 
     the_tool = build_subagent_tools(
-        "http://kb:8200/", card_loader=load, client_factory=lambda _card: Broken()
+        [KNOWLEDGE], card_loader=load, client_factory=lambda config, _card: Broken()
     )[0]
 
     with caplog.at_level(logging.ERROR, logger="demo.tools.subagent_tools"):
@@ -204,11 +207,11 @@ class RemoteThatResumes(FakeRemote):
 
 
 def tools_with(remote):
-    async def load():
+    async def load(config):
         return card()
 
     return build_subagent_tools(
-        "http://kb:8200/", card_loader=load, client_factory=lambda _card: remote
+        [KNOWLEDGE], card_loader=load, client_factory=lambda config, _card: remote
     )
 
 
@@ -246,7 +249,7 @@ async def test_resuming_clears_the_pending_state():
     from demo.server.run_context import current_pending
 
     answer_tool = tools_with(RemoteThatResumes())[1]
-    token = current_pending.set({"task_id": "t-99"})
+    token = current_pending.set({"task_id": "t-99", "agent": "knowledge"})
     try:
         result = await answer_tool.func(answer="Go")
     finally:
@@ -285,33 +288,35 @@ CATALOGUE = AgentSkill(
 
 
 def tool_with_card(remote, token: str, extended: bool = True):
-    async def load():
+    async def load(config):
         return AgentCard(
             name="knowledge",
             capabilities=AgentCapabilities(streaming=True, extended_agent_card=extended),
         )
 
     return build_subagent_tools(
-        "http://kb:8200/", card_loader=load, client_factory=lambda _card: remote
+        [SubagentConfig(name="knowledge", url="http://kb:8200/", token=token)],
+        card_loader=load,
+        client_factory=lambda config, _card: remote,
     )[0]
 
 
 @pytest.mark.asyncio
-async def test_the_catalogue_reaches_the_tool_description(monkeypatch):
-    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "secret")
+async def test_the_catalogue_reaches_the_tool_description():
     remote = RemoteWithExtendedCard([CATALOGUE])
     the_tool = tool_with_card(remote, "secret")
 
     await the_tool.func(question="anything")
 
-    # The model knows what there is to ask for only because the master authenticated.
+    # The model knows what there is to ask for only because the master
+    # authenticated. The description is rebuilt with the card, so the tool object
+    # carries it only after the first call: from the next turn the model sees it.
     assert remote.received_token == "secret"
     assert "go, python, rust" in the_tool.description
 
 
 @pytest.mark.asyncio
-async def test_without_a_token_the_description_stays_generic(monkeypatch):
-    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "")
+async def test_without_a_token_the_description_stays_generic():
     remote = RemoteWithExtendedCard([CATALOGUE])
     the_tool = tool_with_card(remote, "")
 
@@ -322,8 +327,7 @@ async def test_without_a_token_the_description_stays_generic(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_refused_extended_card_does_not_stop_the_tool(monkeypatch):
-    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "wrong")
+async def test_a_refused_extended_card_does_not_stop_the_tool():
     remote = RemoteWithExtendedCard(None)
     the_tool = tool_with_card(remote, "wrong")
 
@@ -342,7 +346,7 @@ class CountingLoader:
         self.broken = False
         self._card_factory = card_factory
 
-    async def __call__(self):
+    async def __call__(self, config=None):
         self.calls += 1
         if self.broken:
             raise ConnectionError("card unreachable")
@@ -351,9 +355,9 @@ class CountingLoader:
 
 def tool_with_clock(remote, loader, clock):
     return build_subagent_tools(
-        "http://kb:8200/",
+        [KNOWLEDGE],
         card_loader=loader,
-        client_factory=lambda _card: remote,
+        client_factory=lambda config, _card: remote,
         card_ttl_seconds=10,
         now=clock,
     )[0]

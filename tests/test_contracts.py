@@ -11,6 +11,7 @@ from contracts import assert_shape, load, sample
 from demo.a2a.client import Artifact, Progress
 from demo.logging_bridge import LogCollector, RedisLogStream
 from demo.memory.remote_store import MemoryServiceSnapshotStore
+from demo.config import SubagentConfig
 from demo.plan import PlanStore
 from demo.server.run_context import current_pending
 from demo.tools.memory_tools import build_memory_tools
@@ -41,11 +42,13 @@ class RemoteReturningTheBriefing:
 
 
 def knowledge_tool(remote):
-    async def card():
+    async def card(config):
         return AgentCard(name="knowledge", capabilities=AgentCapabilities(streaming=True))
 
     return build_subagent_tools(
-        "http://kb:8200/", card_loader=card, client_factory=lambda _card: remote
+        [SubagentConfig(name="knowledge", url="http://kb:8200/")],
+        card_loader=card,
+        client_factory=lambda config, _card: remote,
     )[0]
 
 
