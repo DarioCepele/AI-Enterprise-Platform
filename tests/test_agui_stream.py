@@ -146,3 +146,19 @@ async def test_cors_preflight_allows_next_fallback_port(app):
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3001"
+
+
+@pytest.mark.asyncio
+async def test_a_request_too_big_is_refused_before_it_is_read(app):
+    transport = httpx.ASGITransport(app=app)
+    huge = {**REQUEST, "messages": [{"id": "m1", "role": "user", "content": "x" * 200}]}
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/agui", json=huge, headers={"Content-Length": "99999999"}
+        )
+
+    # A body without a ceiling is a way to make the process hold whatever the
+    # client feels like sending.
+    assert response.status_code == 413
+    assert "too large" in response.text

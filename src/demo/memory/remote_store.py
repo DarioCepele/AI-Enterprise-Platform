@@ -18,6 +18,8 @@ from typing import Any
 import httpx
 from agent_framework.ag_ui import AGUIThreadSnapshot
 
+from ..resilience import Breaker, with_retries
+
 logger = logging.getLogger(__name__)
 
 SCOPE_HEADER = "X-Memory-Scope"
@@ -30,9 +32,20 @@ class MemoryServiceSnapshotStore:
         base_url: str,
         client: httpx.AsyncClient | None = None,
         timeout: float = 5.0,
+        attempts: int = 3,
+        backoff: float = 0.2,
     ) -> None:
 
         self._client = client or httpx.AsyncClient(base_url=base_url, timeout=timeout)
+        self._attempts = attempts
+        self._backoff = backoff
+        self._breaker = Breaker("memory service", threshold=5, cooldown_seconds=30.0)
+
+    async def _call(self, request):
+        """Retries what may pass, and stops calling what keeps failing."""
+        return await self._breaker.call(
+            lambda: with_retries(request, attempts=self._attempts, backoff=self._backoff)
+        )
 
     @staticmethod
     def _headers(scope: str) -> dict[str, str]:
@@ -52,11 +65,15 @@ class MemoryServiceSnapshotStore:
             "interrupt": snapshot.interrupt,
             "session_state": snapshot.session_state,
         }
-        try:
+        async def put() -> httpx.Response:
             response = await self._client.put(
                 f"/threads/{thread_id}/snapshot", json=body, headers=self._headers(scope)
             )
             response.raise_for_status()
+            return response
+
+        try:
+            response = await self._call(put)
         except Exception:
 
             logger.error("Memory NOT saved for thread %s.", thread_id, exc_info=True)
@@ -68,13 +85,18 @@ class MemoryServiceSnapshotStore:
         )
 
     async def get(self, *, scope: str, thread_id: str) -> AGUIThreadSnapshot | None:
-        try:
+        async def get() -> httpx.Response:
             response = await self._client.get(
                 f"/threads/{thread_id}/snapshot", headers=self._headers(scope)
             )
+            if response.status_code != 404:
+                response.raise_for_status()
+            return response
+
+        try:
+            response = await self._call(get)
             if response.status_code == 404:
                 return None
-            response.raise_for_status()
             payload = response.json()
         except Exception:
 

@@ -15,12 +15,13 @@ from agent_framework.ag_ui import (
 )
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from ..agents.master import build_master_agent
 from ..config import get_settings
 from ..logging_bridge import LogCollector, RedisLogStream
 from ..a2a.client import A2AClient, fetch_agent_card
-from ..a2a.push import HEADER, is_terminal, summary_of, token_is_valid
+from ..a2a.push import HEADER, SeenNotifications, is_terminal, summary_of, token_is_valid
 from ..memory.remote_store import MemoryServiceSnapshotStore
 from .run_context import LabRunner
 from .scope import ScopeResolver, scope_of_request
@@ -28,6 +29,8 @@ from .scope import ScopeResolver, scope_of_request
 logger = logging.getLogger(__name__)
 
 DEFAULT_STATE = {"artifacts": [], "plan": {"status": "idle", "steps": []}}
+
+MAX_REQUEST_BYTES = 1_000_000
 
 def _default_snapshot_store() -> AGUIThreadSnapshotStore:
     """The thread store: the memory service when configured, otherwise RAM.
@@ -44,6 +47,11 @@ def _default_snapshot_store() -> AGUIThreadSnapshotStore:
         return InMemoryAGUIThreadSnapshotStore()
     logger.info("Thread memory in the memory service: %s", url)
     return MemoryServiceSnapshotStore(url)
+
+def _shared_redis() -> Redis | None:
+    uri = get_settings().redis_uri
+    return Redis.from_url(uri, decode_responses=True) if uri else None
+
 
 def _shared_log_stream(collector: LogCollector) -> RedisLogStream | None:
     """The operational logs of every replica in one stream, when Redis is there.
@@ -77,6 +85,7 @@ def create_app(
     log_collector = collector if collector is not None else LogCollector()
     log_collector.attach()
     log_stream = _shared_log_stream(log_collector)
+    seen = SeenNotifications(_shared_redis())
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -93,6 +102,23 @@ def create_app(
                 log_collector.detach()
 
     app = FastAPI(title=get_settings().product_name, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def refuse_oversized_bodies(request: Request, call_next):
+        """A ceiling on what a client may send.
+
+        Without one, the process holds whatever arrives: the limit is generous
+        enough for a long conversation and small enough that nobody can pin the
+        agent with a single request.
+        """
+        declared = request.headers.get("content-length")
+        if declared and int(declared) > MAX_REQUEST_BYTES:
+            logger.warning("Request refused: %s bytes declared.", declared)
+            return JSONResponse(
+                {"detail": f"request too large: over {MAX_REQUEST_BYTES} bytes"},
+                status_code=413,
+            )
+        return await call_next(request)
     app.state.scope_resolver = resolve_scope
 
     allowed_origins = list(get_settings().allowed_origins)
@@ -106,8 +132,50 @@ def create_app(
     )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    @app.get("/health/live")
+    async def live() -> dict[str, str]:
+        """Whether this process is stuck.
+
+        It asks nothing of anyone: a liveness probe that called the memory
+        service would restart a healthy agent because a dependency went away,
+        turning an outage into a restart loop.
+        """
+        return {"status": "alive"}
+
+    @app.get("/health/ready")
+    async def ready() -> dict[str, object]:
+        """Whether this process can serve, and which dependencies were asked.
+
+        The subagents are not among them: one that is down degrades a turn, and
+        the tool says so. The memory service is, because without it every thread
+        starts from scratch without anyone noticing.
+        """
+        settings = get_settings()
+        checked: list[str] = []
+        if settings.memory_service_url:
+            checked.append("memory")
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as http:
+                    answer = await http.get(f"{settings.memory_service_url}/health/ready")
+                    answer.raise_for_status()
+            except Exception as error:
+                raise HTTPException(
+                    status_code=503, detail=f"memory service unreachable: {error}"
+                ) from error
+        if settings.redis_uri:
+            checked.append("redis")
+            try:
+                client = Redis.from_url(settings.redis_uri, decode_responses=True)
+                try:
+                    await client.ping()
+                finally:
+                    await client.aclose()
+            except Exception as error:
+                # Redis carries the shared logs, not the conversation: it is
+                # reported, and it does not take the agent out of service.
+                logger.warning("Redis unreachable: shared logs degraded.", exc_info=True)
+                return {"status": "degraded", "checked": checked, "detail": str(error)}
+        return {"status": "ok", "checked": checked}
 
     async def outcome_of_task(task_id: str) -> str:
         """Fetches the result: the notification says it is done, not what it says."""
@@ -175,6 +243,10 @@ def create_app(
             # The subagent notifies every event, not only the end: writing to
             # memory on every progress step would fill the conversation with noise.
             return {"state": "progress ignored"}
+
+        if not await seen.first_time(thread_id, task_id, state):
+            logger.info("Notification for task %s already seen: ignored.", task_id[:8] or "?")
+            return {"state": "already seen"}
 
         if not text:
             text = await outcome_of_task(task_id)

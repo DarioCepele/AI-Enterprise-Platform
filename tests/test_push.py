@@ -151,3 +151,56 @@ async def test_progress_notifications_are_ignored(app, caplog):
     # step would fill the conversation with noise.
     assert response.json() == {"state": "progress ignored"}
     assert "completed task" not in caplog.text
+
+
+def test_a_token_of_a_past_window_is_refused(monkeypatch):
+    monkeypatch.setenv("DEMO_PUSH_WINDOW_SECONDS", "3600")
+    now = 1_800_000_000.0
+
+    old = token_for("t1", at=now - 3 * 3600)
+
+    # A token that never expires is a key somebody can keep: signing the window
+    # too bounds how long a captured one is worth anything.
+    assert token_is_valid("t1", old, at=now) is False
+
+
+def test_a_token_of_the_previous_window_still_works(monkeypatch):
+    monkeypatch.setenv("DEMO_PUSH_WINDOW_SECONDS", "3600")
+    now = 1_800_000_000.0
+
+    previous = token_for("t1", at=now - 3600)
+
+    # The subagent registers the webhook when the task starts and calls back when
+    # it ends: one window of slack is what makes a slow task still deliverable.
+    assert token_is_valid("t1", previous, at=now) is True
+
+
+@pytest.mark.asyncio
+async def test_the_same_notification_is_written_once(app, monkeypatch):
+    received: list[tuple[str, dict]] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        import json
+
+        received.append((str(request.url), json.loads(request.content)))
+        return httpx.Response(201, json={"seq": 1})
+
+    monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "http://memory")
+    original = httpx.AsyncClient
+
+    def fake(*args, **kwargs):
+        if kwargs.get("base_url") == "http://memory":
+            kwargs["transport"] = httpx.MockTransport(transport)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr("demo.server.app.httpx.AsyncClient", fake)
+
+    first = await send(app, "t1", token_for("t1"))
+    second = await send(app, "t1", token_for("t1"))
+    await asyncio.sleep(0)
+
+    # A2A delivery is at-least-once: the same outcome arriving twice must not
+    # become two lines in the conversation.
+    assert first.status_code == 200
+    assert second.json() == {"state": "already seen"}
+    assert len(received) == 1

@@ -92,3 +92,37 @@ def test_shutdown_detaches_the_log_handler(make_app):
         assert len(logger.handlers) == baseline + 1
 
     assert len(logger.handlers) == baseline
+
+
+def test_liveness_answers_without_touching_anything(make_app):
+    with TestClient(make_app()) as client:
+        alive = client.get("/health/live")
+
+    assert alive.status_code == 200
+    assert alive.json()["status"] == "alive"
+
+
+def test_readiness_is_green_without_configured_dependencies(make_app, monkeypatch):
+    monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "")
+    monkeypatch.setenv("DEMO_REDIS_URI", "")
+
+    with TestClient(make_app()) as client:
+        ready = client.get("/health/ready")
+
+    # What is not configured cannot be down: a laboratory with the agent alone
+    # is ready, and says which dependencies it checked.
+    assert ready.status_code == 200
+    assert ready.json()["checked"] == []
+
+
+def test_readiness_fails_when_the_memory_service_is_unreachable(make_app, monkeypatch):
+    monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "http://memory.invalid")
+    monkeypatch.setenv("DEMO_REDIS_URI", "")
+
+    with TestClient(make_app()) as client:
+        ready = client.get("/health/ready")
+
+    # The conversation lives in the memory service: answering without it means
+    # starting every thread from scratch, quietly.
+    assert ready.status_code == 503
+    assert "memory" in ready.json()["detail"]
