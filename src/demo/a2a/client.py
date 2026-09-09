@@ -65,6 +65,10 @@ class Progress:
     task_id: str
     state: str
     raw_state: int
+    # The conversation the task belongs to. Answering a task that is waiting
+    # means sending into **that** conversation: a message without it opens a
+    # new one, and the agent refuses it as belonging somewhere else.
+    context_id: str = ""
     text: str = ""
     artifact: Artifact | None = None
     question: str = ""
@@ -162,12 +166,15 @@ class A2AClient:
             )
 
         current = task_id or ""
+        conversation = context_id or ""
         async for response in self._client.send_message(request):
             if response.HasField("task"):
                 task = response.task
                 current = task.id
+                conversation = task.context_id or conversation
                 yield Progress(
                     task_id=task.id,
+                    context_id=conversation,
                     state=STATES.get(task.status.state, "unknown"),
                     raw_state=task.status.state,
                     text=_text_of(task.status.message.parts) if task.status.message.parts else "",
@@ -175,10 +182,12 @@ class A2AClient:
             elif response.HasField("status_update"):
                 update = response.status_update
                 current = update.task_id or current
+                conversation = update.context_id or conversation
                 update_message = update.status.message
                 update_text = _text_of(update_message.parts) if update_message.parts else ""
                 yield Progress(
                     task_id=current,
+                    context_id=conversation,
                     state=STATES.get(update.status.state, "unknown"),
                     raw_state=update.status.state,
                     text=update_text,
@@ -189,8 +198,10 @@ class A2AClient:
             elif response.HasField("artifact_update"):
                 update = response.artifact_update
                 current = update.task_id or current
+                conversation = update.context_id or conversation
                 yield Progress(
                     task_id=current,
+                    context_id=conversation,
                     state=STATES[TaskState.TASK_STATE_WORKING],
                     raw_state=TaskState.TASK_STATE_WORKING,
                     artifact=_artifact_of(update.artifact),
@@ -198,6 +209,7 @@ class A2AClient:
             elif response.HasField("message"):
                 yield Progress(
                     task_id=current,
+                    context_id=conversation,
                     state=STATES[TaskState.TASK_STATE_COMPLETED],
                     raw_state=TaskState.TASK_STATE_COMPLETED,
                     text=_text_of(response.message.parts),

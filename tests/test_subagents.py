@@ -21,15 +21,29 @@ def card(name: str, description: str = "") -> AgentCard:
 
 
 class Remote:
-    def __init__(self, answer: str) -> None:
+    def __init__(self, answer: str, question: str = "") -> None:
         self.answer = answer
+        self.question = question
         self.asked: list[str] = []
         self.resumed: list[str | None] = []
+        self.conversations: list[str | None] = []
 
     async def ask(self, text, task_id=None, context_id=None, webhook=None):
         self.asked.append(text)
         self.resumed.append(task_id)
-        yield Progress(task_id="t-1", state="completed", raw_state=3, text=self.answer)
+        self.conversations.append(context_id)
+        if self.question and task_id is None:
+            yield Progress(
+                task_id="t-1",
+                context_id="c-1",
+                state="input_required",
+                raw_state=6,
+                question=self.question,
+            )
+            return
+        yield Progress(
+            task_id="t-1", context_id="c-1", state="completed", raw_state=3, text=self.answer
+        )
 
 
 def tools_for(configs, remotes, cards=None):
@@ -100,6 +114,32 @@ async def test_the_answer_goes_back_to_the_subagent_that_asked():
     assert remotes["legal"].resumed == ["t-99"]
     assert remotes["knowledge"].resumed == []
     assert "resumed legal" in result.text
+
+
+@pytest.mark.asyncio
+async def test_the_answer_goes_back_into_the_conversation_the_task_belongs_to():
+    """A task waiting for an answer belongs to a conversation, and so does the answer.
+
+    Without the conversation id the agent opens a new one and refuses the
+    message as belonging somewhere else -- which is what it did, in front of a
+    user, before this was carried through.
+    """
+    remote = Remote("resumed", question="which language?")
+    ask_knowledge, answer_subagent = tools_for([KNOWLEDGE], {"knowledge": remote})
+
+    stopped = await ask_knowledge.func(question="how does concurrency work?")
+    carried = stopped.additional_properties["__ag_ui_tool_result_state__"]
+    pending = carried["subagent_pending"]
+    assert pending["context_id"] == "c-1"
+
+    token = current_pending.set(pending)
+    try:
+        await answer_subagent.func(answer="Go")
+    finally:
+        current_pending.reset(token)
+
+    assert remote.resumed == [None, "t-1"]
+    assert remote.conversations == [None, "c-1"]
 
 
 @pytest.mark.asyncio

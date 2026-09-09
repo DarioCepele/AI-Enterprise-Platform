@@ -172,6 +172,7 @@ def _ask_tool(remote: Subagent) -> FunctionTool:
         artifact_count = 0
         briefings: list = []
         task_id = ""
+        context_id = ""
         question_from_the_subagent = ""
 
         try:
@@ -182,6 +183,7 @@ def _ask_tool(remote: Subagent) -> FunctionTool:
                     async with asyncio.timeout(settings.subagent_wait_seconds):
                         async for progress in client.ask(question, webhook=webhook):
                             task_id = progress.task_id or task_id
+                            context_id = progress.context_id or context_id
                             if not states or states[-1] != progress.state:
                                 states.append(progress.state)
                             if progress.text:
@@ -247,6 +249,9 @@ def _ask_tool(remote: Subagent) -> FunctionTool:
                 state={
                     "subagent_pending": {
                         "task_id": task_id,
+                        # The conversation the task belongs to travels with it:
+                        # answering into a new one is what the agent refuses.
+                        "context_id": context_id,
                         "agent": remote.name,
                         "question": question_from_the_subagent,
                         "request": question,
@@ -312,11 +317,14 @@ def _answer_tool(remotes: dict[str, Subagent]) -> FunctionTool:
             )
 
         task_id = str(waiting["task_id"])
+        context_id = str(waiting.get("context_id") or "")
         pieces: list[str] = []
         try:
             client = await remote.client()
             async with subagent_run(remote.name, answer):
-                async for progress in client.ask(answer, task_id=task_id):
+                async for progress in client.ask(
+                    answer, task_id=task_id, context_id=context_id
+                ):
                     if progress.text:
                         pieces.append(progress.text)
                     if progress.artifact and progress.artifact.text:
