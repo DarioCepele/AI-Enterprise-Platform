@@ -212,11 +212,24 @@ class InstanceStore:
             ).fetchall()
         return [row[0] for row in rows]
 
-    async def set_status(self, *, instance_id: UUID, status: str) -> None:
+    async def set_status(
+        self, *, instance_id: UUID, status: str, note: str | None = None
+    ) -> None:
+        """The state, and -- when there is one -- the reason for it.
+
+        A `failed` with nothing next to it makes whoever reads the instance open
+        the logs; the note is there so they do not have to.
+        """
         async with self._pool.connection() as connection:
             await connection.execute(
-                "UPDATE process_instances SET status = %s, updated_at = now() WHERE id = %s",
-                (status, instance_id),
+                """
+                UPDATE process_instances
+                   SET status = %s,
+                       note = COALESCE(%s, note),
+                       updated_at = now()
+                 WHERE id = %s
+                """,
+                (status, note, instance_id),
             )
 
     async def ping(self) -> None:
@@ -234,6 +247,7 @@ def _instance_of(row: dict[str, Any], steps: list[dict[str, Any]]) -> Instance:
         status=row["status"],
         input=row["input"],
         context=row["context"],
+        note=row.get("note"),
         created_at=_moment(row["created_at"]),
         updated_at=_moment(row["updated_at"]),
         steps=[

@@ -14,7 +14,14 @@ from .agents import AgentGateway, TOKEN_HEADER, NEEDS_INPUT, TERMINAL, summary_o
 from .catalog import Catalog, load_catalog
 from .config import Settings, get_settings
 from .definitions import DefinitionError
-from .engine import Engine, approval_topic, current_engine, human_topic, use_engine
+from .engine import (
+    Engine,
+    approval_topic,
+    current_engine,
+    human_topic,
+    step_workflow_id,
+    use_engine,
+)
 from .migrations import run_migrations
 from .models import AnswerRequest, ApprovalRequest, Instance, StartRequest
 from .observability import configure_logging, configure_tracing
@@ -191,7 +198,7 @@ def create_app(
             len(text),
         )
         await DBOS.send_async(
-            destination_id=str(instance_id),
+            destination_id=step_workflow_id(str(instance_id), step_id),
             message={"task_id": task_id, "state": state, "text": text},
             topic=step_id,
             idempotency_key=f"{instance_id}:{step_id}:{task_id}:{state}",
@@ -237,7 +244,7 @@ def create_app(
             )
 
         await DBOS.send_async(
-            destination_id=str(instance_id),
+            destination_id=step_workflow_id(str(instance_id), step_id),
             message={"text": request.text},
             topic=human_topic(step_id),
         )
@@ -281,7 +288,7 @@ def create_app(
             )
 
         await DBOS.send_async(
-            destination_id=str(instance_id),
+            destination_id=step_workflow_id(str(instance_id), step_id),
             message={"decision": request.decision, "by": request.by, "note": request.note},
             topic=approval_topic(step_id),
         )

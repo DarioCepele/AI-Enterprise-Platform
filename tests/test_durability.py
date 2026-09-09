@@ -130,27 +130,22 @@ async def test_a_process_of_three_steps_runs_them_in_order(engine, store, scope)
 
 
 async def test_the_steps_already_done_are_not_done_again_after_a_crash(engine, store, scope):
-    """A workflow interrupted and resumed picks up where it stopped.
+    """A workflow replayed from the start does not redo the work it recorded.
 
-    Cancelling is how a test says "the process died here": what matters is that
-    the resumed run reads the finished steps from the ledger instead of calling
-    the tools again.
+    Each step is a workflow of its own, with an id derived from the instance and
+    the step: replaying the instance addresses the same ones, and a step that
+    already finished hands back what it wrote instead of running again. That is
+    what a recovered process does, minus the crash.
     """
     instance = await store.create(scope=scope, definition=THREE_STEPS, payload={})
     handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
     await handle.get_result()
-
-    recorded = await DBOS.list_workflow_steps_async(handle.workflow_id)
-    tool_calls = [step for step in recorded if step["function_name"].endswith("run_tool_step")]
-    restart_from = tool_calls[-1]["function_id"]
     CALLS.clear()
 
-    resumed = await DBOS.fork_workflow_async(handle.workflow_id, start_step=restart_from)
-    await resumed.get_result()
+    resumed = await DBOS.fork_workflow_async(handle.workflow_id, start_step=1)
 
-    # Only the last tool ran again: the two before it were read from the ledger,
-    # which is what stops a recovered process from doing its work twice.
-    assert CALLS == ["three"]
+    assert await resumed.get_result() == "completed"
+    assert CALLS == []
 
 
 async def test_an_effect_is_applied_once_even_if_the_step_runs_twice(engine, store, scope):

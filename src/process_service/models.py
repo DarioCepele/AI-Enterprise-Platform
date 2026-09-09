@@ -30,6 +30,7 @@ class Instance(BaseModel):
     process_id: str
     process_version: int
     status: str
+    note: str | None = None
     input: dict[str, Any] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None

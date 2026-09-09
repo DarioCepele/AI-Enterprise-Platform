@@ -20,7 +20,13 @@ from dbos import DBOS, SetWorkflowID
 from process_service.api import create_app
 from process_service.catalog import Catalog
 from process_service.definitions import parse_definition
-from process_service.engine import Engine, advance_instance, approval_topic, use_engine
+from process_service.engine import (
+    Engine,
+    advance_instance,
+    approval_topic,
+    step_workflow_id,
+    use_engine,
+)
 from process_service.tools import tool
 
 from conftest import POSTGRES_DSN, needs_postgres
@@ -56,7 +62,7 @@ NOBODY_COMES = parse_definition(
                 "timeout_seconds": 1,
                 "on_timeout": "by_the_manager",
             },
-            {"id": "by_the_manager", "type": "approval", "approvers": ["manager"]},
+            {"id": "by_the_manager", "type": "tool", "tool": "escalate_it"},
         ],
     }
 )
@@ -116,6 +122,12 @@ def apply_it(context):
     return {"applied": True}
 
 
+@tool("escalate_it")
+def escalate_it(context):
+    CALLS.append("escalated")
+    return {"escalated": True}
+
+
 @pytest.fixture
 async def engine(store, dbos):
     CALLS.clear()
@@ -168,7 +180,7 @@ async def waiting_instance(store, scope, definition=NEEDS_A_YES):
 
 async def decide(instance_id: str, step_id: str, by: str, decision: str = "approved") -> None:
     await DBOS.send_async(
-        destination_id=instance_id,
+        destination_id=step_workflow_id(instance_id, step_id),
         message={"decision": decision, "by": by, "note": None},
         topic=approval_topic(step_id),
     )
@@ -321,12 +333,15 @@ async def test_nobody_deciding_escalates_where_the_definition_says(engine, store
     instance = await store.create(scope=scope, definition=NOBODY_COMES, payload={})
 
     with SetWorkflowID(str(instance.id)):
-        result = await advance_instance(str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+    result = await handle.get_result()
 
     read = await store.get(scope=scope, instance_id=instance.id)
-    assert result == "escalated"
-    assert read.status == "escalated"
+    # Nobody decided, so the work went where the definition said it should go.
+    assert result == "completed"
+    assert step_of(read, "sign_off").status == "escalated"
     assert "by_the_manager" in step_of(read, "sign_off").note
+    assert CALLS == ["escalated"]
 
 
 async def test_a_wait_with_nowhere_to_escalate_fails_instead_of_hanging(
@@ -337,7 +352,8 @@ async def test_a_wait_with_nowhere_to_escalate_fails_instead_of_hanging(
     )
 
     with SetWorkflowID(str(instance.id)):
-        result = await advance_instance(str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+    result = await handle.get_result()
 
     read = await store.get(scope=scope, instance_id=instance.id)
     # Without an escalation there is nobody left to ask: saying so is better
@@ -356,7 +372,12 @@ if sys.platform == "win32":
 from dbos import DBOS, SetWorkflowID
 from process_service.catalog import Catalog
 from process_service.definitions import parse_definition
-from process_service.engine import Engine, advance_instance, use_engine
+from process_service.engine import (
+    Engine,
+    advance_instance,
+    step_workflow_id,
+    use_engine,
+)
 from process_service.store import InstanceStore, build_pool
 from process_service.tools import tool
 
@@ -434,6 +455,10 @@ async def test_the_approval_can_come_after_a_restart(engine, store, scope, tmp_p
     assert step_of(read, "sign_off").status == "waiting_approval"
 
     await decide(str(instance.id), "sign_off", "reviewer")
+    # A restarted service recovers every workflow left pending; here the two of
+    # them are named, because the test is the one doing the recovering: the step
+    # that was waiting, and the instance that was waiting for the step.
+    await DBOS.resume_workflow_async(step_workflow_id(str(instance.id), "sign_off"))
     resumed = await DBOS.resume_workflow_async(str(instance.id))
     assert await resumed.get_result() == "completed"
 

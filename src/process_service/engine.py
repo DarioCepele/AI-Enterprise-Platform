@@ -11,6 +11,7 @@ a held connection.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 from uuid import UUID
@@ -102,6 +103,10 @@ async def run_tool_step(
     """
     engine = current_engine()
     output = get_tool(tool_name)(context)
+    if inspect.isawaitable(output):
+        # A tool that talks to something else should not hold the loop while it
+        # does: an async tool is the ordinary case, not the exception.
+        output = await output
     await engine.store.finish_step(
         instance_id=UUID(instance_id), step_id=step_id, status=COMPLETED, output=output
     )
@@ -308,14 +313,103 @@ async def read_plan(instance_id: str, scope: str) -> dict[str, Any]:
 
 
 @DBOS.step()
-async def set_instance_status(instance_id: str, status: str) -> None:
+async def set_instance_status(instance_id: str, status: str, note: str | None = None) -> None:
     engine = current_engine()
-    await engine.store.set_status(instance_id=UUID(instance_id), status=status)
+    await engine.store.set_status(instance_id=UUID(instance_id), status=status, note=note)
+
+
+def step_workflow_id(instance_id: str, step_id: str) -> str:
+    """The workflow of one step of one instance.
+
+    Derived rather than random, so that whatever wakes a step -- a webhook, an
+    approval, a retry of the same instance -- addresses the one workflow that is
+    waiting for it, and starting the same step twice starts nothing.
+    """
+    return f"{instance_id}:{step_id}"
+
+
+@DBOS.workflow()
+async def run_step(
+    instance_id: str, scope: str, step_id: str, context: dict[str, Any]
+) -> dict[str, Any]:
+    """One step, in a workflow of its own.
+
+    A step gets its own workflow so that several can be running -- or waiting --
+    at the same time without the instance having to choose between them, and so
+    that a long wait belongs to the step that is waiting rather than to the
+    whole process.
+    """
+    engine = current_engine()
+    plan = await read_plan(instance_id, scope)
+    definition = engine.catalog.get(plan["process_id"], plan["process_version"])
+    step = definition.step(step_id)
+    if step is None:
+        raise RuntimeError(f"step '{step_id}' is not in process '{plan['process_id']}'")
+
+    try:
+        return await _do_step(instance_id, scope, step, context)
+    except Exception as error:  # noqa: BLE001 - the step failed, the instance has not
+        # Whatever the step was doing, the process is entitled to hear that it
+        # did not work and which one it was: an exception that escaped here
+        # would take the whole instance down with a stack trace instead.
+        await fail_step(instance_id, step.id, f"{type(error).__name__}: {error}")
+        logger.warning("Instance %s step %s failed.", instance_id, step.id, exc_info=True)
+        return _stopped(step.id, FAILED)
+
+
+async def _do_step(
+    instance_id: str, scope: str, step: Step, context: dict[str, Any]
+) -> dict[str, Any]:
+    step_id = step.id
+    if step.type == "agent":
+        outcome = await _run_agent_step(instance_id, scope, step, context)
+        if outcome is None:
+            return _handed_on(step)
+    elif step.type == "approval":
+        outcome = await _run_approval_step(instance_id, step, context)
+        if outcome is None:
+            return _handed_on(step)
+        if outcome["decision"] != APPROVED:
+            # A refusal is not a failure: it is an answer, and the instance stops
+            # in a state that says which one it got.
+            return _stopped(step_id, REJECTED, output=outcome)
+    elif step.type in SUSPENDING_TYPES:
+        await suspend(instance_id, step_id, f"{step.type} step")
+        return _stopped(step_id, WAITING)
+    else:
+        outcome = await _run_step(instance_id, step, context)
+
+    if outcome is FAILED:
+        return _stopped(step_id, FAILED)
+    return {"step_id": step_id, "state": COMPLETED, "output": outcome, "goto": None}
+
+
+def _stopped(step_id: str, state: str, output: Any = None) -> dict[str, Any]:
+    return {"step_id": step_id, "state": state, "output": output, "goto": None}
+
+
+def _handed_on(step: Step) -> dict[str, Any]:
+    """A step whose time ran out: the process goes on where the definition says.
+
+    An escalation that only wrote 'escalated' on a row would leave the instance
+    for somebody to notice; handing the work to the declared step is what the
+    word means.
+    """
+    if not step.on_timeout:
+        return _stopped(step.id, FAILED)
+    return {"step_id": step.id, "state": ESCALATED, "output": None, "goto": step.on_timeout}
 
 
 @DBOS.workflow()
 async def advance_instance(instance_id: str, scope: str) -> str:
-    """Walks an instance as far as it can go, and says where it stopped."""
+    """Walks an instance as far as it can go, and says where it stopped.
+
+    Steps that do not depend on each other run **together**: the ones ready at
+    the same time are started as their own workflows, and the join waits for all
+    of them before deciding anything -- including when one has already failed,
+    because stopping early would leave the others running with nobody reading
+    their outcome.
+    """
     engine = current_engine()
     plan = await read_plan(instance_id, scope)
 
@@ -329,41 +423,68 @@ async def advance_instance(instance_id: str, scope: str) -> str:
     ready = [step.id for step in definition.entry_steps()]
 
     while ready:
-        step_id = ready.pop(0)
-        step = definition.step(step_id)
-        if step is None or step_id in done:
-            continue
+        batch = [step_id for step_id in dict.fromkeys(ready) if step_id not in done]
+        ready = []
+        if not batch:
+            break
 
-        if step.type == "agent":
-            outcome = await _run_agent_step(instance_id, scope, step, context)
-            if outcome is None:
-                return ESCALATED if step.on_timeout else FAILED
-        elif step.type == "approval":
-            outcome = await _run_approval_step(instance_id, step, context)
-            if outcome is None:
-                return ESCALATED if step.on_timeout else FAILED
-            if outcome["decision"] != APPROVED:
-                # A refusal is not a failure: it is an answer, and the instance
-                # stops in a state that says which one it got.
-                await set_instance_status(instance_id, REJECTED)
-                return REJECTED
-        elif step.type in SUSPENDING_TYPES:
-            await suspend(instance_id, step_id, f"{step.type} step")
-            return WAITING
-        else:
-            outcome = await _run_step(instance_id, step, context)
-        if outcome is FAILED:
-            await set_instance_status(instance_id, FAILED)
-            return FAILED
+        handles = []
+        for step_id in batch:
+            with SetWorkflowID(step_workflow_id(instance_id, step_id)):
+                handles.append(
+                    await DBOS.start_workflow_async(
+                        run_step, instance_id, scope, step_id, context
+                    )
+                )
+        results = [await handle.get_result() for handle in handles]
 
-        done.add(step_id)
-        if isinstance(outcome, dict):
-            context.update({key: value for key, value in outcome.items() if value is not None})
+        for result in results:
+            if result["state"] != COMPLETED:
+                continue
+            done.add(result["step_id"])
+            if isinstance(result["output"], dict):
+                context.update(
+                    {key: value for key, value in result["output"].items() if value is not None}
+                )
 
-        ready.extend(_next_steps(definition, step, outcome, done))
+        # An escalated step did not do its work, but it said where the work
+        # goes: the instance carries on there instead of stopping.
+        for result in results:
+            if result["state"] == ESCALATED and result.get("goto"):
+                ready.append(result["goto"])
+
+        stopped = [
+            result
+            for result in results
+            if result["state"] != COMPLETED and not result.get("goto")
+        ]
+        if stopped:
+            return await _stop_here(instance_id, stopped)
+
+        for result in results:
+            step = definition.step(result["step_id"])
+            if step is not None and result["state"] == COMPLETED:
+                ready.extend(_next_steps(definition, step, result["output"], done))
 
     await set_instance_status(instance_id, COMPLETED)
     return COMPLETED
+
+
+async def _stop_here(instance_id: str, stopped: list[dict[str, Any]]) -> str:
+    """Says where the instance stopped, and because of which steps.
+
+    With several steps running together the state alone is not an answer: what
+    somebody needs is the name of the ones that did not get through.
+    """
+    for state in (FAILED, REJECTED, ESCALATED, WAITING):
+        named = [result["step_id"] for result in stopped if result["state"] == state]
+        if not named:
+            continue
+        await set_instance_status(instance_id, state, f"{state}: {', '.join(named)}")
+        logger.info("Instance %s is %s because of %s.", instance_id, state, ", ".join(named))
+        return state
+
+    return WAITING
 
 
 async def _run_agent_step(
@@ -439,6 +560,14 @@ async def read_result(owner: str, task_id: str) -> str:
     except Exception:
         logger.warning("Task %s of %s could not be read back.", task_id[:8], owner, exc_info=True)
         return ""
+
+
+@DBOS.step()
+async def fail_step(instance_id: str, step_id: str, note: str) -> None:
+    engine = current_engine()
+    await engine.store.finish_step(
+        instance_id=UUID(instance_id), step_id=step_id, status=FAILED, output=None, note=note
+    )
 
 
 @DBOS.step()

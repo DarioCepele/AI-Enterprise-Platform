@@ -67,15 +67,28 @@ class ProcessDefinition(BaseModel):
     def branch_targets(self) -> set[str]:
         return {branch.goto for step in self.steps for branch in step.branches}
 
+    def handed_to(self) -> set[str]:
+        """Every step that some other step hands control to.
+
+        A branch, a `goto`, an escalation: three ways of saying "go there next",
+        and all three mean the step is not a starting point.
+        """
+        return (
+            self.branch_targets()
+            | {step.goto for step in self.steps if step.goto}
+            | {step.on_timeout for step in self.steps if step.on_timeout}
+        )
+
     def entry_steps(self) -> list[Step]:
-        """Where an instance starts: no dependencies, and nobody branches to it.
+        """Where an instance starts: no dependencies, and nobody hands to it.
 
         A step reachable only through a decision must not start on its own --
         otherwise both sides of a branch would run, which is the opposite of
-        what a branch is for.
+        what a branch is for. Same for the step an escalation goes to: it exists
+        for when the wait runs out, not for the beginning.
         """
-        targets = self.branch_targets()
-        return [step for step in self.steps if not step.depends_on and step.id not in targets]
+        handed = self.handed_to()
+        return [step for step in self.steps if not step.depends_on and step.id not in handed]
 
 
 REQUIRED_BY_TYPE = {

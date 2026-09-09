@@ -21,7 +21,12 @@ from process_service.agents import summary_of, token_for
 from process_service.api import create_app
 from process_service.catalog import Catalog
 from process_service.definitions import parse_definition
-from process_service.engine import Engine, advance_instance, use_engine
+from process_service.engine import (
+    Engine,
+    advance_instance,
+    step_workflow_id,
+    use_engine,
+)
 from process_service.tools import tool
 
 from conftest import POSTGRES_DSN, needs_postgres
@@ -59,7 +64,7 @@ IMPATIENT = parse_definition(
                 "on_timeout": "by_hand",
                 "input": {"question": "Anyone there?"},
             },
-            {"id": "by_hand", "type": "approval", "approvers": ["operations"]},
+            {"id": "by_hand", "type": "tool", "tool": "note_by_hand"},
         ],
     }
 )
@@ -77,6 +82,12 @@ def note_start(context):
 def note_end(context):
     CALLS.append("close")
     return {"closed": True}
+
+
+@tool("note_by_hand")
+def note_by_hand(context):
+    CALLS.append("by_hand")
+    return {"by_hand": True}
 
 
 class FakeAgent:
@@ -151,7 +162,7 @@ async def answer(instance_id: str, step_id: str, notification: dict[str, Any]) -
     """What the webhook does, without the HTTP in the way."""
     task_id, state, text = summary_of(notification)
     await DBOS.send_async(
-        destination_id=instance_id,
+        destination_id=step_workflow_id(instance_id, step_id),
         message={"task_id": task_id, "state": state, "text": text},
         topic=step_id,
     )
@@ -293,13 +304,17 @@ async def test_a_step_that_nobody_answers_escalates_where_the_definition_says(
     instance = await store.create(scope=scope, definition=IMPATIENT, payload={})
 
     with SetWorkflowID(str(instance.id)):
-        result = await advance_instance(str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+    result = await handle.get_result()
 
     read = await store.get(scope=scope, instance_id=instance.id)
-    assert result == "escalated"
-    assert read.status == "escalated"
+    # The escalation is not a note on a dead instance: the work went to the step
+    # the definition named, and the process carried on from there.
+    assert result == "completed"
     assert step_of(read, "ask").status == "escalated"
     assert "by_hand" in step_of(read, "ask").note
+    assert step_of(read, "by_hand").status == "completed"
+    assert CALLS == ["by_hand"]
 
 
 @pytest.fixture
@@ -361,7 +376,12 @@ if sys.platform == "win32":
 from dbos import DBOS, SetWorkflowID
 from process_service.catalog import Catalog
 from process_service.definitions import parse_definition
-from process_service.engine import Engine, advance_instance, use_engine
+from process_service.engine import (
+    Engine,
+    advance_instance,
+    step_workflow_id,
+    use_engine,
+)
 from process_service.store import InstanceStore, build_pool
 from process_service.tools import tool
 
@@ -451,6 +471,10 @@ async def test_the_answer_finds_the_instance_after_the_asking_process_died(
     assert step_of(read, "ask").task_id == "task-1"
 
     await answer(str(instance.id), "ask", completion("task-1", "answered after the crash"))
+    # A restarted service recovers every workflow left pending; here the two of
+    # them are named, because the test is the one doing the recovering: the step
+    # that was waiting, and the instance that was waiting for the step.
+    await DBOS.resume_workflow_async(step_workflow_id(str(instance.id), "ask"))
     resumed = await DBOS.resume_workflow_async(str(instance.id))
     assert await resumed.get_result() == "completed"
 

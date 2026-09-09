@@ -68,6 +68,11 @@ ALTER TABLE instance_steps ADD COLUMN IF NOT EXISTS question text;
 """
 
 
+INSTANCE_NOTE = """
+ALTER TABLE process_instances ADD COLUMN IF NOT EXISTS note text;
+"""
+
+
 @dataclass(frozen=True)
 class Migration:
     version: int
@@ -79,6 +84,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "instances and steps", (INSTANCES, STEPS)),
     Migration(2, "effects that must not repeat", (EFFECTS,)),
     Migration(3, "the remote task a step waits on", (STEP_TASKS,)),
+    Migration(4, "why an instance stopped where it stopped", (INSTANCE_NOTE,)),
 )
 
 LATEST_VERSION = max(migration.version for migration in MIGRATIONS)

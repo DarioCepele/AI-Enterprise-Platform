@@ -111,13 +111,35 @@ aveva gia' capito, e si farebbe rifare la stessa domanda. Dopo
 `MAX_CLARIFICATIONS` giri il passo viene passato avanti invece di continuare a
 chiedere.
 
-**Chi non risponde entro `timeout_seconds`** finisce dove dice `on_timeout`: il
-passo resta `escalated` con il motivo scritto, e chi guarda l'istanza vede
-perche'. Senza `on_timeout` il passo fallisce, che e' l'altra scelta onesta.
+**Chi non risponde entro `timeout_seconds`** manda il lavoro dove dice
+`on_timeout`: il passo resta `escalated` con il motivo scritto, e **il processo
+continua da quel passo** -- un'escalation che scrivesse solo "scaduto" lascerebbe
+l'istanza li' ad aspettare che qualcuno se ne accorga. Senza `on_timeout` il
+passo fallisce, che e' l'altra scelta onesta.
 
 L'attesa e' durevole: e' DBOS a tenerla, non un processo. Un servizio ucciso
 mentre aspetta torna ad aspettare la stessa risposta, e la notifica arrivata a
 una replica diversa trova comunque la sua istanza.
+
+## Quello che non si aspetta a vicenda parte insieme
+
+**Ogni passo e' un workflow a se'**, con id `istanza:passo`. Da questo viene il
+resto:
+
+- i passi pronti nello stesso momento **partono insieme**, e il join aspetta
+  tutti prima di decidere qualcosa -- anche quando uno ha gia' fallito, perche'
+  fermarsi subito lascerebbe gli altri in giro senza nessuno che ne legga
+  l'esito;
+- se qualcuno non passa, l'istanza si ferma **dicendo chi**: lo stato e' sulla
+  riga dell'istanza (`failed: paga_fornitore`), non nei log;
+- due passi possono **aspettare contemporaneamente** -- due agenti, due
+  approvazioni -- ognuno sul proprio workflow;
+- riavviare lo stesso passo non lo riesegue: l'id e' derivato, non casuale, e un
+  passo gia' concluso restituisce quello che aveva scritto.
+
+Un passo che solleva un'eccezione **fallisce come passo**, con il messaggio
+sulla riga: l'istanza si ferma in `failed` invece di sparire dentro uno stack
+trace.
 
 ## L'approvazione
 
