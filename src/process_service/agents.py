@@ -27,7 +27,7 @@ from a2a.types import (
     TaskPushNotificationConfig,
     TaskState,
 )
-from google.protobuf.json_format import ParseDict
+from google.protobuf.json_format import MessageToDict, ParseDict
 
 from .config import get_settings
 
@@ -108,6 +108,27 @@ def summary_of(notification: dict[str, Any]) -> tuple[str, str, str]:
             part["text"] for part in message.get("parts") or [] if isinstance(part.get("text"), str)
         ]
     return task_id, state, "".join(parts).strip()
+
+
+def _usage_of(data: dict[str, Any]) -> dict[str, int]:
+    """What the agent said the answer cost, when it says so.
+
+    An agent that does not report it is not an error: the field is part of the
+    artifacts of this laboratory, not of the A2A protocol, and a fork can plug
+    in an agent that knows nothing about it.
+    """
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    counted = {}
+    for key, value in usage.items():
+        # Numbers cross protobuf as doubles: 2 arrives as 2.0, and a filter that
+        # only accepted digits threw the whole count away.
+        try:
+            counted[str(key)] = int(float(value))
+        except (TypeError, ValueError):
+            continue
+    return counted
 
 
 async def fetch_card(url: str, timeout: float = 10.0) -> AgentCard:
@@ -191,24 +212,27 @@ class AgentGateway:
             agent=agent, text=question, scope=scope, instance_id=instance_id, step_id=step_id
         )
 
-    async def result_of(self, *, agent: str, task_id: str) -> str:
+    async def result_of(self, *, agent: str, task_id: str) -> dict[str, Any]:
         """Reads the task itself, because a notification is a signal, not the answer.
 
         A push notification says a task is done; the text can be in artifacts
         that were notified separately, or filtered out on the way. The task is
-        the one place where the whole answer is.
+        the one place where the whole answer is -- and the only place where what
+        the answer cost is written down.
         """
         client = await self._client(agent)
         task = await client.get_task(GetTaskRequest(id=task_id))
-        pieces = [
-            part.text
-            for artifact in task.artifacts
-            for part in artifact.parts
-            if part.HasField("text")
-        ]
+        pieces = []
+        usage: dict[str, int] = {}
+        for artifact in task.artifacts:
+            for part in artifact.parts:
+                if part.HasField("text"):
+                    pieces.append(part.text)
+                elif part.HasField("data"):
+                    usage = usage or _usage_of(MessageToDict(part.data))
         if not pieces and task.status.HasField("message"):
             pieces = [part.text for part in task.status.message.parts if part.HasField("text")]
-        return "".join(pieces).strip()
+        return {"text": "".join(pieces).strip(), "usage": usage}
 
     async def reply(
         self, *, agent: str, answer: str, scope: str, instance_id: str, step_id: str, task_id: str

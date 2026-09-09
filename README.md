@@ -172,6 +172,39 @@ Un passo che solleva un'eccezione **fallisce come passo**, con il messaggio
 sulla riga: l'istanza si ferma in `failed` invece di sparire dentro uno stack
 trace.
 
+## Quanto costa davvero il ventaglio
+
+Due passi `agent` indipendenti contro gli stessi due, uno in attesa dell'altro.
+Stesse domande, agenti veri (`knowledge` e `analysis`), cinque giri alternati
+perche' la latenza del modello e' rumorosa. Si rimisura con
+`demo-infra/tools/measure_fan_out.py`, che si avvia un servizio dei processi suo
+con due definizioni usa e getta.
+
+| | insieme | uno dopo l'altro |
+| --- | --- | --- |
+| tempo totale | 14 s (9-24) | 22 s (14-32) |
+| round del modello | 4 (4-4) | 4 (4-4) |
+| token in | 2966 (2966-2968) | 2966 (2966-2968) |
+| token out | 509 (384-611) | 524 (387-827) |
+
+Mediana su cinque giri, fra parentesi minimo e massimo.
+
+**Il ventaglio compra tempo, non lavoro.** Round e token in ingresso sono gli
+stessi: nessuno dei due modi fa fare meno fatica al modello. E' un'informazione
+che vale piu' del guadagno: la ragione per parallelizzare e' l'attesa, e se i
+passi non aspettano niente di lungo non c'e' niente da guadagnare.
+
+**Il rumore e' piu' grande della differenza, su un giro solo.** Un singolo
+confronto ha dato 15 s contro 13 s -- il parallelo *piu' lento* -- e un altro
+49 s contro 23 s, perche' il modello aveva deciso di fare un round in piu'.
+Chiunque misuri due volte e scriva il numero che gli piace ha misurato le
+proprie preferenze.
+
+**Il costo sta nella storia dell'istanza**, non nei log: ogni passo `agent`
+scrive un evento `step_usage` con l'agente, i round e i token. Da li' escono i
+numeri qui sopra, e da li' escono anche quelli di un'istanza qualsiasi in
+produzione.
+
 ## Disfare quello che si era gia' fatto
 
 Un passo puo' dichiarare `compensate_with: <tool>`. Quando l'istanza si ferma

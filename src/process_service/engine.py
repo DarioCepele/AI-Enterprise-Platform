@@ -615,10 +615,14 @@ async def _run_agent_step(
         return None
 
     task_id = answer.get("task_id") or started.get("task_id", "")
-    text = answer.get("text", "")
-    if not text and task_id:
-        text = await read_result(step.owner or "", task_id)
-    output = {"agent": step.owner, "text": text, "task_id": task_id}
+    result = await read_result(instance_id, step.id, step.owner or "", task_id)
+    text = result.get("text") or answer.get("text", "")
+    output = {
+        "agent": step.owner,
+        "text": text,
+        "task_id": task_id,
+        "usage": result.get("usage") or {},
+    }
     await write_step_output(instance_id, step.id, output)
     return output
 
@@ -630,16 +634,44 @@ async def _timed_out(instance_id: str, step: Step, timeout: float) -> None:
 
 
 @DBOS.step()
-async def read_result(owner: str, task_id: str) -> str:
-    """Asks the agent for the answer the notification did not carry."""
+async def read_result(
+    instance_id: str, step_id: str, owner: str, task_id: str
+) -> dict[str, Any]:
+    """Reads the finished task: the answer, and what it cost.
+
+    The notification is a signal -- it can arrive without the text, and it never
+    carries the cost. Reading the task back is also what puts "how many rounds,
+    how many tokens" into the history, which is the only way the fan-out can be
+    compared with doing the same work in one agent.
+    """
     engine = current_engine()
     if engine.agents is None:
         raise RuntimeError("no agents are configured: an agent step cannot run")
+    if not task_id:
+        return {}
     try:
-        return await engine.agents.result_of(agent=owner, task_id=task_id)
+        result = await engine.agents.result_of(agent=owner, task_id=task_id)
     except Exception:
         logger.warning("Task %s of %s could not be read back.", task_id[:8], owner, exc_info=True)
-        return ""
+        return {}
+
+    usage = result.get("usage") or {}
+    if usage:
+        await engine.store.record_event(
+            instance_id=UUID(instance_id),
+            step_id=step_id,
+            kind="step_usage",
+            data={"agent": owner, **usage},
+        )
+        logger.info(
+            "Instance %s step %s cost %s rounds, %s/%s tokens.",
+            instance_id,
+            step_id,
+            usage.get("rounds", "?"),
+            usage.get("input_tokens", "?"),
+            usage.get("output_tokens", "?"),
+        )
+    return result
 
 
 @DBOS.step()

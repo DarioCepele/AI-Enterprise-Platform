@@ -118,9 +118,12 @@ class FakeAgent:
         self.answered.append({"answer": answer, "task_id": task_id})
         return {"task_id": task_id, "state": "TASK_STATE_WORKING"}
 
-    async def result_of(self, *, agent: str, task_id: str) -> str:
+    async def result_of(self, *, agent: str, task_id: str) -> dict[str, Any]:
         self.read_back.append(task_id)
-        return f"the answer of {task_id}"
+        return {
+            "text": f"the answer of {task_id}",
+            "usage": {"rounds": 2, "input_tokens": 1000, "output_tokens": 120},
+        }
 
 
 @pytest.fixture
@@ -216,7 +219,9 @@ async def test_the_answer_resumes_the_instance_and_the_process_goes_on(engine, s
 
     read = await store.get(scope=scope, instance_id=instance.id)
     assert step_of(read, "ask").status == "completed"
-    assert step_of(read, "ask").output["text"] == "the policy says yes"
+    # The answer comes from the task, not from the notification that woke the
+    # step: the notification is a signal, and the fake agent's task says this.
+    assert step_of(read, "ask").output["text"] == "the answer of task-1"
     assert CALLS == ["collect", "close"]
 
 
@@ -238,6 +243,12 @@ async def test_a_notification_without_the_text_makes_the_step_read_the_task(
     read = await store.get(scope=scope, instance_id=instance.id)
     assert agents.read_back == ["task-1"]
     assert step_of(read, "ask").output["text"] == "the answer of task-1"
+
+    # What the answer cost is part of the history, not of the log.
+    spent = [event for event in await store.events_of(instance_id=instance.id)
+             if event.kind == "step_usage"]
+    assert [event.data["agent"] for event in spent] == ["knowledge"]
+    assert spent[0].data["input_tokens"] == 1000
 
 
 async def test_a_clarification_puts_the_step_in_front_of_a_person(
@@ -479,5 +490,5 @@ async def test_the_answer_finds_the_instance_after_the_asking_process_died(
     assert await resumed.get_result() == "completed"
 
     read = await store.get(scope=scope, instance_id=instance.id)
-    assert step_of(read, "ask").output["text"] == "answered after the crash"
+    assert step_of(read, "ask").output["text"] == "the answer of task-1"
     assert read.status == "completed"

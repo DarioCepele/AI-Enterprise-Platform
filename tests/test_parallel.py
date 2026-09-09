@@ -7,6 +7,7 @@ when they stop the instance says which ones did not get through.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 import pytest
@@ -126,6 +127,9 @@ class FakeAgent:
         self.asked.append(step_id)
         return {"task_id": f"task-{step_id}", "state": "TASK_STATE_SUBMITTED"}
 
+    async def result_of(self, *, agent: str, task_id: str):
+        return {"text": f"answer of {task_id}", "usage": {}}
+
 
 @pytest.fixture
 def agents() -> FakeAgent:
@@ -181,6 +185,73 @@ async def test_the_join_waits_for_everyone_and_names_who_failed(engine, store, s
     assert read.status == "failed"
     assert read.note == "failed: broken"
     assert step_of(read, "join").status == "pending"
+
+
+class TimedAgent(FakeAgent):
+    """Records when each task was started, so the answers can be timed from it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked_at: dict[str, float] = {}
+
+    async def ask(self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str):
+        self.asked_at[step_id] = time.perf_counter()
+        return await super().ask(
+            agent=agent, question=question, scope=scope, instance_id=instance_id, step_id=step_id
+        )
+
+
+ANSWER_AFTER = 0.6
+
+
+async def answer_each_step(agents: TimedAgent, instance_id: str, expected: int) -> None:
+    """Answers every task exactly `ANSWER_AFTER` seconds after it was started.
+
+    This is the shape of a slow agent, without a slow agent: if the two steps
+    are started together the two answers arrive together, and if they were
+    started one after the other the second clock only starts when the first is
+    over.
+    """
+    answered: set[str] = set()
+    while len(answered) < expected:
+        for step_id, began in list(agents.asked_at.items()):
+            if step_id in answered or time.perf_counter() - began < ANSWER_AFTER:
+                continue
+            answered.add(step_id)
+            await DBOS.send_async(
+                destination_id=step_workflow_id(instance_id, step_id),
+                message={
+                    "task_id": f"task-{step_id}",
+                    "state": "TASK_STATE_COMPLETED",
+                    "text": step_id,
+                },
+                topic=step_id,
+            )
+        await asyncio.sleep(0.02)
+
+
+async def test_two_agents_that_take_a_while_cost_the_slower_one_not_the_sum(
+    store, scope, dbos
+):
+    CALLS.clear()
+    agents = TimedAgent()
+    use_engine(Engine(Catalog([TWO_AGENTS]), store, agents))
+    instance = await store.create(scope=scope, definition=TWO_AGENTS, payload={})
+
+    began = time.perf_counter()
+    with SetWorkflowID(str(instance.id)):
+        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+    result, _ = await asyncio.gather(
+        handle.get_result(), answer_each_step(agents, str(instance.id), expected=2)
+    )
+    took = time.perf_counter() - began
+
+    assert result == "completed"
+    assert sorted(agents.asked) == ["one", "two"]
+    # Two waits of 0.6s each: together they cost about 0.6s, one after the other
+    # they would cost 1.2s. The margin is wide enough not to depend on the
+    # machine the test runs on.
+    assert took < 2 * ANSWER_AFTER
 
 
 async def test_two_agents_can_be_waiting_at_the_same_time(engine, store, scope, agents):
