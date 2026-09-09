@@ -69,4 +69,17 @@ async def test_the_card_is_served_where_a2a_clients_look_for_it():
 
     assert card.status_code == 200
     assert card.json()["capabilities"]["streaming"] is True
-    assert health.json()["status"] == "ok"
+    assert health.json()["status"] == "alive"
+
+
+@pytest.mark.asyncio
+async def test_liveness_and_readiness_answer_separately():
+    app = create_app(agent=object())
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        alive = await client.get("/health/live")
+        ready = await client.get("/health/ready")
+
+    assert alive.json() == {"status": "alive"}
+    assert ready.json()["documents"]

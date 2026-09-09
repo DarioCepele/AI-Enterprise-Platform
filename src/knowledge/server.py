@@ -28,7 +28,7 @@ from agent_framework import Agent
 from .executor import KnowledgeExecutor
 from .extended import SCHEME, ServiceTokenOnly, build_extended_card, card_for_the_caller
 from .push import EssentialNotifications
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from .agent import build_knowledge_agent, catalogue
 
@@ -89,8 +89,18 @@ def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastA
     app.add_middleware(ServiceTokenOnly)
 
     @app.get("/health")
-    async def health() -> dict[str, object]:
-        return {"status": "ok", "documents": sorted(catalogue())}
+    @app.get("/health/live")
+    async def live() -> dict[str, str]:
+        """Whether this process is stuck. It depends on nobody, so it asks nobody."""
+        return {"status": "alive"}
+
+    @app.get("/health/ready")
+    async def ready() -> dict[str, object]:
+        """Whether this agent can answer: it needs its corpus, and nothing else."""
+        documents = sorted(catalogue())
+        if not documents:
+            raise HTTPException(status_code=503, detail="the corpus is empty")
+        return {"status": "ok", "documents": documents}
 
     add_a2a_routes_to_fastapi(
         app,
