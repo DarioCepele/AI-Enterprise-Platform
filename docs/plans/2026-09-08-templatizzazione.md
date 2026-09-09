@@ -94,6 +94,12 @@ Oggi chi forka deve cercare le stringhe. `SINGLE_TENANT_SCOPE = "local-laborator
 
 Con Kubernetes nel bersaglio, questi smettono di essere note nel README e diventano difetti osservabili.
 
+**Chiuso il 2026-09-09.** Tre note emerse facendolo, che il piano non prevedeva:
+
+- il frontend **non** trattava il cursore dei log come opaco (`cursor: number`, confrontato con `>`): il contratto `agui/logs-page` ora lo dichiara e lo verifica dalle due parti;
+- la lettura dei log fa `flush` prima di leggere, altrimenti il tab resta indietro di un intervallo di drain e una riga prodotta mentre si risponde alla richiesta che la chiede arriva al giro dopo;
+- il lock rilasciato senza confrontare il token e' peggio del lock assente: rilascerebbe quello che un altro ha preso dopo la scadenza del proprio.
+
 ### Task B1 — I log operativi escono dal processo
 
 **Files:** `demo-master-agent/src/demo/logging_bridge.py`, `demo-master-agent/src/demo/server/app.py`, `tests/test_logging_bridge.py`
@@ -105,7 +111,7 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 - [x] **Step 3:** il cursore diventa l'id dello stream, non un intero per processo; il frontend **non** lo trattava come opaco (`cursor: number`): ora si', e il contratto `agui/logs-page` lo dichiara.
 - [x] **Step 4:** documentare il ripiego: senza Redis, i log restano locali e con piu' repliche sono parziali.
 
-**Fatto quando:** con due repliche il tab LOG mostra le righe di entrambe, in ordine.
+**Fatto quando:** con due repliche il tab LOG mostra le righe di entrambe, in ordine. **Fatto** il 2026-09-09: verificato con un secondo processo locale, le cui righe compaiono nel `/logs` del container.
 
 ### Task B2 — La compattazione prende un lock, non un set in RAM
 
@@ -113,12 +119,12 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 **Perche':** `self._compacting: set[tuple[str, str]]` impedisce due compattazioni contemporanee **nello stesso processo**. Con due repliche lo stesso thread viene riassunto due volte, si pagano due chiamate al modello e vince l'ultima scrittura.
 
-- [ ] **Step 1:** test: due istanze di `ThreadMemory` sullo stesso Redis, invocate insieme sullo stesso thread, producono una sola chiamata al summarizer.
-- [ ] **Step 2:** implementare un lock su Redis con `SET key value NX EX <ttl>` e rilascio condizionato al valore (nessun `DEL` cieco: rilasciare il lock di un altro e' peggio che non prenderlo).
-- [ ] **Step 3:** TTL piu' lungo della compattazione piu' lenta osservata, e log esplicito quando il lock scade prima della fine.
-- [ ] **Step 4:** senza Redis si ricade sul set in RAM, dichiarato nel log all'avvio.
+- [x] **Step 1:** test: due istanze di `ThreadMemory` sullo stesso Redis, invocate insieme sullo stesso thread, producono una sola chiamata al summarizer.
+- [x] **Step 2:** implementare un lock su Redis con `SET key value NX EX <ttl>` e rilascio condizionato al valore (nessun `DEL` cieco: rilasciare il lock di un altro e' peggio che non prenderlo).
+- [x] **Step 3:** TTL piu' lungo della compattazione piu' lenta osservata, e log esplicito quando il lock scade prima della fine.
+- [x] **Step 4:** senza Redis si ricade sul set in RAM, dichiarato nel log all'avvio.
 
-**Fatto quando:** il test con due istanze passa e il conteggio delle chiamate al modello non dipende dal numero di repliche.
+**Fatto quando:** il test con due istanze passa e il conteggio delle chiamate al modello non dipende dal numero di repliche. **Fatto** il 2026-09-09.
 
 ### Task B3 — La agent card si rilegge, e non solo al riavvio
 
@@ -126,11 +132,11 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 **Perche':** `cached["client"]` non scade mai. Un sottoagente che cambia URL, capability o skill resta invisibile finche' non si riavvia il master — e con la card estesa questo significa anche un catalogo fermo a ieri.
 
-- [ ] **Step 1:** test: passato il TTL la card viene richiesta di nuovo; entro il TTL no.
-- [ ] **Step 2:** test: se la rilettura fallisce si continua con la card in cache invece di far fallire il turno.
-- [ ] **Step 3:** implementare TTL configurabile (default dieci minuti) sulla cache di card e client.
+- [x] **Step 1:** test: passato il TTL la card viene richiesta di nuovo; entro il TTL no.
+- [x] **Step 2:** test: se la rilettura fallisce si continua con la card in cache invece di far fallire il turno.
+- [x] **Step 3:** implementare TTL configurabile (default dieci minuti) sulla cache di card e client.
 
-**Fatto quando:** cambiare la card del knowledge agent si riflette nel master senza riavviarlo.
+**Fatto quando:** cambiare la card del knowledge agent si riflette nel master senza riavviarlo. **Fatto** il 2026-09-09.
 
 ---
 
