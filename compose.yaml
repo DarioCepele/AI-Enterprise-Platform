@@ -80,6 +80,11 @@ services:
           memory: 512M
           cpus: "1.0"
     build: ../demo-knowledge-agent
+    ports:
+      # On the loopback only: published so that a measurement -- or a service
+      # started outside compose -- can reach the agent the way another
+      # container does.
+      - "127.0.0.1:8200:8200"
     environment:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -101,6 +106,11 @@ services:
           memory: 512M
           cpus: "1.0"
     build: ../demo-analysis-agent
+    ports:
+      # On the loopback only: published so that a measurement -- or a service
+      # started outside compose -- can reach the agent the way another
+      # container does.
+      - "127.0.0.1:8400:8400"
     environment:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
