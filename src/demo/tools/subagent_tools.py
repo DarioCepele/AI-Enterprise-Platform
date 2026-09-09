@@ -15,7 +15,7 @@ import asyncio
 
 from ..a2a.client import A2AClient, Progress, fetch_agent_card
 from ..a2a.push import token_for, webhook_url
-from ..config import SINGLE_TENANT_SCOPE, get_settings
+from ..config import get_settings
 from ..server.run_context import pending_of_run, subagent_run, thread_of_run
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ def build_subagent_tools(
         thread_id = thread_of_run()
         webhook = (
             (
-                webhook_url(settings.public_url, SINGLE_TENANT_SCOPE, thread_id),
+                webhook_url(settings.public_url, settings.default_scope, thread_id),
                 token_for(thread_id),
             )
             if settings.public_url and thread_id

@@ -17,20 +17,17 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..agents.master import build_master_agent
-from ..config import SINGLE_TENANT_SCOPE, get_settings
+from ..config import get_settings
 from ..logging_bridge import LogCollector, RedisLogStream
 from ..a2a.client import A2AClient, fetch_agent_card
 from ..a2a.push import HEADER, is_terminal, summary_of, token_is_valid
 from ..memory.remote_store import MemoryServiceSnapshotStore
 from .run_context import LabRunner
+from .scope import ScopeResolver, scope_of_request
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_STATE = {"artifacts": [], "plan": {"status": "idle", "steps": []}}
-
-def _resolve_snapshot_scope(request: object) -> str:
-    """The scope the threads live in. See SINGLE_TENANT_SCOPE."""
-    return SINGLE_TENANT_SCOPE
 
 def _default_snapshot_store() -> AGUIThreadSnapshotStore:
     """The thread store: the memory service when configured, otherwise RAM.
@@ -67,8 +64,10 @@ def create_app(
     agent: Agent | None = None,
     collector: LogCollector | None = None,
     snapshot_store: AGUIThreadSnapshotStore | None = None,
+    scope_resolver: ScopeResolver | None = None,
 ) -> FastAPI:
-    """Builds the app. `agent`, `collector` and the store are passed in tests."""
+    """Builds the app. `agent`, `collector`, the store and the resolver are passed in tests."""
+    resolve_scope: ScopeResolver = scope_resolver or scope_of_request
     if not logging.getLogger().handlers:
         # Uvicorn configures only its own loggers: without this, `demo.*` ends up
         # in the handler of last resort, which prints only WARNING and above and
@@ -93,7 +92,8 @@ def create_app(
             finally:
                 log_collector.detach()
 
-    app = FastAPI(title="Laboratorio AG-UI", lifespan=lifespan)
+    app = FastAPI(title=get_settings().product_name, lifespan=lifespan)
+    app.state.scope_resolver = resolve_scope
 
     allowed_origins = list(get_settings().allowed_origins)
 
@@ -210,7 +210,7 @@ def create_app(
     store = snapshot_store or _default_snapshot_store()
 
     async def state_of_thread(thread_id: str) -> dict | None:
-        snapshot = await store.get(scope=SINGLE_TENANT_SCOPE, thread_id=thread_id)
+        snapshot = await store.get(scope=get_settings().default_scope, thread_id=thread_id)
         state = getattr(snapshot, "state", None)
         return state if isinstance(state, dict) else None
 
@@ -222,6 +222,6 @@ def create_app(
         allow_origins=allowed_origins,
         default_state=DEFAULT_STATE,
         snapshot_store=store,
-        snapshot_scope_resolver=_resolve_snapshot_scope,
+        snapshot_scope_resolver=resolve_scope,
     )
     return app

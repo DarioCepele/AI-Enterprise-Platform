@@ -5,7 +5,7 @@ from agent_framework import Agent, BaseChatClient
 from agent_framework.openai import OpenAIChatCompletionClient
 
 from ..chat_clients.fake import FakeStreamingChatClient
-from ..config import SINGLE_TENANT_SCOPE, get_settings
+from ..config import get_settings
 from ..telemetry import log_context_size
 from ..tools.memory_tools import build_memory_tools
 from ..tools.plan_tools import PlanStore, build_plan_tools
@@ -13,8 +13,8 @@ from ..tools.subagent_tools import build_subagent_tools
 from ..tools.skill_tools import build_skill_tools
 from ..tools.ui_tools import get_tools
 
-INSTRUCTIONS = """You are the agent of a demonstration laboratory.
-Answer in Italian, concisely.
+INSTRUCTIONS = """You are the agent of {product}.
+Answer in {language}, concisely.
 
 When the request resolves in a single step, just answer.
 
@@ -44,8 +44,18 @@ If the user refers to something already said that you cannot see in the
 context, call `search_memories` before saying you do not know: past
 conversations are not all in front of you."""
 
+def instructions_for(product: str, language: str) -> str:
+    """The prompt says the product's name and the language it answers in.
+
+    Both are configuration: a template whose agent introduces itself as someone
+    else's product, in a language nobody chose, is a template you rewrite before
+    using it.
+    """
+    return INSTRUCTIONS.format(product=product, language=language)
+
 def _default_chat_client() -> BaseChatClient:
     settings = get_settings()
+    settings.require_model_access()
     if settings.use_fake_client:
         return FakeStreamingChatClient()
     return OpenAIChatCompletionClient(
@@ -67,13 +77,13 @@ def build_master_agent(
         else []
     )
     memory_tools = (
-        build_memory_tools(settings.memory_service_url, SINGLE_TENANT_SCOPE)
+        build_memory_tools(settings.memory_service_url, settings.default_scope)
         if settings.memory_service_url
         else []
     )
     return Agent(
         name="master",
-        instructions=INSTRUCTIONS,
+        instructions=instructions_for(settings.product_name, settings.product_language),
         client=chat_client or _default_chat_client(),
         tools=[
             *get_tools(),

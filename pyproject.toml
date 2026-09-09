@@ -9,6 +9,7 @@ dependencies = [
     "agent-framework-core==1.17.0",
     "agent-framework-openai>=1.14.2",
     "fastapi>=0.139.2",
+    "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.3",
     "redis>=6.4.0",
     "uvicorn>=0.52.4",
