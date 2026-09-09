@@ -20,6 +20,8 @@ from ..server.run_context import pending_of_run, subagent_run, thread_of_run
 
 logger = logging.getLogger(__name__)
 
+CARD_TTL_SECONDS = 600
+
 DESCRIPTION = """Queries the knowledge base agent about a topic.
 
 Every call is independent: the subagent does not see the conversation, so the
@@ -31,20 +33,43 @@ def build_subagent_tools(
     url: str,
     card_loader: Callable[[], Awaitable[AgentCard]] | None = None,
     client_factory: Callable[[AgentCard], Any] | None = None,
+    card_ttl_seconds: float = CARD_TTL_SECONDS,
+    now: Callable[[], float] = time.monotonic,
 ) -> list[FunctionTool]:
     load_card = card_loader or (lambda: fetch_agent_card(url))
     make_client = client_factory or (lambda card: A2AClient(card))
     cached: dict[str, Any] = {}
 
     async def client() -> Any:
-        if "client" not in cached:
+        """The client for the remote agent, rebuilt when its card gets old.
+
+        A card that never expires means a subagent that changes url, capability
+        or catalogue stays invisible until this process restarts.
+        """
+        fresh = "client" in cached and now() - cached["read_at"] < card_ttl_seconds
+        if fresh:
+            return cached["client"]
+
+        try:
             card = await load_card()
-            if not card.capabilities.streaming:
-                logger.warning(
-                    "The card of %s does not declare streaming: answers will arrive whole.", url
-                )
-            cached["client"] = make_client(card)
-            await _catalogue_from_the_extended_card(cached["client"], card)
+        except Exception:
+            if "client" not in cached:
+                raise
+            logger.warning(
+                "The card of %s could not be read again: keeping the one in hand.",
+                url,
+                exc_info=True,
+            )
+            cached["read_at"] = now()
+            return cached["client"]
+
+        if not card.capabilities.streaming:
+            logger.warning(
+                "The card of %s does not declare streaming: answers will arrive whole.", url
+            )
+        cached["client"] = make_client(card)
+        cached["read_at"] = now()
+        await _catalogue_from_the_extended_card(cached["client"], card)
         return cached["client"]
 
     async def _catalogue_from_the_extended_card(remote: Any, card: AgentCard) -> None:

@@ -332,3 +332,61 @@ async def test_a_refused_extended_card_does_not_stop_the_tool(monkeypatch):
     # Not being able to see the extended view is no reason not to query the agent.
     assert "ok" in answer.text
     assert the_tool.description.startswith("Queries")
+
+
+class CountingLoader:
+    """Counts how many times the card was fetched, and can start failing."""
+
+    def __init__(self, card_factory) -> None:
+        self.calls = 0
+        self.broken = False
+        self._card_factory = card_factory
+
+    async def __call__(self):
+        self.calls += 1
+        if self.broken:
+            raise ConnectionError("card unreachable")
+        return self._card_factory()
+
+
+def tool_with_clock(remote, loader, clock):
+    return build_subagent_tools(
+        "http://kb:8200/",
+        card_loader=loader,
+        client_factory=lambda _card: remote,
+        card_ttl_seconds=10,
+        now=clock,
+    )[0]
+
+
+@pytest.mark.asyncio
+async def test_the_card_is_read_again_when_the_ttl_expires():
+    now = [1000.0]
+    loader = CountingLoader(card)
+    the_tool = tool_with_clock(FakeRemote(["ok"]), loader, lambda: now[0])
+
+    await the_tool.func(question="first")
+    now[0] += 5
+    await the_tool.func(question="within the ttl")
+    now[0] += 11
+    await the_tool.func(question="after the ttl")
+
+    # A subagent that changes url, capability or catalogue stays invisible until
+    # the cache lets go of the old card.
+    assert loader.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_a_card_that_cannot_be_reread_keeps_the_one_in_hand(caplog):
+    now = [1000.0]
+    loader = CountingLoader(card)
+    the_tool = tool_with_clock(FakeRemote(["ok"]), loader, lambda: now[0])
+    await the_tool.func(question="first")
+
+    loader.broken = True
+    now[0] += 11
+    with caplog.at_level(logging.WARNING, logger="demo.tools.subagent_tools"):
+        answer = await the_tool.func(question="after the ttl")
+
+    assert "ok" in answer.text
+    assert "keeping the one in hand" in caplog.text
