@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LOGS_URL, fetchLogs } from "./logs";
+import { fetchLogs, logsUrl } from "./logs";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("fetchLogs", () => {
   it("derives the logs URL from the AG-UI one", () => {
-    expect(LOGS_URL.endsWith("/logs")).toBe(true);
-    expect(LOGS_URL).not.toContain("/agui");
+    expect(logsUrl().endsWith("/logs")).toBe(true);
+    expect(logsUrl()).not.toContain("/agui");
   });
 
   it("passes the cursor and returns the page", async () => {

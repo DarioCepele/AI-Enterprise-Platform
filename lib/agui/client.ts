@@ -1,13 +1,17 @@
+import { runtimeConfig } from "../runtime-config";
 import type { AGUIEvent, RunInput } from "./types";
 
-const ENDPOINT = process.env.NEXT_PUBLIC_AGUI_URL ?? "http://127.0.0.1:8000/agui";
+/** Read per call: the endpoint arrives with the page, not with the bundle. */
+export function aguiUrl(): string {
+  return runtimeConfig().aguiUrl;
+}
 
 export async function runAgent(
   input: RunInput,
   onEvent: (event: AGUIEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(ENDPOINT, {
+  const response = await fetch(aguiUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify(input),
