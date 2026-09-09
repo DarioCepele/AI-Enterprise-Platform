@@ -8,7 +8,7 @@ export interface LogEntry {
 
 export interface LogPage {
   entries: LogEntry[];
-  cursor: number;
+  cursor: string;
   dropped: number;
 }
 
@@ -16,8 +16,10 @@ const AGUI_URL = process.env.NEXT_PUBLIC_AGUI_URL ?? "http://127.0.0.1:8000/agui
 
 export const LOGS_URL = AGUI_URL.replace(/\/agui$/, "/logs");
 
-export async function fetchLogs(cursor: number, signal?: AbortSignal): Promise<LogPage> {
-  const response = await fetch(`${LOGS_URL}?cursor=${cursor}`, { signal, cache: "no-store" });
+/** The cursor is opaque: it comes from the server and goes back untouched. */
+export async function fetchLogs(cursor: string, signal?: AbortSignal): Promise<LogPage> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  const response = await fetch(`${LOGS_URL}${query}`, { signal, cache: "no-store" });
   if (!response.ok) {
     throw new Error(`/logs ha risposto ${response.status}`);
   }

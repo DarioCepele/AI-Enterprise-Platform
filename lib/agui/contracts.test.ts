@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { contractSample, loadContract } from "@/lib/contracts";
 import { parseArtifact } from "./entries";
 import { reduce, initialState } from "./reducer";
+import { fetchLogs, type LogPage } from "./logs";
 import type { AGUIEvent } from "./types";
 
 describe("contracts with the master agent", () => {
@@ -50,5 +51,27 @@ describe("contracts with the master agent", () => {
   it("names this repository as a consumer, so a break points here", () => {
     expect(loadContract("agui/tool-result-briefing").consumed_by).toContain("demo-frontend");
     expect(loadContract("agui/shared-state").consumed_by).toContain("demo-frontend");
+  });
+});
+
+describe("the logs page", () => {
+  it("is typed as the contract declares", () => {
+    const page = contractSample<LogPage>("agui/logs-page");
+
+    expect(typeof page.cursor).toBe("string");
+    expect(typeof page.dropped).toBe("number");
+    expect(Object.keys(page.entries[0]).sort()).toEqual(
+      ["level", "message", "seq", "source", "ts"].sort(),
+    );
+  });
+
+  it("sends the cursor back untouched, whatever is inside it", async () => {
+    const page = contractSample<LogPage>("agui/logs-page");
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => page });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchLogs(page.cursor);
+
+    expect(fetchMock.mock.calls[0][0]).toContain(encodeURIComponent(page.cursor));
   });
 });

@@ -7,7 +7,7 @@ import { LogPanel } from "./LogPanel";
 vi.mock("@/lib/agui/logs", () => ({ fetchLogs: vi.fn() }));
 const fetchMock = vi.mocked(fetchLogs);
 const page = (seq: number, message = `riga ${seq}`, dropped = 0): LogPage => ({
-  cursor: seq, dropped,
+  cursor: String(seq), dropped,
   entries: [{ seq, ts: "2026-09-07T09:00:00Z", level: "INFO", source: "tools.plan_tools", message }],
 });
 async function settle() { await act(async () => {}); }
@@ -15,7 +15,7 @@ async function settle() { await act(async () => {}); }
 beforeEach(() => {
   vi.useFakeTimers();
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue({ entries: [], cursor: 0, dropped: 0 });
+  fetchMock.mockResolvedValue({ entries: [], cursor: "", dropped: 0 });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
@@ -31,18 +31,18 @@ describe("LogPanel", () => {
     fetchMock.mockResolvedValueOnce(page(1)).mockResolvedValueOnce(page(2)).mockResolvedValueOnce(page(3));
     const { rerender } = render(<LogPanel running />);
     await settle();
-    expect(fetchMock.mock.calls[0][0]).toBe(0);
+    expect(fetchMock.mock.calls[0][0]).toBe("");
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(fetchMock.mock.calls[1][0]).toBe(1);
+    expect(fetchMock.mock.calls[1][0]).toBe("1");
     rerender(<LogPanel running={false} />);
     await settle();
-    expect(fetchMock.mock.calls[2][0]).toBe(2);
+    expect(fetchMock.mock.calls[2][0]).toBe("2");
     expect(screen.getByText("riga 3")).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     rerender(<LogPanel running />);
     await settle();
-    expect(fetchMock.mock.calls[3][0]).toBe(3);
+    expect(fetchMock.mock.calls[3][0]).toBe("3");
   });
 
   it("waits for a slow answer before scheduling the next poll", async () => {
@@ -54,7 +54,7 @@ describe("LogPanel", () => {
     await act(async () => { resolve(page(1)); });
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][0]).toBe(1);
+    expect(fetchMock.mock.calls[1][0]).toBe("1");
   });
 
   it("cancels and ignores stale answers across run changes and unmount", async () => {

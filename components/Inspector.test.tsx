@@ -12,7 +12,7 @@ vi.mock("@/lib/agui/logs", () => ({ fetchLogs: vi.fn() }));
 const fetchMock = vi.mocked(fetchLogs);
 beforeEach(() => {
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue({ entries: [], cursor: 0, dropped: 0 });
+  fetchMock.mockResolvedValue({ entries: [], cursor: "", dropped: 0 });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
@@ -150,22 +150,22 @@ describe("Inspector", () => {
   it("collects logs while hidden and keeps cursor and tail after the run", async () => {
     vi.useFakeTimers();
     const page = (seq: number) => ({
-      cursor: seq, dropped: 0,
+      cursor: String(seq), dropped: 0,
       entries: [{ seq, ts: "2026-09-08T10:00:00Z", level: "INFO", source: "demo", message: `riga ${seq}` }],
     });
     fetchMock.mockResolvedValueOnce(page(1)).mockResolvedValueOnce(page(2)).mockResolvedValueOnce(page(3));
     const { rerender } = render(<Inspector events={[]} running />);
     await act(async () => {});
-    expect(fetchMock.mock.calls[0][0]).toBe(0);
+    expect(fetchMock.mock.calls[0][0]).toBe("");
     expect(screen.getByText("riga 1")).not.toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Log" }));
     expect(screen.getByText("riga 1")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Event inspector 0" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(fetchMock.mock.calls[1][0]).toBe(1);
+    expect(fetchMock.mock.calls[1][0]).toBe("1");
     rerender(<Inspector events={[]} running={false} />);
     await act(async () => {});
-    expect(fetchMock.mock.calls[2][0]).toBe(2);
+    expect(fetchMock.mock.calls[2][0]).toBe("2");
     fireEvent.click(screen.getByRole("button", { name: "Log" }));
     for (const seq of [1, 2, 3]) expect(screen.getByText(`riga ${seq}`)).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });

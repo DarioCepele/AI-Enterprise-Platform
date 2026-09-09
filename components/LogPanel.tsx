@@ -12,7 +12,7 @@ const TONE: Record<string, string> = {
 export function LogPanel({ running }: { running: boolean }) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const cursor = useRef(0);
+  const cursor = useRef("");
   const wasRunning = useRef(false);
   const [dropped, setDropped] = useState(0);
 
