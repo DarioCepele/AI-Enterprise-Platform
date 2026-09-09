@@ -1,0 +1,39 @@
+# Gli stessi manifest, su un k3s locale.
+#
+# Serve a una cosa sola: provarli. Un manifest che nessuno ha mai applicato e'
+# una dichiarazione di intenti, e k3d (k3s dentro Docker) costa un minuto e si
+# butta con un comando.
+#
+# Cambia due cose, e nessuna delle due riguarda la forma dei manifest:
+#   - le immagini sono quelle che il compose ha appena costruito, invece di
+#     quelle di un registry;
+#   - i database restano **fuori dal cluster**, come in produzione: qui sono
+#     quelli del compose, raggiunti per nome perche' il cluster e' sulla loro
+#     stessa rete Docker.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agui-lab
+
+resources:
+  - ../deploy
+
+images:
+  - name: ghcr.io/your-org/demo-master-agent
+    newName: demo-infra-master-agent
+    newTag: latest
+  - name: ghcr.io/your-org/demo-memory-service
+    newName: demo-infra-memory-service
+    newTag: latest
+  - name: ghcr.io/your-org/demo-knowledge-agent
+    newName: demo-infra-knowledge-agent
+    newTag: latest
+  - name: ghcr.io/your-org/demo-analysis-agent
+    newName: demo-infra-analysis-agent
+    newTag: latest
+  - name: ghcr.io/your-org/demo-frontend
+    newName: demo-infra-frontend
+    newTag: latest
+  - name: ghcr.io/your-org/demo-process-service
+    newName: demo-infra-process-service
+    newTag: latest

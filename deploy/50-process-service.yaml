@@ -22,11 +22,15 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # Numerico, non un nome: kubelet verifica che l'utente non sia root
+        # prima di avviare il container, e da un `USER service` non lo sa dire.
+        # Un manifest con solo runAsNonRoot non parte proprio.
+        runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: process-service
-          image: ghcr.io/<owner>/demo-process-service:<tag>
+          image: ghcr.io/your-org/demo-process-service:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8300

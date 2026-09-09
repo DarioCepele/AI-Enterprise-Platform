@@ -1,0 +1,16 @@
+# The manifests as they ship: images from a registry, databases outside.
+#
+# `kubectl apply -k deploy/` applies exactly what is in this folder. The k3s
+# overlay next to it points the images at what a laptop has just built, and
+# nothing else: what gets verified locally is these manifests, not a copy.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - 00-configmap.yaml
+  - 10-master-agent.yaml
+  - 20-memory-service.yaml
+  - 30-knowledge-agent.yaml
+  - 35-analysis-agent.yaml
+  - 40-frontend.yaml
+  - 50-process-service.yaml
