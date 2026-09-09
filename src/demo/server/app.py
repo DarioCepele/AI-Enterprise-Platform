@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from ..agents.master import build_master_agent
 from ..config import get_settings
 from ..logging_bridge import LogCollector, RedisLogStream
+from ..observability import configure_logging, configure_tracing
 from ..a2a.client import A2AClient, fetch_agent_card
 from ..a2a.push import HEADER, SeenNotifications, is_terminal, summary_of, token_is_valid
 from ..memory.remote_store import MemoryServiceSnapshotStore
@@ -27,6 +28,8 @@ from .run_context import LabRunner
 from .scope import ScopeResolver, scope_of_request
 
 logger = logging.getLogger(__name__)
+
+SERVICE_NAME = "master-agent"
 
 DEFAULT_STATE = {"artifacts": [], "plan": {"status": "idle", "steps": []}}
 
@@ -76,11 +79,10 @@ def create_app(
 ) -> FastAPI:
     """Builds the app. `agent`, `collector`, the store and the resolver are passed in tests."""
     resolve_scope: ScopeResolver = scope_resolver or scope_of_request
-    if not logging.getLogger().handlers:
-        # Uvicorn configures only its own loggers: without this, `demo.*` ends up
-        # in the handler of last resort, which prints only WARNING and above and
-        # leaves the container mute exactly when it needs to be read.
-        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    # Uvicorn configures only its own loggers: without this, `demo.*` ends up in
+    # the handler of last resort, which prints only WARNING and above and leaves
+    # the container mute exactly when it needs to be read.
+    configure_logging(SERVICE_NAME, as_json=get_settings().json_logs)
 
     log_collector = collector if collector is not None else LogCollector()
     log_collector.attach()
@@ -296,4 +298,5 @@ def create_app(
         snapshot_store=store,
         snapshot_scope_resolver=resolve_scope,
     )
+    configure_tracing(SERVICE_NAME, app)
     return app

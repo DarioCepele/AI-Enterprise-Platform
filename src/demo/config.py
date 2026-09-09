@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     scope_header: str = Field(
         default="", validation_alias=AliasChoices("DEMO_SCOPE_HEADER")
     )
+    json_logs: bool = Field(default=False, validation_alias=AliasChoices("DEMO_JSON_LOGS"))
 
     memory_service_url: str = Field(
         default="", validation_alias=AliasChoices("DEMO_MEMORY_SERVICE_URL")
