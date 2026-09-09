@@ -73,6 +73,21 @@ ALTER TABLE process_instances ADD COLUMN IF NOT EXISTS note text;
 """
 
 
+EVENTS = """
+CREATE TABLE IF NOT EXISTS instance_events (
+    id bigserial PRIMARY KEY,
+    instance_id uuid NOT NULL REFERENCES process_instances (id) ON DELETE CASCADE,
+    step_id text,
+    kind text NOT NULL,
+    data jsonb NOT NULL DEFAULT '{}'::jsonb,
+    at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS instance_events_by_instance
+    ON instance_events (instance_id, id);
+"""
+
+
 @dataclass(frozen=True)
 class Migration:
     version: int
@@ -85,6 +100,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(2, "effects that must not repeat", (EFFECTS,)),
     Migration(3, "the remote task a step waits on", (STEP_TASKS,)),
     Migration(4, "why an instance stopped where it stopped", (INSTANCE_NOTE,)),
+    Migration(5, "the history of what happened, in order", (EVENTS,)),
 )
 
 LATEST_VERSION = max(migration.version for migration in MIGRATIONS)

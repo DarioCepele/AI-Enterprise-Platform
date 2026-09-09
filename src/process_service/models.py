@@ -22,6 +22,17 @@ class StepState(BaseModel):
     ended_at: datetime | None = None
 
 
+class Event(BaseModel):
+    """One thing that happened to an instance, in the order it happened."""
+
+    id: int
+    instance_id: UUID
+    step_id: str | None = None
+    kind: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    at: datetime | None = None
+
+
 class Instance(BaseModel):
     """A running process, pinned to the version it started with."""
 

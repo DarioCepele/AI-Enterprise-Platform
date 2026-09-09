@@ -22,6 +22,7 @@ from .agents import NEEDS_INPUT, AgentGateway
 from .catalog import Catalog
 from .definitions import ProcessDefinition, Step
 from .expressions import ConditionError, evaluate
+from .observability import current_trace, working_on
 from .store import InstanceStore
 from .tools import get_tool
 
@@ -315,6 +316,24 @@ async def read_plan(instance_id: str, scope: str) -> dict[str, Any]:
 
 
 @DBOS.step()
+async def note_trace(instance_id: str) -> None:
+    """Writes the trace this run belongs to into the history.
+
+    The logs carry the instance, and the history carries the trace: from either
+    end of a question -- a line in a collector, a row somebody is looking at --
+    the other one can be found. Without a collector there is no trace, and
+    nothing is written.
+    """
+    trace_id = current_trace()
+    if not trace_id:
+        return
+    engine = current_engine()
+    await engine.store.record_event(
+        instance_id=UUID(instance_id), kind="trace", data={"trace_id": trace_id}
+    )
+
+
+@DBOS.step()
 async def set_instance_status(instance_id: str, status: str, note: str | None = None) -> None:
     engine = current_engine()
     await engine.store.set_status(instance_id=UUID(instance_id), status=status, note=note)
@@ -341,6 +360,13 @@ async def run_step(
     that a long wait belongs to the step that is waiting rather than to the
     whole process.
     """
+    with working_on(instance_id):
+        return await _one_step(instance_id, scope, step_id, context)
+
+
+async def _one_step(
+    instance_id: str, scope: str, step_id: str, context: dict[str, Any]
+) -> dict[str, Any]:
     engine = current_engine()
     plan = await read_plan(instance_id, scope)
     definition = engine.catalog.get(plan["process_id"], plan["process_version"])
@@ -412,6 +438,11 @@ async def advance_instance(instance_id: str, scope: str) -> str:
     because stopping early would leave the others running with nobody reading
     their outcome.
     """
+    with working_on(instance_id):
+        return await _advance(instance_id, scope)
+
+
+async def _advance(instance_id: str, scope: str) -> str:
     engine = current_engine()
     plan = await read_plan(instance_id, scope)
 
@@ -419,6 +450,7 @@ async def advance_instance(instance_id: str, scope: str) -> str:
     # definition that changed after this instance started is another process.
     definition = engine.catalog.get(plan["process_id"], plan["process_version"])
 
+    await note_trace(instance_id)
     await set_instance_status(instance_id, RUNNING)
     context: dict[str, Any] = dict(plan["context"])
     done: set[str] = set()
@@ -469,7 +501,7 @@ async def advance_instance(instance_id: str, scope: str) -> str:
         for result in results:
             step = definition.step(result["step_id"])
             if step is not None and result["state"] == COMPLETED:
-                ready.extend(_next_steps(definition, step, result["output"], done))
+                ready.extend(definition.next_after(step, result["output"], done))
 
     await set_instance_status(instance_id, COMPLETED)
     return COMPLETED
@@ -707,28 +739,3 @@ async def _run_step(instance_id: str, step: Step, context: dict[str, Any]) -> An
             return {}
 
     return await run_tool_step(instance_id, step.id, step.tool or "", context)
-
-
-def _next_steps(
-    definition: ProcessDefinition, step: Step, outcome: Any, done: set[str]
-) -> list[str]:
-    """What becomes runnable after this step.
-
-    A branch hands control to exactly one target, and so does `goto`: a step
-    reached through a branch cannot be waited on with `depends_on`, because the
-    other side of the branch would never satisfy it. Everything else follows the
-    dependencies, and a step runs only once every step it waits for is done.
-    """
-    if step.type == "decision":
-        return [outcome] if isinstance(outcome, str) else []
-
-    if step.goto:
-        return [step.goto] if step.goto not in done else []
-
-    return [
-        candidate.id
-        for candidate in definition.steps
-        if step.id in candidate.depends_on
-        and candidate.id not in done
-        and all(dependency in done for dependency in candidate.depends_on)
-    ]

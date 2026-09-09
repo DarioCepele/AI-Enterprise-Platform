@@ -17,7 +17,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from .definitions import ProcessDefinition
-from .models import Instance, StepState
+from .models import Event, Instance, StepState
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def build_pool(dsn: str, min_size: int = 1, max_size: int = 10) -> AsyncConnecti
 
 
 class InstanceStore:
-    """Instances and the state of their steps."""
+    """Instances, the state of their steps, and the history of both."""
 
     def __init__(self, pool: AsyncConnectionPool) -> None:
         self._pool = pool
@@ -74,6 +74,18 @@ class InstanceStore:
                     """,
                     (instance_id, step.id, PENDING, step.owner),
                 )
+            await _write_event(
+                connection,
+                instance_id,
+                None,
+                "instance_created",
+                {
+                    "process_id": definition.id,
+                    "process_version": definition.version,
+                    "scope": scope,
+                    "input": payload,
+                },
+            )
         logger.info(
             "Instance %s of %s@%d created.", instance_id, definition.id, definition.version
         )
@@ -137,6 +149,7 @@ class InstanceStore:
                 """,
                 (status, instance_id, step_id),
             )
+            await _write_event(connection, instance_id, step_id, "step_started", {"status": status})
 
     async def waiting_on(
         self,
@@ -159,6 +172,13 @@ class InstanceStore:
                  WHERE instance_id = %s AND step_id = %s
                 """,
                 (status, task_id, question, instance_id, step_id),
+            )
+            await _write_event(
+                connection,
+                instance_id,
+                step_id,
+                "step_waiting",
+                {"status": status, "task_id": task_id, "question": question},
             )
 
     async def finish_step(
@@ -184,6 +204,13 @@ class InstanceStore:
                 (status, json.dumps(output) if output is not None else None, note,
                  instance_id, step_id),
             )
+            await _write_event(
+                connection,
+                instance_id,
+                step_id,
+                "step_finished",
+                {"status": status, "output": output, "note": note},
+            )
 
     async def note_step(
         self, *, instance_id: UUID, step_id: str, status: str, note: str
@@ -198,6 +225,9 @@ class InstanceStore:
                 "UPDATE instance_steps SET status = %s, note = %s "
                 "WHERE instance_id = %s AND step_id = %s",
                 (status, note, instance_id, step_id),
+            )
+            await _write_event(
+                connection, instance_id, step_id, "step_noted", {"status": status, "note": note}
             )
 
     async def record_effect(self, *, instance_id: UUID, step_id: str, key: str) -> bool:
@@ -215,6 +245,10 @@ class InstanceStore:
                 """,
                 (key, instance_id, step_id),
             )
+            if done.rowcount == 1:
+                await _write_event(
+                    connection, instance_id, step_id, "effect_recorded", {"key": key}
+                )
             return done.rowcount == 1
 
     async def effects_of(self, *, instance_id: UUID) -> list[str]:
@@ -246,11 +280,60 @@ class InstanceStore:
                 """,
                 (status, note, instance_id),
             )
+            await _write_event(
+                connection, instance_id, None, "instance_status", {"status": status, "note": note}
+            )
+
+    async def record_event(
+        self, *, instance_id: UUID, kind: str, data: dict[str, Any], step_id: str | None = None
+    ) -> None:
+        """Writes something that happened but did not change a row."""
+        async with self._pool.connection() as connection:
+            await _write_event(connection, instance_id, step_id, kind, data)
+
+    async def events_of(self, *, instance_id: UUID, after: int = 0) -> list[Event]:
+        """The history of an instance, in the order it happened."""
+        async with self._pool.connection() as connection, connection.cursor(
+            row_factory=dict_row
+        ) as cursor:
+            await cursor.execute(
+                "SELECT * FROM instance_events WHERE instance_id = %s AND id > %s ORDER BY id",
+                (instance_id, after),
+            )
+            return [
+                Event(
+                    id=row["id"],
+                    instance_id=row["instance_id"],
+                    step_id=row["step_id"],
+                    kind=row["kind"],
+                    data=row["data"],
+                    at=_moment(row["at"]),
+                )
+                for row in await cursor.fetchall()
+            ]
 
     async def ping(self) -> None:
         """Raises if the database does not answer."""
         async with self._pool.connection() as connection:
             await connection.execute("SELECT 1")
+
+
+async def _write_event(
+    connection: AsyncConnection,
+    instance_id: UUID,
+    step_id: str | None,
+    kind: str,
+    data: dict[str, Any],
+) -> None:
+    """Writes what just happened, in the transaction that made it happen.
+
+    The history is a by-product of the change, not a second thing to remember:
+    a state written without its event would be a state nobody can explain.
+    """
+    await connection.execute(
+        "INSERT INTO instance_events (instance_id, step_id, kind, data) VALUES (%s, %s, %s, %s)",
+        (instance_id, step_id, kind, json.dumps(data, default=str)),
+    )
 
 
 def _instance_of(row: dict[str, Any], steps: list[dict[str, Any]]) -> Instance:

@@ -13,6 +13,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from opentelemetry import trace
@@ -25,6 +28,26 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 logger = logging.getLogger(__name__)
 
 ENDPOINT_VARIABLE = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
+# Which instance the current work belongs to. Every line written while a step
+# runs carries it, so a log line and an instance can find each other without
+# anybody having to remember to say which instance they were talking about.
+_INSTANCE: ContextVar[str | None] = ContextVar("instance_id", default=None)
+
+
+@contextmanager
+def working_on(instance_id: str) -> Iterator[None]:
+    token = _INSTANCE.set(instance_id)
+    try:
+        yield
+    finally:
+        _INSTANCE.reset(token)
+
+
+def current_trace() -> str | None:
+    """The trace this work belongs to, when there is a collector listening."""
+    span = trace.get_current_span().get_span_context()
+    return format(span.trace_id, "032x") if span.is_valid else None
 
 RESERVED = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
     "message",
@@ -53,6 +76,10 @@ class JsonFormatter(logging.Formatter):
         if span.is_valid:
             payload["trace_id"] = format(span.trace_id, "032x")
             payload["span_id"] = format(span.span_id, "016x")
+
+        instance_id = _INSTANCE.get()
+        if instance_id:
+            payload["instance_id"] = instance_id
 
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)

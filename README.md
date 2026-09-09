@@ -76,6 +76,8 @@ GET  /instances/{id}                  una istanza con lo stato dei suoi passi
 GET  /instances?status=&limit=        le istanze di questo scope, dalla piu' recente
 POST /instances/{id}/steps/{step}/answer     una persona risponde a un chiarimento
 POST /instances/{id}/steps/{step}/decision   una persona approva o rifiuta
+GET  /instances/{id}/events?after=         la storia, in ordine
+GET  /instances/{id}/replay                che strada ha preso, e perche'
 POST /a2a/push/{scope}/{id}/{step}    la notifica dell'agente, firmata
 GET  /health/live  /health/ready      processo vivo / puo' servire
 ```
@@ -120,6 +122,35 @@ passo fallisce, che e' l'altra scelta onesta.
 L'attesa e' durevole: e' DBOS a tenerla, non un processo. Un servizio ucciso
 mentre aspetta torna ad aspettare la stessa risposta, e la notifica arrivata a
 una replica diversa trova comunque la sua istanza.
+
+## Perche' e' passata di li'
+
+Ogni cambiamento scrive **anche l'evento che lo spiega**, nella stessa
+transazione: uno stato scritto senza il suo evento sarebbe uno stato che nessuno
+sa raccontare. La storia si legge da `/instances/{id}/events`, e cresce solo in
+fondo -- per seguirla si chiede `?after=<ultimo id letto>`.
+
+`/instances/{id}/replay` **rigioca la storia senza fare niente**: nessun tool
+chiamato, nessun agente interrogato, nessun modello. Quello che poteva andare in
+due modi -- cosa ha risposto un tool, cosa ha detto l'agente -- si rilegge dagli
+eventi; quello che e' una regola -- quale ramo prende una condizione, quale passo
+viene dopo -- si ricalcola e **si confronta con quello che era stato registrato**.
+
+Se le due cose non coincidono piu', e' un 409 e non un percorso: vuol dire che
+la definizione o i dati sono cambiati sotto, e la storia ha smesso di spiegare
+l'istanza. Rigiocare in silenzio con la regola nuova sarebbe peggio che
+rifiutare.
+
+La regola su cosa viene dopo un passo sta nella **definizione**, non nel motore,
+proprio perche' il replay deve camminare il processo come lo ha camminato il
+motore: due copie di quella regola sarebbero due processi.
+
+## Log e tracce si trovano
+
+Ogni riga scritta mentre un passo gira porta `instance_id`, senza che il tool
+debba dirlo; e se c'e' un collector, l'istanza si tiene il `trace_id` del giro
+in cui e' partita, come evento nella sua storia. Da una riga di log si arriva
+all'istanza, e dall'istanza alle righe degli altri servizi.
 
 ## Quello che non si aspetta a vicenda parte insieme
 

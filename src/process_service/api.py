@@ -23,8 +23,9 @@ from .engine import (
     use_engine,
 )
 from .migrations import run_migrations
-from .models import AnswerRequest, ApprovalRequest, Instance, StartRequest
+from .models import AnswerRequest, ApprovalRequest, Event, Instance, StartRequest
 from .observability import configure_logging, configure_tracing
+from .replay import ReplayDiverged, replay
 from .store import InstanceStore, build_pool
 
 logger = logging.getLogger(__name__)
@@ -296,6 +297,56 @@ def create_app(
             "Instance %s step %s: %s by %s.", instance_id, step_id, request.decision, request.by
         )
         return {"state": request.decision}
+
+    @app.get("/instances/{instance_id}/events")
+    async def read_events(
+        instance_id: UUID,
+        after: int = Query(default=0, ge=0),
+        scope: str = Depends(current_scope),
+        store: InstanceStore = Depends(current_store),
+    ) -> dict[str, list[Event]]:
+        """Everything that happened to this instance, in order.
+
+        `after` is the id of the last event already read: the history only ever
+        grows at the end, so following an instance is asking for what came after
+        what you have.
+        """
+        instance = await store.get(scope=scope, instance_id=instance_id)
+        if instance is None:
+            raise HTTPException(status_code=404, detail="unknown instance")
+        return {"events": await store.events_of(instance_id=instance_id, after=after)}
+
+    @app.get("/instances/{instance_id}/replay")
+    async def replay_instance(
+        instance_id: UUID,
+        scope: str = Depends(current_scope),
+        store: InstanceStore = Depends(current_store),
+    ) -> dict[str, Any]:
+        """Walks the history again, and says which way the instance went.
+
+        Nothing is called: the tools, the agents and the model are read back
+        from the events. When the answer disagrees with what was recorded, that
+        is a 409 and not a path -- the history has stopped explaining the
+        instance, and saying so is the useful answer.
+        """
+        instance = await store.get(scope=scope, instance_id=instance_id)
+        if instance is None:
+            raise HTTPException(status_code=404, detail="unknown instance")
+
+        definition = definitions.get(instance.process_id, instance.process_version)
+        events = await store.events_of(instance_id=instance_id)
+        try:
+            walked = replay(definition, events)
+        except ReplayDiverged as divergence:
+            raise HTTPException(status_code=409, detail=str(divergence)) from divergence
+        return {
+            "path": walked.path,
+            "decisions": walked.decisions,
+            "outputs": walked.outputs,
+            "context": walked.context,
+            "status": walked.status,
+            "undone": walked.undone,
+        }
 
     @app.get("/instances")
     async def list_instances(

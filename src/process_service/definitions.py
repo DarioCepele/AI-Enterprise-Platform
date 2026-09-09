@@ -79,6 +79,33 @@ class ProcessDefinition(BaseModel):
             | {step.on_timeout for step in self.steps if step.on_timeout}
         )
 
+    def next_after(self, step: Step, outcome: Any, done: set[str]) -> list[str]:
+        """What becomes runnable after this step.
+
+        A branch hands control to exactly one target, and so does `goto`: a step
+        reached through a branch cannot be waited on with `depends_on`, because
+        the other side of the branch would never satisfy it. Everything else
+        follows the dependencies, and a step runs only once every step it waits
+        for is done.
+
+        It lives here, and not in the engine, because replaying a history has to
+        walk the process the same way the engine walked it -- two copies of this
+        rule would be two processes.
+        """
+        if step.type == "decision":
+            return [outcome] if isinstance(outcome, str) else []
+
+        if step.goto:
+            return [step.goto] if step.goto not in done else []
+
+        return [
+            candidate.id
+            for candidate in self.steps
+            if step.id in candidate.depends_on
+            and candidate.id not in done
+            and all(dependency in done for dependency in candidate.depends_on)
+        ]
+
     def entry_steps(self) -> list[Step]:
         """Where an instance starts: no dependencies, and nobody hands to it.
 
