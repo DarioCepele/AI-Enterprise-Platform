@@ -204,6 +204,21 @@ nella distribuzione open source (AGPLv3) e redis-stack non è più mantenuta.
 Verificato sull'istanza: `FT.CREATE` e `VADD` rispondono, quindi la ricerca
 vettoriale è disponibile qui senza aggiungere un terzo datastore.
 
+## I log operativi con piu' di una replica
+
+Il tab LOG legge `GET /logs` con un cursore. Il collettore in RAM di ogni
+processo resta, ma quando `DEMO_REDIS_URI` e' configurato le righe finiscono
+anche in uno stream Redis condiviso, e l'endpoint legge da li': due repliche
+raccontano una storia sola invece di meta' ciascuna.
+
+Il cursore e' **opaco**: con lo stream porta una posizione piu' il numero di
+sequenza globale, senza porta il numero di sequenza locale. Il client lo
+rimanda com'e'. `dropped` dice quante righe sono uscite dal buffer fra due
+letture, cosi' un buco non si legge come continuita'.
+
+Senza Redis non si rompe niente: ogni replica mostra le proprie righe, e lo
+dichiara nei log all'avvio.
+
 ## Contratti fra i repo
 
 `contracts/` tiene i campioni versionati di cio' che passa da un repo all'altro:

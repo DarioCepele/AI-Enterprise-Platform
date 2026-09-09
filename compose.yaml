@@ -10,6 +10,7 @@ services:
       DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
       DEMO_ALLOWED_ORIGINS: ${DEMO_ALLOWED_ORIGINS:-}
       DEMO_MEMORY_SERVICE_URL: http://memory-service:8100
+      DEMO_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/1
       DEMO_KNOWLEDGE_AGENT_URL: http://knowledge-agent:8200/
       DEMO_PUBLIC_URL: http://master-agent:8000
       DEMO_PUSH_SECRET: ${DEMO_PUSH_SECRET:?required in .env}
@@ -21,6 +22,8 @@ services:
       memory-service:
         condition: service_healthy
       knowledge-agent:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

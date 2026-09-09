@@ -100,10 +100,10 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 **Perche':** `LogCollector` e' un `deque` in RAM con un cursore per processo. Con due repliche il tab LOG mostra meta' delle righe, e quali meta' dipende da chi ha risposto alla `GET /logs`.
 
-- [ ] **Step 1:** test: due collector che scrivono sullo stesso backend condiviso vengono letti da un terzo con un cursore solo.
-- [ ] **Step 2:** implementare il backend su Redis Streams (`XADD` con maxlen approssimato, `XRANGE` dal cursore), tenendo il `deque` come ripiego quando Redis non e' configurato.
-- [ ] **Step 3:** il cursore diventa l'id dello stream, non un intero per processo; il frontend lo tratta gia' come opaco — verificare che sia vero in `lib/agui/logs.ts`.
-- [ ] **Step 4:** documentare il ripiego: senza Redis, i log restano locali e con piu' repliche sono parziali.
+- [x] **Step 1:** test: due collector che scrivono sullo stesso backend condiviso vengono letti da un terzo con un cursore solo.
+- [x] **Step 2:** implementare il backend su Redis Streams (`XADD` con maxlen approssimato, `XRANGE` dal cursore), tenendo il `deque` come ripiego quando Redis non e' configurato.
+- [x] **Step 3:** il cursore diventa l'id dello stream, non un intero per processo; il frontend **non** lo trattava come opaco (`cursor: number`): ora si', e il contratto `agui/logs-page` lo dichiara.
+- [x] **Step 4:** documentare il ripiego: senza Redis, i log restano locali e con piu' repliche sono parziali.
 
 **Fatto quando:** con due repliche il tab LOG mostra le righe di entrambe, in ordine.
 
