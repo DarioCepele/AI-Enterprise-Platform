@@ -15,4 +15,6 @@ USER service
 
 EXPOSE 8100
 
-CMD ["uv", "run", "--no-sync", "uvicorn", "memory_service.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8100"]
+# The interpreter of the venv, not `uv run`: uv wants a writable cache,
+# and a container that only serves HTTP has no business writing anywhere.
+CMD ["/app/.venv/bin/uvicorn", "memory_service.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8100"]
