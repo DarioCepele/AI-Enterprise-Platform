@@ -219,6 +219,23 @@ letture, cosi' un buco non si legge come continuita'.
 Senza Redis non si rompe niente: ogni replica mostra le proprie righe, e lo
 dichiara nei log all'avvio.
 
+## Sonde, log e tracce
+
+`/health/live` dice se il processo e' bloccato e non chiede niente a nessuno:
+una sonda di liveness che interrogasse i database trasformerebbe un guasto in
+un loop di riavvii. `/health/ready` dice se il servizio puo' servire, ed e'
+quella che il compose usa per `service_healthy`.
+
+Cosa conta come dipendenza cambia per servizio: per il master il servizio di
+memoria si' e i sottoagenti no -- uno giu' degrada un turno e il tool lo
+dichiara, mentre senza memoria ogni thread ripartirebbe da zero in silenzio.
+Per la memoria, Mongo e' obbligatorio e Redis no: e' una cache, e senza si e'
+piu' lenti, non incapaci.
+
+Con `JSON_LOGS=true` le righe diventano oggetti con servizio, logger e thread
+del turno. Con `OTEL_EXPORTER_OTLP_ENDPOINT` le tracce attraversano i tre
+servizi; senza, non si esporta niente e non si rompe niente.
+
 ## Contratti fra i repo
 
 `contracts/` tiene i campioni versionati di cio' che passa da un repo all'altro:

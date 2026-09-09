@@ -148,14 +148,25 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 ## Blocco C — I confini reggono il traffico vero
 
+**Chiuso il 2026-09-09**, meno la traccia di esempio nel README (C4 step 4),
+che ha senso scriverla con un collector davanti. Due note:
+
+- il `run_id` nei log non c'e': il thread basta a ricucire un turno, e il run
+  vive dentro l'adattatore AG-UI senza passare da una ContextVar nostra. Se
+  servira', il posto e' `LabRunner`;
+- ricordare davvero le notifiche gia' viste ha rotto i test delle push, che
+  condividevano il thread `t1` e leggevano gli avanzi l'uno dell'altro. Il
+  codice era giusto, l'isolamento no -- ed e' il tipo di rottura che si vede
+  solo con Redis configurato.
+
 ### Task C1 — Timeout, ritentativi e un limite alle richieste
 
 **Files:** `demo-master-agent/src/demo/a2a/client.py`, `memory/remote_store.py`, `tools/memory_tools.py`, `server/app.py`
 
-- [ ] **Step 1:** test: una chiamata alla memoria che fallisce con 503 viene ritentata con backoff e poi degrada, senza far fallire il turno.
-- [ ] **Step 2:** test: oltre N fallimenti consecutivi il client smette di provare per un intervallo (circuit breaker) e lo dice nei log una volta sola, non a ogni richiesta.
-- [ ] **Step 3:** limite di dimensione sul corpo di `POST /agui` e sul webhook push; oltre il limite, 413 con messaggio.
-- [ ] **Step 4:** timeout espliciti su ogni client HTTP, nessuno lasciato al default della libreria.
+- [x] **Step 1:** test: una chiamata alla memoria che fallisce con 503 viene ritentata con backoff e poi degrada, senza far fallire il turno.
+- [x] **Step 2:** test: oltre N fallimenti consecutivi il client smette di provare per un intervallo (circuit breaker) e lo dice nei log una volta sola, non a ogni richiesta.
+- [x] **Step 3:** limite di dimensione sul corpo di `POST /agui` e sul webhook push; oltre il limite, 413 con messaggio.
+- [x] **Step 4:** timeout espliciti su ogni client HTTP, nessuno lasciato al default della libreria.
 
 **Fatto quando:** un servizio a valle giu' produce una degradazione dichiarata e limitata nel tempo, non una raffica di stack trace.
 
@@ -165,9 +176,9 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 **Perche':** oggi `/health` risponde `ok` anche se Mongo e' irraggiungibile. Un orchestratore che ci crede manda traffico a un processo che non puo' servirlo.
 
-- [ ] **Step 1:** test: `/health/ready` risponde 503 quando la dipendenza obbligatoria non risponde, e 200 quando risponde.
-- [ ] **Step 2:** `/health/live` resta una risposta senza dipendenze: serve a dire "il processo non e' bloccato", non "il sistema funziona".
-- [ ] **Step 3:** compose e manifest puntano alle due sonde giuste.
+- [x] **Step 1:** test: `/health/ready` risponde 503 quando la dipendenza obbligatoria non risponde, e 200 quando risponde.
+- [x] **Step 2:** `/health/live` resta una risposta senza dipendenze: serve a dire "il processo non e' bloccato", non "il sistema funziona".
+- [x] **Step 3:** compose e manifest puntano alle due sonde giuste.
 
 **Fatto quando:** spegnere Mongo rende il servizio di memoria *not ready* senza farlo riavviare in loop.
 
@@ -177,9 +188,9 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 **Perche':** il token firma il thread e non scade. Chi lo intercetta una volta puo' riusarlo per sempre su quel thread.
 
-- [ ] **Step 1:** test: una notifica con timestamp piu' vecchio della finestra viene rifiutata.
-- [ ] **Step 2:** test: la stessa notifica consegnata due volte viene annotata in memoria una volta sola.
-- [ ] **Step 3:** firmare `thread_id + finestra temporale`, e deduplicare per `task_id + stato` con una chiave a TTL su Redis.
+- [x] **Step 1:** test: una notifica con timestamp piu' vecchio della finestra viene rifiutata.
+- [x] **Step 2:** test: la stessa notifica consegnata due volte viene annotata in memoria una volta sola.
+- [x] **Step 3:** firmare `thread_id + finestra temporale`, e deduplicare per `task_id + stato` con una chiave a TTL su Redis.
 
 **Fatto quando:** replay e duplicati sono coperti da test, e il README dice perche' la firma include il tempo.
 
@@ -189,9 +200,9 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 **Perche':** oggi una domanda che tocca master, knowledge e memoria lascia tre serie di righe che nessuno puo' ricucire.
 
-- [ ] **Step 1:** log in JSON con `service`, `thread_id`, `run_id`, `trace_id`.
-- [ ] **Step 2:** propagazione W3C `traceparent` sulle chiamate A2A e verso la memoria.
-- [ ] **Step 3:** OpenTelemetry con esportatore OTLP configurabile; senza endpoint configurato non si esporta e non si rompe niente.
+- [x] **Step 1:** log in JSON con `service`, `thread_id`, `run_id`, `trace_id`.
+- [x] **Step 2:** propagazione W3C `traceparent` sulle chiamate A2A e verso la memoria.
+- [x] **Step 3:** OpenTelemetry con esportatore OTLP configurabile; senza endpoint configurato non si esporta e non si rompe niente.
 - [ ] **Step 4:** una traccia di esempio nel README: un turno con sottoagente, dall'ingresso all'artefatto.
 
 **Fatto quando:** da un `trace_id` si ricostruisce il giro completo di un turno.
