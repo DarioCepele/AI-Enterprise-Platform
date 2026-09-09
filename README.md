@@ -236,6 +236,23 @@ Con `JSON_LOGS=true` le righe diventano oggetti con servizio, logger e thread
 del turno. Con `OTEL_EXPORTER_OTLP_ENDPOINT` le tracce attraversano i tre
 servizi; senza, non si esporta niente e non si rompe niente.
 
+## Immagini e deploy
+
+Le immagini di base sono pinnate per **digest**: un tag si sposta, un digest
+no, e due build della stessa riga devono partire dalla stessa base. Nessun
+processo gira come root, e i tre servizi Python reggono
+`readOnlyRootFilesystem` -- chiamano uvicorn dal venv, perche' `uv run` vuole
+una cache scrivibile.
+
+Il frontend legge la propria configurazione **a runtime**: la stessa immagine
+serve staging e produzione cambiando `AGUI_URL` e `PRODUCT_NAME`, senza
+ricostruire niente. Prima quelle variabili finivano nel bundle a build time.
+
+I manifest Kubernetes stanno in `deploy/`, con due repliche di default sul
+master agent e sul servizio di memoria: non e' dimensionamento, e' la sonda che
+fa emergere subito una regressione dello stato di processo. Mongo e Redis
+restano fuori, e il perche' e' scritto in `deploy/README.md`.
+
 ## Contratti fra i repo
 
 `contracts/` tiene i campioni versionati di cio' che passa da un repo all'altro:

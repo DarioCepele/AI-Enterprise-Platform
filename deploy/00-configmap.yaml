@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agui-lab
+data:
+  # What is not a secret. Addresses of the managed databases and the API keys
+  # live in the Secret of the same name, which this repository does not carry.
+  OPENAI_BASE_URL: https://openrouter.ai/api/v1
+  OPENAI_CHAT_COMPLETION_MODEL: anthropic/claude-sonnet-5
+  DEMO_PRODUCT_NAME: AG-UI Lab
+  DEMO_PRODUCT_LANGUAGE: Italian
+  DEMO_SUBAGENT_WAIT_SECONDS: "60"
+  PRODUCT_NAME: AG-UI Lab
+  MEMORY_MONGO_DATABASE: agui_lab
+  MEMORY_RETENTION_DAYS: "0"

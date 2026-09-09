@@ -1,5 +1,10 @@
 services:
   master-agent:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
     build: ../demo-master-agent
     ports:
       - "8000:8000"
@@ -34,6 +39,11 @@ services:
       retries: 5
 
   memory-service:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
     build: ../demo-memory-service
     environment:
       MEMORY_MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/?authSource=admin
@@ -58,6 +68,11 @@ services:
       retries: 5
 
   knowledge-agent:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
     build: ../demo-knowledge-agent
     environment:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL}
@@ -74,10 +89,15 @@ services:
       retries: 5
 
   frontend:
-    build:
-      context: ../demo-frontend
-      args:
-        NEXT_PUBLIC_AGUI_URL: http://localhost:8000/agui
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    build: ../demo-frontend
+    environment:
+      AGUI_URL: ${AGUI_URL:-http://localhost:8000/agui}
+      PRODUCT_NAME: ${PRODUCT_NAME:-AG-UI Lab}
     ports:
       - "3000:3000"
     depends_on:
@@ -85,7 +105,12 @@ services:
         condition: service_healthy
 
   mongo:
-    image: mongo:8.0.16
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+    image: mongo:8.0.16@sha256:4b58ebcb1dc7a7b4e84cd8ce9098d48764ae4478876898ff9551acf2ac4a6a6d
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?required in .env}
@@ -103,7 +128,12 @@ services:
       start_period: 20s
 
   redis:
-    image: redis:8.2.3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    image: redis:8.2.3@sha256:0908d9af26bf9b985e984a40a5eb82eed229b07a3317eee6843832c3cc3a9619
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?required in .env}", "--appendonly", "no"]
     ports:

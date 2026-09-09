@@ -244,13 +244,23 @@ anche per la manutenzione.
 
 ## Blocco E — Confezione e consegna
 
+**Chiuso il 2026-09-09**, meno due cose dichiarate: `docker compose config`
+non nasconde i segreti (il `.env` resta il percorso di sviluppo, i manifest
+usano il Secret) e `kubectl apply` non e' stato eseguito -- non c'e' un
+cluster qui, e i manifest sono validati solo come YAML.
+
+Una cosa emersa facendolo: `readOnlyRootFilesystem: true` **rompe il
+container**, perche' `uv run` vuole una cache scrivibile. Si risolve chiamando
+uvicorn dal venv invece che tramite uv: un processo che serve solo HTTP non ha
+motivo di scrivere da nessuna parte. Verificato con `docker run --read-only`.
+
 ### Task E1 — Immagini che si possono mettere in produzione
 
 **Files:** i quattro `Dockerfile`, `demo-infra/compose.yaml`
 
-- [ ] **Step 1:** utente non root in tutte e quattro le immagini.
-- [ ] **Step 2:** immagini di base pinnate per digest, non per tag.
-- [ ] **Step 3:** `mongo` e `redis` con limiti di risorse nel compose; Redis con `appendonly` deciso e dichiarato.
+- [x] **Step 1:** utente non root in tutte e quattro le immagini.
+- [x] **Step 2:** immagini di base pinnate per digest, non per tag.
+- [x] **Step 3:** `mongo` e `redis` con limiti di risorse nel compose; Redis con `appendonly` deciso e dichiarato.
 - [ ] **Step 4:** `docker compose config` senza segreti in chiaro: `.env` resta per lo sviluppo, i manifest usano i secret dell'orchestratore.
 
 **Fatto quando:** `docker scout` (o equivalente) non segnala vulnerabilita' alte sulle immagini costruite, e nessun processo gira come root.
@@ -261,9 +271,9 @@ anche per la manutenzione.
 
 **Perche':** `NEXT_PUBLIC_AGUI_URL` viene inlinato nel bundle a build time. La stessa immagine non puo' passare da staging a produzione: bisogna ricostruirla, il che vanifica la promozione dell'artefatto.
 
-- [ ] **Step 1:** test: il client legge la configurazione iniettata dal server invece della costante di build.
-- [ ] **Step 2:** esporre la configurazione pubblica da un endpoint o da uno script nel layout, letto una volta all'avvio.
-- [ ] **Step 3:** togliere l'`ARG` dal Dockerfile.
+- [x] **Step 1:** test: il client legge la configurazione iniettata dal server invece della costante di build.
+- [x] **Step 2:** esporre la configurazione pubblica da un endpoint o da uno script nel layout, letto una volta all'avvio.
+- [x] **Step 3:** togliere l'`ARG` dal Dockerfile.
 
 **Fatto quando:** la stessa immagine del frontend gira contro due backend diversi cambiando solo una variabile d'ambiente del container.
 
@@ -271,9 +281,9 @@ anche per la manutenzione.
 
 **Files:** `.github/workflows/ci.yml` in ciascuno dei quattro repo
 
-- [ ] **Step 1:** test + lint su push e pull request; per il servizio di memoria, Mongo e Redis come servizi del job.
-- [ ] **Step 2:** build dell'immagine e scansione delle vulnerabilita'.
-- [ ] **Step 3:** i test di contratto del Blocco F girano in ognuno dei repo che partecipano al contratto.
+- [x] **Step 1:** test + lint su push e pull request; per il servizio di memoria, Mongo e Redis come servizi del job.
+- [x] **Step 2:** build dell'immagine e scansione delle vulnerabilita'.
+- [x] **Step 3:** i test di contratto del Blocco F girano in ognuno dei repo che partecipano al contratto.
 
 **Fatto quando:** un push che rompe un contratto fra repo fallisce in CI nel repo che l'ha rotto.
 
@@ -281,10 +291,10 @@ anche per la manutenzione.
 
 **Files:** `demo-infra/deploy/` (nuovo)
 
-- [ ] **Step 1:** Deployment per i quattro servizi con probe di liveness e readiness, richieste e limiti, `securityContext` non root.
-- [ ] **Step 2:** Secret e ConfigMap separati; nessuna variabile sensibile in un ConfigMap.
-- [ ] **Step 3:** due repliche di master agent e servizio di memoria nel manifest di default — cosi' una regressione del Blocco B si vede subito.
-- [ ] **Step 4:** Mongo e Redis **fuori** dai manifest, con un README che dice di usare servizi gestiti e perche' un database in un Deployment senza operator e' una trappola.
+- [x] **Step 1:** Deployment per i quattro servizi con probe di liveness e readiness, richieste e limiti, `securityContext` non root.
+- [x] **Step 2:** Secret e ConfigMap separati; nessuna variabile sensibile in un ConfigMap.
+- [x] **Step 3:** due repliche di master agent e servizio di memoria nel manifest di default — cosi' una regressione del Blocco B si vede subito.
+- [x] **Step 4:** Mongo e Redis **fuori** dai manifest, con un README che dice di usare servizi gestiti e perche' un database in un Deployment senza operator e' una trappola.
 
 **Fatto quando:** `kubectl apply` porta su lo stack contro un Mongo e un Redis esterni, e il giro completo funziona con due repliche.
 
