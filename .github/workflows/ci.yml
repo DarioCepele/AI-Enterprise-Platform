@@ -44,3 +44,24 @@ jobs:
           sed -i 's/^\(DEMO_PUSH_SECRET\)=.*/\1=ci/' .env
           sed -i 's/^\(KNOWLEDGE_SERVICE_TOKEN\)=.*/\1=ci/' .env
           docker compose config > /dev/null
+
+  env-table:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: demo-infra
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/demo-master-agent
+          path: demo-master-agent
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/demo-memory-service
+          path: demo-memory-service
+      - uses: astral-sh/setup-uv@v7
+
+      # The table is generated from the fields that read the environment: if it
+      # drifts, the README is documenting a configuration that no longer exists.
+      - run: uv run --project ../demo-master-agent python tools/env_table.py --check
+        working-directory: demo-infra

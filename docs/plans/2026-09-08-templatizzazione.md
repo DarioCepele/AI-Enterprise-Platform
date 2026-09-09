@@ -77,7 +77,7 @@ Oggi chi forka deve cercare le stringhe. `SINGLE_TENANT_SCOPE = "local-laborator
 - [x] **Step 1:** test: senza intestazioni la risoluzione restituisce `settings.default_scope`.
 - [x] **Step 2:** test: con l'intestazione di scope configurata la risoluzione la usa, e uno scope vuoto o malformato ricade sul default invece di propagare stringhe arbitrarie.
 - [x] **Step 3:** implementare `scope_resolver` iniettabile in `create_app`, con il resolver a tenant singolo come default.
-- [ ] **Step 4:** README: una sezione "dove si aggancia l'autenticazione" che nomina questa funzione, gli `security_schemes` della card e il token di servizio.
+- [x] **Step 4:** README: una sezione "dove si aggancia l'autenticazione" che nomina questa funzione, gli `security_schemes` della card e il token di servizio.
 
 **Fatto quando:** esiste un punto solo da cambiare per passare da un tenant a molti, ed e' documentato.
 
@@ -316,12 +316,16 @@ motivo di scrivere da nessuna parte. Verificato con `docker run --read-only`.
 
 ### Task F2 — Il README del template
 
+**Chiuso il 2026-09-09.** La tabella si genera con `tools/env_table.py` e la CI
+la verifica con `--check`: se va fuori sincrono, il README documenta una
+configurazione che non esiste piu'.
+
 **Files:** `demo-infra/README.md`, README dei quattro repo
 
-- [ ] **Step 1:** "Come si forka": cosa si cambia (configurazione, branding, agenti, skill), cosa si tiene, cosa si butta (il knowledge agent e' un esempio).
-- [ ] **Step 2:** "Cosa manca di proposito": autenticazione, con il rimando alle giunture del Task A3.
-- [ ] **Step 3:** "Limiti dichiarati": ogni ripiego che degrada senza Redis, ogni default che vale per un tenant solo.
-- [ ] **Step 4:** una tabella delle variabili d'ambiente, generata dal modulo di configurazione, non scritta a mano.
+- [x] **Step 1:** "Come si forka": cosa si cambia (configurazione, branding, agenti, skill), cosa si tiene, cosa si butta (il knowledge agent e' un esempio).
+- [x] **Step 2:** "Cosa manca di proposito": autenticazione, con il rimando alle giunture del Task A3.
+- [x] **Step 3:** "Limiti dichiarati": ogni ripiego che degrada senza Redis, ogni default che vale per un tenant solo.
+- [x] **Step 4:** una tabella delle variabili d'ambiente, generata dal modulo di configurazione, non scritta a mano.
 
 **Fatto quando:** una persona che non ha visto il progetto arriva a un giro completo seguendo solo il README.
 

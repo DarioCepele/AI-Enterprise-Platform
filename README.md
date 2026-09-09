@@ -1,15 +1,165 @@
 # Laboratorio AG-UI
 
-Demo locale di un'interfaccia agentica: chat in streaming, piano di lavoro ed
-event inspector alimentati da un solo stream SSE in protocollo AG-UI, un agente
-che interroga un **sottoagente via A2A** e una memoria conversazionale che
-sopravvive ai riavvii.
+Un'interfaccia agentica completa da cui partire: chat in streaming, piano di
+lavoro ed event inspector alimentati da un solo stream SSE in protocollo AG-UI,
+un agente che interroga **sottoagenti via A2A** e una memoria conversazionale
+che sopravvive ai riavvii.
 
-Il tab LOG usa un secondo canale: `GET /logs?cursor=<int>`, interrogato durante
-la run e una volta alla fine. Il polling si ferma a riposo; cambiare tab conserva
-cronologia e cursore.
+E' pensato per essere **forkato**: si clona, si cambiano delle variabili, si
+scrivono i propri agenti. Cosa toccare sta in "[Come si forka](#come-si-forka)";
+cosa manca di proposito, in "[Cosa non c'e'](#cosa-non-ce-e-perche)".
+
+Il tab LOG usa un secondo canale: `GET /logs?cursor=<opaco>`, interrogato
+durante la run e una volta alla fine. Il polling si ferma a riposo; cambiare tab
+conserva cronologia e cursore.
 
 Design: [`docs/specs/2026-09-07-agui-lab-design.md`](docs/specs/2026-09-07-agui-lab-design.md)
+
+## Come si forka
+
+Quattro repo fratelli, nessuno che li contiene: si clonano tutti e quattro nella
+stessa cartella, perche' il compose li costruisce da percorsi fratelli e i test
+di contratto cercano `../demo-infra/contracts`.
+
+**Quello che si cambia**, in ordine di quanto si nota:
+
+1. **Le variabili d'ambiente.** Nome del prodotto, lingua delle risposte, scope,
+   modelli, indirizzi. Sono tutte nella tabella qui sotto e in `.env.example`;
+   nessuna richiede di toccare il codice.
+2. **Le istruzioni del master**, in `demo-master-agent/src/demo/agents/master.py`.
+   E' il prompt che dice come lavora il tuo agente: il nome e la lingua ci
+   arrivano gia' dalla configurazione.
+3. **Le skill**, in `demo-master-agent/src/demo/skills/`. Formato Agent Skills:
+   una cartella, un `SKILL.md`, frontmatter YAML. `comparison` e' un esempio.
+4. **I tool**, in `demo-master-agent/src/demo/tools/`. `ui_table` e il piano di
+   lavoro sono il vocabolario dell'interfaccia; il resto e' tuo.
+5. **Il copy dell'interfaccia**, in `demo-frontend/lib/runtime-config.ts` per
+   nome e claim, nei componenti per il resto.
+
+**Quello che si tiene** e' l'ossatura: lo stream AG-UI e il reducer che lo
+consuma, il client A2A col ciclo di vita del task, il servizio di memoria con
+riassunti e ricerca semantica, i contratti fra i repo, le sonde, le migrazioni.
+
+**Quello che si butta**: `demo-knowledge-agent` e' un **esempio** di sottoagente
+A2A -- corpus di tre documenti su tre linguaggi. Serve a mostrare come si scrive
+un agente remoto che risponde con artefatti strutturati e sa fermarsi a chiedere
+un chiarimento. Il tuo sottoagente prendera' il suo posto, o non ce ne sara'
+nessuno: `DEMO_SUBAGENTS=` vuoto e il master non espone tool di sottoagente.
+
+## Cosa non c'e', e perche'
+
+**L'autenticazione.** Rimandata per scelta, ma le giunture sono aperte e sono
+tre:
+
+- `demo-master-agent/src/demo/server/scope.py` -- `scope_of_request` decide a
+  quale scope appartiene una richiesta. Oggi restituisce lo scope configurato, e
+  legge l'intestazione **solo** se `DEMO_SCOPE_HEADER` la dichiara fidata: un
+  valore che nessuno ha verificato e' una richiesta del client, non
+  un'identita'. Chi aggiunge OIDC sostituisce questa funzione, e nient'altro;
+- `create_app(scope_resolver=...)` la accetta iniettata, quindi la sostituzione
+  non richiede di modificare l'app;
+- la card A2A dichiara gia' i propri `security_schemes`, e il token di servizio
+  della card estesa e' isolato in `demo-knowledge-agent/src/knowledge/extended.py`.
+
+**Una UI di amministrazione.** Ritenzione e reindicizzazione sono endpoint,
+pensati per un job schedulato.
+
+**Un registry di agenti.** Il master conosce i sottoagenti per configurazione.
+Il perche' e cosa servirebbe stanno in §11 della spec.
+
+## Limiti dichiarati
+
+Quello che degrada, invece di rompersi, quando manca un pezzo:
+
+| Se manca | Cosa succede |
+|---|---|
+| `DEMO_MEMORY_SERVICE_URL` | la conversazione vive in RAM e muore col processo |
+| `DEMO_REDIS_URI` | i log operativi restano per replica, e con due repliche il tab LOG ne mostra meta'; le notifiche push non si deduplicano |
+| `MEMORY_REDIS_URI` | niente coda calda, niente ricerca semantica, lock di compattazione solo di processo |
+| `MEMORY_SUMMARY_MODEL` | i turni fuori finestra escono dal contesto senza riassunto, e non si imparano fatti duraturi |
+| `MEMORY_EMBEDDING_MODEL` | `cerca_nei_ricordi` non trova niente e lo dichiara |
+| `KNOWLEDGE_SERVICE_TOKEN` | la card estesa non e' accessibile: il modello interroga il sottoagente senza sapere cosa contiene |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | nessuna traccia esportata, tutto il resto uguale |
+
+E i default che valgono per un tenant solo: `DEMO_DEFAULT_SCOPE` e' una
+costante, `DEMO_SCOPE_HEADER` e' vuoto, la ritenzione e' spenta.
+
+## Variabili d'ambiente
+
+Generata da chi le legge, con `tools/env_table.py`: una tabella scritta a mano
+e' una tabella che mente al secondo cambiamento.
+
+<!-- env-table:start -->
+
+### master agent
+
+| Variable | Default | What it decides |
+|---|---|---|
+| `OPENAI_BASE_URL` | `https://openrouter.ai/api/v1` | Where the model lives. Any OpenAI-compatible endpoint. |
+| `OPENAI_API_KEY` | *(empty)* | Credential for that endpoint. Required unless the fake client is on. |
+| `OPENAI_CHAT_COMPLETION_MODEL` | `anthropic/claude-sonnet-5` | Model the master agent talks to. |
+| `DEMO_FAKE_CLIENT` | `False` | Deterministic answers without a model. For tests and offline work. |
+| `DEMO_ALLOWED_ORIGINS` | `http://localhost:3000, http://127.0.0.1:3000, http://localhost:3001, http://127.0.0.1:3001` | Comma-separated origins allowed by CORS. |
+| `DEMO_PRODUCT_NAME` | `AG-UI Lab` | What the agent calls itself in its own instructions. |
+| `DEMO_PRODUCT_LANGUAGE` | `Italian` | Language the agent answers in. |
+| `DEMO_DEFAULT_SCOPE` | `local-laboratory` | Authorization boundary used when nothing else says otherwise. |
+| `DEMO_SCOPE_HEADER` | *(empty)* | Header carrying the scope, read **only** when this is set: naming it means something in front has verified it. |
+| `DEMO_JSON_LOGS` | `False` | Structured logs for a collector instead of the readable line. |
+| `DEMO_MEMORY_SERVICE_URL` | *(empty)* | Memory service. Without it the conversation lives in RAM and dies with the process. |
+| `DEMO_REDIS_URI` | *(empty)* | Shared logs, deduplicated notifications. Without it both are per replica. |
+| `DEMO_KNOWLEDGE_AGENT_URL` | *(empty)* | One subagent, the short way. Ignored when DEMO_SUBAGENTS is set. |
+| `DEMO_KNOWLEDGE_SERVICE_TOKEN` | *(empty)* | Service token of that subagent, for its extended card. |
+| `DEMO_SUBAGENTS` | *(empty)* | Subagents as JSON: [{"name":"x","url":"http://...","token":""}]. |
+| `DEMO_PUBLIC_URL` | *(empty)* | How a subagent reaches this agent back, for push notifications. |
+| `DEMO_SUBAGENT_WAIT_SECONDS` | `60.0` | How long a turn waits before letting the outcome arrive by notification. |
+
+### memory service
+
+| Variable | Default | What it decides |
+|---|---|---|
+| `MEMORY_MONGO_URI` | `mongodb://127.0.0.1:27017` | Durable transcripts. Required. |
+| `MEMORY_MONGO_DATABASE` | `demo_memory` | Database name inside that Mongo. |
+| `MEMORY_REDIS_URI` | `redis://127.0.0.1:6379/0` | Hot tail, semantic index, compaction lock. Required. |
+| `MEMORY_BUCKET_SIZE` | `50` | Messages per bucket document. |
+| `MEMORY_RETENTION_DAYS` | `0` | Days of inactivity after which a thread is forgotten. 0 = never. |
+| `MEMORY_JSON_LOGS` | `False` | Structured logs for a collector instead of the readable line. |
+| `MEMORY_HOT_TAIL_SECONDS` | `1800` | How long the cached tail of a conversation survives. |
+| `MEMORY_HOT_TAIL_MESSAGES` | `100` | How many messages that tail keeps. |
+| `MEMORY_SUMMARY_MODEL` | *(empty)* | Model for summaries. Empty means no compaction and no durable facts. |
+| `MEMORY_SUMMARY_BASE_URL` | `https://openrouter.ai/api/v1` | Endpoint of the model that summarizes and extracts facts. |
+| `MEMORY_SUMMARY_API_KEY` | *(empty)* | Credential for that endpoint. |
+| `MEMORY_EMBEDDING_MODEL` | *(empty)* | Embedding model. Empty means no semantic search. |
+| `MEMORY_DROP_REASONING` | `True` | Whether past reasoning leaves the rebuilt context. |
+| `MEMORY_KEEP_TOOL_RESULTS` | `4` | How many recent tool results keep their content. |
+| `MEMORY_MAX_CONTEXT_MESSAGES` | `60` | Window handed back to the agent, in messages. |
+| `MEMORY_MAX_FACTS` | `30` | How many durable facts are injected into a context. |
+
+### frontend
+
+Read at request time, so the same image serves any environment. The
+`NEXT_PUBLIC_*` names still work as the build-time fallback.
+
+| Variable | Default | What it decides |
+|---|---|---|
+| `AGUI_URL` | `http://127.0.0.1:8000/agui` | Where the agent answers. The logs endpoint is derived from it. |
+| `PRODUCT_NAME` | `AG-UI Lab` | Name shown in the header and in the tab. |
+| `PRODUCT_TAGLINE` | `an agent at work` | Line under the name. |
+| `PRODUCT_DESCRIPTION` | *(see lib/runtime-config.ts)* | Page description. |
+| `PRODUCT_DISCLAIMER` | *(see lib/runtime-config.ts)* | Footer line. |
+| `PRODUCT_LOCALE` | `en` | `lang` of the document. |
+| `PRODUCT_MONOGRAM` | `a/` | The two characters in the badge. |
+| `PRODUCT_BADGES` | `AG-UI,MAF 1.17,Next.js` | Comma-separated badges in the header. |
+
+### knowledge agent
+
+| Variable | Default | What it decides |
+|---|---|---|
+| `KNOWLEDGE_BASE_URL` | `http://localhost:8200/` | The url this agent declares in its own card. |
+| `KNOWLEDGE_SERVICE_TOKEN` | *(empty)* | Token that unlocks the extended card. Empty means nobody gets it. |
+| `KNOWLEDGE_JSON_LOGS` | `false` | Structured logs for a collector. |
+| `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_CHAT_COMPLETION_MODEL` | *(as the master agent)* | The model this agent reads its corpus with. |
+
+<!-- env-table:end -->
 
 ## Repo
 
