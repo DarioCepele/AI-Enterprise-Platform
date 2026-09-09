@@ -7,11 +7,13 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
+from dbos import DBOS
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from .catalog import Catalog, load_catalog
 from .config import Settings, get_settings
 from .definitions import DefinitionError
+from .engine import Engine, current_engine, use_engine
 from .migrations import run_migrations
 from .models import Instance, StartRequest
 from .observability import configure_logging, configure_tracing
@@ -39,6 +41,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if store is not None:
+            use_engine(Engine(definitions, store))
             yield
             return
 
@@ -46,10 +49,26 @@ def create_app(
         await pool.open(wait=True)
         async with pool.connection() as connection:
             await run_migrations(connection)
-        state["store"] = InstanceStore(pool)
+        running_store = InstanceStore(pool)
+        state["store"] = running_store
+        use_engine(Engine(definitions, running_store))
+
+        # DBOS owns the durability: it keeps the ledger of what each instance has
+        # already done, and on launch it picks up the workflows this process --
+        # or the one it replaces -- left half-finished.
+        DBOS(
+            config={
+                "name": SERVICE_NAME,
+                "system_database_url": config.postgres_dsn,
+                "run_admin_server": False,
+                "enable_otlp": False,
+            }
+        )
+        DBOS.launch()
         try:
             yield
         finally:
+            DBOS.destroy()
             await pool.close()
 
     app = FastAPI(title="Process service", lifespan=lifespan)
@@ -125,7 +144,11 @@ def create_app(
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return await store.create(scope=scope, definition=definition, payload=request.input)
+        instance = await store.create(
+            scope=scope, definition=definition, payload=request.input
+        )
+        await current_engine().start(instance.id, scope)
+        return instance
 
     @app.get("/instances/{instance_id}")
     async def read_instance(

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Durable business processes: versioned definitions, instances that survive restarts"
 requires-python = ">=3.12"
 dependencies = [
+    "dbos>=2.31.1",
     "fastapi>=0.139.2",
     "opentelemetry-exporter-otlp-proto-http>=1.44.0",
     "opentelemetry-instrumentation-fastapi>=0.65b0",
@@ -26,6 +27,10 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# DBOS keeps a thread pool bound to the loop it launched on: a fresh loop per
+# test would leave it shut down from the second test onwards.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
 markers = ["integration: needs a real Postgres"]

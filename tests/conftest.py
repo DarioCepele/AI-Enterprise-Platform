@@ -52,3 +52,23 @@ async def pool():
 @pytest.fixture
 async def store(pool) -> InstanceStore:
     return InstanceStore(pool)
+
+
+@pytest.fixture(scope="session")
+def dbos():
+    """One DBOS per test session: it owns tables and a recovery thread."""
+    from dbos import DBOS
+
+    DBOS(
+        config={
+            "name": "process-service-tests",
+            "system_database_url": POSTGRES_DSN or "",
+            "run_admin_server": False,
+            "enable_otlp": False,
+        }
+    )
+    DBOS.launch()
+    try:
+        yield DBOS
+    finally:
+        DBOS.destroy()

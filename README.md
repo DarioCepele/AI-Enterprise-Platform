@@ -3,9 +3,11 @@
 Processi durevoli: **le definizioni sono dati versionati**, le istanze sono
 righe su Postgres, e un'istanza finisce con la versione con cui e' partita.
 
-Questo repo, oggi, tiene definizioni e istanze. L'esecuzione dei passi -- con
-ripresa dopo un crash, attese lunghe, approvazioni umane e compensazioni --
-arriva dai blocchi successivi del piano.
+Un'istanza avanza dentro un workflow DBOS: **ogni passo e' uno step
+checkpointato**, quindi un processo che muore e torna non rifa' quello che ha
+gia' fatto. Attese lunghe, approvazioni e compensazioni arrivano dai blocchi
+successivi; oggi un passo `agent` o `approval` **sospende** l'istanza, che resta
+una riga e non una richiesta appesa.
 
 ## Una definizione
 
@@ -89,3 +91,23 @@ container non si presenta.
 Numerate, idempotenti, registrate in `schema_migrations`, applicate all'avvio.
 Come nel servizio di memoria, e per lo stesso motivo: un fork non deve dover
 trovare uno script ed eseguirlo a mano prima che il servizio parta.
+
+## Cosa rende durevole un'istanza
+
+Tre regole, e tutte e tre hanno un test che le tiene.
+
+**Il workflow deve rigiocarsi uguale.** Il corpo legge i propri dati da uno step
+(`read_plan`) e non da righe che cambiano mentre gira: una versione che leggesse
+lo stato corrente prenderebbe una strada diversa al secondo giro, e DBOS lo dice
+con un errore invece di lasciarlo passare. E' la prima cosa che abbiamo sbagliato.
+
+**Un effetto esterno ha una chiave.** I passi con `idempotency_key` scrivono
+prima nella tabella `side_effects`, dove la chiave e' unica: due tentativi dello
+stesso passo -- anche su due repliche -- lasciano un effetto solo.
+
+**L'istanza porta la propria versione.** Il motore risolve la definizione con
+`(process_id, process_version)` presi dalla riga: il catalogo puo' cambiare
+mentre l'istanza gira, e lei finisce comunque il processo che ha iniziato.
+
+Il workflow ha come id **l'id dell'istanza**: chiedere due volte di avviarla non
+la avvia due volte.

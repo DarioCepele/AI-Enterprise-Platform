@@ -52,6 +52,16 @@ CREATE TABLE IF NOT EXISTS instance_steps (
 """
 
 
+EFFECTS = """
+CREATE TABLE IF NOT EXISTS side_effects (
+    key          text PRIMARY KEY,
+    instance_id  uuid NOT NULL REFERENCES process_instances (id) ON DELETE CASCADE,
+    step_id      text NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+"""
+
+
 @dataclass(frozen=True)
 class Migration:
     version: int
@@ -61,6 +71,7 @@ class Migration:
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "instances and steps", (INSTANCES, STEPS)),
+    Migration(2, "effects that must not repeat", (EFFECTS,)),
 )
 
 LATEST_VERSION = max(migration.version for migration in MIGRATIONS)

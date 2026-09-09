@@ -80,22 +80,21 @@ class InstanceStore:
         return await self.get(scope=scope, instance_id=instance_id)  # type: ignore[return-value]
 
     async def get(self, *, scope: str, instance_id: UUID) -> Instance | None:
-        async with self._pool.connection() as connection:
-            connection.row_factory = dict_row
-            found = await (
-                await connection.execute(
-                    "SELECT * FROM process_instances WHERE id = %s AND scope = %s",
-                    (instance_id, scope),
-                )
-            ).fetchone()
+        async with self._pool.connection() as connection, connection.cursor(
+            row_factory=dict_row
+        ) as cursor:
+            await cursor.execute(
+                "SELECT * FROM process_instances WHERE id = %s AND scope = %s",
+                (instance_id, scope),
+            )
+            found = await cursor.fetchone()
             if found is None:
                 return None
-            steps = await (
-                await connection.execute(
-                    "SELECT * FROM instance_steps WHERE instance_id = %s ORDER BY step_id",
-                    (instance_id,),
-                )
-            ).fetchall()
+            await cursor.execute(
+                "SELECT * FROM instance_steps WHERE instance_id = %s ORDER BY step_id",
+                (instance_id,),
+            )
+            steps = await cursor.fetchall()
         return _instance_of(found, steps)
 
     async def list(
@@ -113,19 +112,82 @@ class InstanceStore:
         query += " ORDER BY created_at DESC LIMIT %s"
         parameters.append(limit)
 
-        async with self._pool.connection() as connection:
-            connection.row_factory = dict_row
-            rows = await (await connection.execute(query, parameters)).fetchall()
+        async with self._pool.connection() as connection, connection.cursor(
+            row_factory=dict_row
+        ) as cursor:
+            await cursor.execute(query, parameters)
+            rows = await cursor.fetchall()
             instances = []
             for row in rows:
-                steps = await (
-                    await connection.execute(
-                        "SELECT * FROM instance_steps WHERE instance_id = %s ORDER BY step_id",
-                        (row["id"],),
-                    )
-                ).fetchall()
-                instances.append(_instance_of(row, steps))
+                await cursor.execute(
+                    "SELECT * FROM instance_steps WHERE instance_id = %s ORDER BY step_id",
+                    (row["id"],),
+                )
+                instances.append(_instance_of(row, await cursor.fetchall()))
         return instances
+
+    async def mark_step(self, *, instance_id: UUID, step_id: str, status: str) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """
+                UPDATE instance_steps
+                   SET status = %s,
+                       started_at = COALESCE(started_at, now())
+                 WHERE instance_id = %s AND step_id = %s
+                """,
+                (status, instance_id, step_id),
+            )
+
+    async def finish_step(
+        self,
+        *,
+        instance_id: UUID,
+        step_id: str,
+        status: str,
+        output: dict[str, Any] | None = None,
+        note: str | None = None,
+    ) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """
+                UPDATE instance_steps
+                   SET status = %s,
+                       output = %s,
+                       note = %s,
+                       started_at = COALESCE(started_at, now()),
+                       ended_at = now()
+                 WHERE instance_id = %s AND step_id = %s
+                """,
+                (status, json.dumps(output) if output is not None else None, note,
+                 instance_id, step_id),
+            )
+
+    async def record_effect(self, *, instance_id: UUID, step_id: str, key: str) -> bool:
+        """Writes an effect under its key, and says whether it is the first one.
+
+        The uniqueness lives in the database, not in the process: two replicas
+        retrying the same step still leave one effect.
+        """
+        async with self._pool.connection() as connection:
+            done = await connection.execute(
+                """
+                INSERT INTO side_effects (key, instance_id, step_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (key) DO NOTHING
+                """,
+                (key, instance_id, step_id),
+            )
+            return done.rowcount == 1
+
+    async def effects_of(self, *, instance_id: UUID) -> list[str]:
+        async with self._pool.connection() as connection:
+            rows = await (
+                await connection.execute(
+                    "SELECT key FROM side_effects WHERE instance_id = %s ORDER BY created_at",
+                    (instance_id,),
+                )
+            ).fetchall()
+        return [row[0] for row in rows]
 
     async def set_status(self, *, instance_id: UUID, status: str) -> None:
         async with self._pool.connection() as connection:
