@@ -110,11 +110,22 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             raise HTTPException(status_code=400, detail="empty scope")
         return scope
 
+    @app.get("/health/live")
+    async def live() -> dict[str, str]:
+        """Whether this process is stuck.
+
+        It asks nothing of the databases on purpose: a liveness probe that did
+        would restart a healthy process because a database went away, which
+        turns an outage into a restart loop.
+        """
+        return {"status": "alive"}
+
     @app.get("/health")
-    async def health(
+    @app.get("/health/ready")
+    async def ready(
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, str]:
-        """Report the actual health of dependencies."""
+        """Whether this process can serve: Mongo is required, Redis is not."""
         try:
             return await memory_instance.check()
         except Exception as error:
