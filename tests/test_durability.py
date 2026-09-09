@@ -68,19 +68,19 @@ BRANCHING = parse_definition(
     }
 )
 
-WITH_APPROVAL = parse_definition(
+NOT_IMPLEMENTED_YET = parse_definition(
     {
-        "id": "with-approval",
+        "id": "with-open-goal",
         "version": 1,
         "steps": [
             {"id": "before", "type": "tool", "tool": "count_one"},
             {
-                "id": "sign_off",
-                "type": "approval",
-                "approvers": ["operations"],
+                "id": "work_it_out",
+                "type": "open_goal",
+                "participants": ["knowledge"],
                 "depends_on": ["before"],
             },
-            {"id": "after", "type": "tool", "tool": "count_two", "depends_on": ["sign_off"]},
+            {"id": "after", "type": "tool", "tool": "count_two", "depends_on": ["work_it_out"]},
         ],
     }
 )
@@ -108,7 +108,7 @@ def count_three(context):
 
 @pytest.fixture
 def catalog() -> Catalog:
-    return Catalog([THREE_STEPS, WITH_EFFECT, BRANCHING, WITH_APPROVAL])
+    return Catalog([THREE_STEPS, WITH_EFFECT, BRANCHING, NOT_IMPLEMENTED_YET])
 
 
 @pytest.fixture
@@ -190,21 +190,23 @@ async def test_the_other_branch_runs_when_the_rule_says_so(engine, store, scope)
     assert CALLS == ["one", "three"]
 
 
-async def test_a_step_waiting_for_a_person_suspends_instead_of_failing(engine, store, scope):
-    """Approvals are not implemented yet, and an instance still has to survive one.
+async def test_a_step_of_a_kind_not_implemented_yet_suspends_instead_of_failing(
+    engine, store, scope
+):
+    """An open goal has no engine behind it yet, and must not lose the instance.
 
     Waiting is a state, not a failure: what resumes the step arrives with a
-    later block, and until then the instance is a row, not a held request. The
-    agent step, which waits the same way, is tested in test_agent_steps.py.
+    later block, and until then the instance is a row, not a held request.
+    Agent steps and approvals, which wait for real, have their own tests.
     """
-    instance = await store.create(scope=scope, definition=WITH_APPROVAL, payload={})
+    instance = await store.create(scope=scope, definition=NOT_IMPLEMENTED_YET, payload={})
 
     result = await advance_instance(str(instance.id), scope)
 
     read = await store.get(scope=scope, instance_id=instance.id)
     assert result == "waiting"
     assert read.status == "waiting"
-    assert next(step for step in read.steps if step.step_id == "sign_off").status == "waiting"
+    assert next(step for step in read.steps if step.step_id == "work_it_out").status == "waiting"
     assert CALLS == ["one"]
 
 

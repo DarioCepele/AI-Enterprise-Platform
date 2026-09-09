@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -41,6 +41,14 @@ class AnswerRequest(BaseModel):
     """What a person answers to a step that is waiting for a clarification."""
 
     text: str
+
+
+class ApprovalRequest(BaseModel):
+    """A decision on a step that is waiting for one, and who made it."""
+
+    by: str
+    decision: Literal["approved", "rejected"] = "approved"
+    note: str | None = None
 
 
 class StartRequest(BaseModel):

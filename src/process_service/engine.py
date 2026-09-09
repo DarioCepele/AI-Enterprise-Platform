@@ -39,13 +39,20 @@ _ENGINE: "Engine | None" = None
 
 
 WAITING_HUMAN = "waiting_human"
+WAITING_APPROVAL = "waiting_approval"
 ESCALATED = "escalated"
+REJECTED = "rejected"
+APPROVED = "approved"
 
 DEFAULT_AGENT_TIMEOUT_SECONDS = 3600.0
 
 # An agent that keeps asking is an agent that is not going to finish: after this
 # many rounds the step is handed on rather than looping in front of a person.
 MAX_CLARIFICATIONS = 5
+
+# Nobody is at their desk forever, and a process that waits forever is a process
+# nobody trusts. A week, unless the definition says otherwise.
+DEFAULT_APPROVAL_TIMEOUT_SECONDS = 7 * 24 * 3600.0
 
 
 class Engine:
@@ -181,6 +188,57 @@ async def ask_agent(
     return started
 
 
+def approval_topic(step_id: str) -> str:
+    """The topic an approver decides on, one per step."""
+    return f"{step_id}:approval"
+
+
+@DBOS.step()
+async def request_approval(instance_id: str, step_id: str, approvers: list[str]) -> None:
+    """Puts the step in front of whoever can decide, and writes down who that is."""
+    engine = current_engine()
+    waiting_for = ", ".join(approvers) if approvers else "anyone"
+    await engine.store.waiting_on(
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        status=WAITING_APPROVAL,
+        question=f"waiting for a decision by {waiting_for}",
+    )
+    await engine.store.set_status(instance_id=UUID(instance_id), status=WAITING_APPROVAL)
+    logger.info("Instance %s step %s waits for %s to decide.", instance_id, step_id, waiting_for)
+
+
+async def _run_approval_step(instance_id: str, step: Step, context: dict[str, Any]) -> Any:
+    """Stops the instance in front of a person, for as long as the step allows.
+
+    The wait costs nothing: the workflow is not running, the row says what is
+    being waited for, and the decision arrives on the topic of this step. Which
+    is what makes "the approval comes tomorrow, after a restart" an ordinary
+    case rather than an exception.
+    """
+    await request_approval(instance_id, step.id, list(step.approvers))
+
+    timeout = step.timeout_seconds or DEFAULT_APPROVAL_TIMEOUT_SECONDS
+    decision = await DBOS.recv_async(topic=approval_topic(step.id), timeout_seconds=timeout)
+    if decision is None:
+        return await _timed_out(instance_id, step, timeout)
+
+    output = {
+        "decision": decision.get("decision", REJECTED),
+        "by": decision.get("by", ""),
+        "note": decision.get("note"),
+    }
+    await write_step_output(instance_id, step.id, output)
+    logger.info(
+        "Instance %s step %s: %s by %s.",
+        instance_id,
+        step.id,
+        output["decision"],
+        output["by"] or "somebody",
+    )
+    return output
+
+
 def human_topic(step_id: str) -> str:
     """The topic a person answers on, kept apart from what the agent notifies."""
     return f"{step_id}:human"
@@ -279,7 +337,16 @@ async def advance_instance(instance_id: str, scope: str) -> str:
         if step.type == "agent":
             outcome = await _run_agent_step(instance_id, scope, step, context)
             if outcome is None:
-                return WAITING if step.on_timeout is None else ESCALATED
+                return ESCALATED if step.on_timeout else FAILED
+        elif step.type == "approval":
+            outcome = await _run_approval_step(instance_id, step, context)
+            if outcome is None:
+                return ESCALATED if step.on_timeout else FAILED
+            if outcome["decision"] != APPROVED:
+                # A refusal is not a failure: it is an answer, and the instance
+                # stops in a state that says which one it got.
+                await set_instance_status(instance_id, REJECTED)
+                return REJECTED
         elif step.type in SUSPENDING_TYPES:
             await suspend(instance_id, step_id, f"{step.type} step")
             return WAITING
@@ -427,11 +494,16 @@ def _next_steps(
 ) -> list[str]:
     """What becomes runnable after this step.
 
-    A branch hands control to exactly one target. Everything else follows the
+    A branch hands control to exactly one target, and so does `goto`: a step
+    reached through a branch cannot be waited on with `depends_on`, because the
+    other side of the branch would never satisfy it. Everything else follows the
     dependencies, and a step runs only once every step it waits for is done.
     """
     if step.type == "decision":
         return [outcome] if isinstance(outcome, str) else []
+
+    if step.goto:
+        return [step.goto] if step.goto not in done else []
 
     return [
         candidate.id

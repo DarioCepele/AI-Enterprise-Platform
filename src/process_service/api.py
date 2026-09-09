@@ -14,9 +14,9 @@ from .agents import AgentGateway, TOKEN_HEADER, NEEDS_INPUT, TERMINAL, summary_o
 from .catalog import Catalog, load_catalog
 from .config import Settings, get_settings
 from .definitions import DefinitionError
-from .engine import Engine, current_engine, human_topic, use_engine
+from .engine import Engine, approval_topic, current_engine, human_topic, use_engine
 from .migrations import run_migrations
-from .models import AnswerRequest, Instance, StartRequest
+from .models import AnswerRequest, ApprovalRequest, Instance, StartRequest
 from .observability import configure_logging, configure_tracing
 from .store import InstanceStore, build_pool
 
@@ -242,6 +242,53 @@ def create_app(
             topic=human_topic(step_id),
         )
         return {"state": "answered"}
+
+    @app.post("/instances/{instance_id}/steps/{step_id}/decision")
+    async def decide_step(
+        instance_id: UUID,
+        step_id: str,
+        request: ApprovalRequest,
+        scope: str = Depends(current_scope),
+        store: InstanceStore = Depends(current_store),
+    ) -> dict[str, str]:
+        """A person approves or refuses a step that is waiting for a decision.
+
+        Deciding twice does nothing: the second decision arrives when the step
+        is no longer waiting, and is refused instead of being kept for the next
+        thing that waits. Who decided goes on the row, because "the process
+        stopped here and somebody let it through" is the question this answers.
+        """
+        instance = await store.get(scope=scope, instance_id=instance_id)
+        if instance is None:
+            raise HTTPException(status_code=404, detail="unknown instance")
+
+        waiting = next((step for step in instance.steps if step.step_id == step_id), None)
+        if waiting is None:
+            raise HTTPException(status_code=404, detail=f"unknown step '{step_id}'")
+        if waiting.status != "waiting_approval":
+            raise HTTPException(
+                status_code=409,
+                detail=f"step '{step_id}' is {waiting.status}, it is not waiting for a decision",
+            )
+
+        definition = definitions.get(instance.process_id, instance.process_version)
+        step = definition.step(step_id)
+        approvers = list(step.approvers) if step else []
+        if approvers and request.by not in approvers:
+            raise HTTPException(
+                status_code=403,
+                detail=f"'{request.by}' cannot decide '{step_id}'. Approvers: {', '.join(approvers)}",
+            )
+
+        await DBOS.send_async(
+            destination_id=str(instance_id),
+            message={"decision": request.decision, "by": request.by, "note": request.note},
+            topic=approval_topic(step_id),
+        )
+        logger.info(
+            "Instance %s step %s: %s by %s.", instance_id, step_id, request.decision, request.by
+        )
+        return {"state": request.decision}
 
     @app.get("/instances")
     async def list_instances(

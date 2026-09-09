@@ -40,6 +40,9 @@ steps:
   - id: approval
     type: approval
     approvers: [reviewer]
+    # A step reached through a branch says itself where it goes next: `apply`
+    # cannot wait for it with depends_on, or the other branch would never run.
+    goto: apply
     # Nobody is at their desk forever: after this, the escalation in the README.
     timeout_seconds: 172800
 

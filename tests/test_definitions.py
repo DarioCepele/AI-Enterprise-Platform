@@ -136,3 +136,38 @@ def test_the_version_is_part_of_the_identity():
     # (id, version) is what a running instance refers to.
     assert first.key() == ("example-approval", 1)
     assert second.key() == ("example-approval", 2)
+
+
+def test_a_goto_that_points_nowhere_is_refused():
+    with pytest.raises(DefinitionError) as refused:
+        parse_definition(
+            {
+                "id": "broken",
+                "version": 1,
+                "steps": [{"id": "only", "type": "tool", "tool": "do", "goto": "elsewhere"}],
+            }
+        )
+
+    assert "elsewhere" in str(refused.value)
+
+
+def test_a_step_cannot_have_both_a_goto_and_branches():
+    with pytest.raises(DefinitionError) as refused:
+        parse_definition(
+            {
+                "id": "broken",
+                "version": 1,
+                "steps": [
+                    {
+                        "id": "decide",
+                        "type": "decision",
+                        "goto": "one",
+                        "branches": [{"when": "true", "goto": "one"}],
+                    },
+                    {"id": "one", "type": "tool", "tool": "do"},
+                ],
+            }
+        )
+
+    # Two ways out of the same step is a definition nobody can read.
+    assert "one way out" in str(refused.value)

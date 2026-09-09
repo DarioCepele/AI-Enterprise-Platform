@@ -24,7 +24,7 @@ from process_service.definitions import parse_definition
 from process_service.engine import Engine, advance_instance, use_engine
 from process_service.tools import tool
 
-from conftest import needs_postgres
+from conftest import POSTGRES_DSN, needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -429,7 +429,12 @@ async def test_the_answer_finds_the_instance_after_the_asking_process_died(
     child = subprocess.Popen(
         [sys.executable, str(script)],
         cwd=os.getcwd(),
-        env={**os.environ, "INSTANCE_ID": str(instance.id), "SCOPE": scope},
+        env={
+            **os.environ,
+            "PROCESS_POSTGRES_DSN": POSTGRES_DSN or "",
+            "INSTANCE_ID": str(instance.id),
+            "SCOPE": scope,
+        },
         stdout=subprocess.PIPE,
         text=True,
     )
