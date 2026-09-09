@@ -70,7 +70,43 @@ class DocumentReads:
             self.documents.append(name)
 
 
-def briefing(question: str, answer: str, documents: list[str]) -> list[Part]:
+class Effort:
+    """What the answer cost: model calls, and tokens in and out.
+
+    The caller is going to compare "two agents in parallel" against "one agent
+    doing both", and that comparison is worth nothing without the tokens. Every
+    provider reports them at the end of each model call, so the count of those
+    reports is also the number of rounds.
+    """
+
+    def __init__(self) -> None:
+        self.rounds = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def observe(self, update: Any) -> None:
+        for content in getattr(update, "contents", None) or []:
+            if getattr(content, "type", "") != "usage":
+                continue
+            details = getattr(content, "usage_details", None) or {}
+            self.rounds += 1
+            self.input_tokens += int(details.get("input_token_count") or 0)
+            self.output_tokens += int(details.get("output_token_count") or 0)
+
+    def as_data(self) -> dict[str, int]:
+        return {
+            "rounds": self.rounds,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+        }
+
+
+def briefing(
+    question: str,
+    answer: str,
+    documents: list[str],
+    effort: dict[str, int] | None = None,
+) -> list[Part]:
     """The subagent's output: text for the model, data for the interface."""
     data = ParseDict(
         {
@@ -78,6 +114,7 @@ def briefing(question: str, answer: str, documents: list[str]) -> list[Part]:
             "question": question,
             "documents": documents,
             "summary": answer,
+            "usage": effort or {"rounds": 0, "input_tokens": 0, "output_tokens": 0},
         },
         Value(),
     )
@@ -108,9 +145,11 @@ class KnowledgeExecutor(AgentExecutor):
         await updater.start_work()
 
         pieces: list[str] = []
+        effort = Effort()
         reads = DocumentReads()
         try:
             async for update in self._agent.run(question, stream=True):
+                effort.observe(update)
                 reads.observe(update)
                 text = getattr(update, "text", None)
                 if text:
@@ -145,16 +184,19 @@ class KnowledgeExecutor(AgentExecutor):
             return
 
         await updater.add_artifact(
-            briefing(question, answer, reads.documents),
+            briefing(question, answer, reads.documents, effort.as_data()),
             name=ARTIFACT,
             last_chunk=True,
         )
         await updater.complete()
         logger.info(
-            "Task %s completed: %d characters, documents %s.",
+            "Task %s completed: %d characters, documents %s, %d rounds, %d/%d tokens.",
             task.id,
             len(answer),
             ", ".join(reads.documents) or "none",
+            effort.rounds,
+            effort.input_tokens,
+            effort.output_tokens,
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
