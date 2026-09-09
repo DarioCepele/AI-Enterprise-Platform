@@ -385,3 +385,38 @@ silenzio che i contratti tolgono.
 
 Quando un campione cambia, cambia insieme in tutti i repo elencati nel suo
 `produced_by` e `consumed_by`. Il messaggio di fallimento dice quali sono.
+
+## Migrazioni
+
+Lo schema cambia col codice, non con uno script che qualcuno deve trovare.
+`memory_service/migrations.py` tiene le migrazioni numerate; il servizio le
+applica all'avvio **prima** di creare gli indici, e registra in
+`schema_migrations` quelle gia' fatte.
+
+L'ordine non e' un dettaglio: un indice unico su un campo che i documenti
+vecchi non hanno ammetterebbe **un documento per scope**. E' esattamente cosi'
+che il servizio si e' rifiutato di partire dopo la rinomina `chiave`/`valore`,
+e le due migrazioni presenti sono quella rinomina e la rimozione degli indici
+coi vecchi nomi.
+
+Se un indice non si crea e mancano migrazioni, l'errore dice **quali**, invece
+di un `E11000` su un campo che nessuno riconosce.
+
+## Ritenzione e reindicizzazione
+
+Due operazioni di manutenzione, esposte come endpoint perche' le chiami un job
+schedulato -- un CronJob, non il percorso di una richiesta.
+
+```bash
+curl -XPOST /admin/retention -H 'X-Memory-Scope: <scope>' -d '{"days": 90}'
+curl -XPOST /admin/reindex   -H 'X-Memory-Scope: <scope>' -d '{"thread_id": null}'
+```
+
+**La ritenzione e' spenta di default** (`MEMORY_RETENTION_DAYS=0`): cancellare
+conversazioni e' una decisione di prodotto, non un default. Quando e' accesa
+dice nei log quali thread ha tolto, ed e' limitata allo scope che la chiede --
+una manutenzione dentro un tenant non deve arrivare in un altro.
+
+La **reindicizzazione** ricostruisce l'indice vettoriale dai transcript, che ne
+sono la fonte. Era una proprieta' dichiarata del progetto e non aveva un
+comando: perdere Redis deve costare una ricostruzione, non i ricordi.

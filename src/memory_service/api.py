@@ -11,7 +11,8 @@ from redis.asyncio import Redis
 
 from .config import Settings, get_settings
 from .curation import ContextPolicy
-from .models import NewMessage, SearchQuery, Snapshot, StoredMessage, Transcript
+from .migrations import run_migrations
+from .models import NewMessage, ReindexRequest, RetentionRequest, SearchQuery, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
 from .stores.hot import HotTail
 from .stores.locks import RedisLock
@@ -53,6 +54,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 "memories will not be available."
             )
         durable = MongoTranscripts(client, config.mongo_database, config.bucket_size)
+        await run_migrations(client[config.mongo_database])
         await durable.ensure_indexes()
         summarizer = None
         if config.summary_model:
@@ -193,6 +195,26 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 for memory in found
             ]
         }
+
+    @app.post("/admin/retention")
+    async def apply_retention(
+        request: RetentionRequest,
+        scope: str = Depends(current_scope),
+        memory_instance: ThreadMemory = Depends(current_memory),
+    ) -> dict[str, int]:
+        """Forget the threads older than the retention. Meant for a scheduled job, not for a request path."""
+        days = request.days if request.days is not None else config.retention_days
+        forgotten = await memory_instance.apply_retention(days, scope)
+        return {"threads_forgotten": len(forgotten)}
+
+    @app.post("/admin/reindex")
+    async def reindex(
+        request: ReindexRequest,
+        scope: str = Depends(current_scope),
+        memory_instance: ThreadMemory = Depends(current_memory),
+    ) -> dict[str, int]:
+        """Rebuild the semantic index of a scope, or of one thread, from the transcripts."""
+        return {"memories_indexed": await memory_instance.reindex(scope, request.thread_id)}
 
     @app.delete("/scope")
     async def forget_scope(

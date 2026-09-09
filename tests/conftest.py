@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from pymongo import AsyncMongoClient
 from redis.asyncio import Redis
 
+from memory_service.migrations import run_migrations
 from memory_service.stores.hot import HotTail
 from memory_service.stores.mongo import MongoTranscripts, build_client
 
@@ -40,6 +41,7 @@ async def mongo_client() -> AsyncMongoClient:
 
 @pytest.fixture
 async def transcripts(mongo_client: AsyncMongoClient) -> MongoTranscripts:
+    await run_migrations(mongo_client["demo_memory_test"])
     store = MongoTranscripts(mongo_client, "demo_memory_test", bucket_size=3)
     await store.ensure_indexes()
     return store

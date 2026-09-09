@@ -47,3 +47,15 @@ class Snapshot(BaseModel):
     interrupt: list[dict[str, Any]] | None = None
     session_state: dict[str, Any] | None = None
     curation: dict[str, int] | None = None
+
+
+class RetentionRequest(BaseModel):
+    """How long a conversation may stay. Without `days`, the configured value."""
+
+    days: int | None = Field(default=None, ge=0)
+
+
+class ReindexRequest(BaseModel):
+    """Which thread to rebuild. Without one, the whole scope."""
+
+    thread_id: str | None = None

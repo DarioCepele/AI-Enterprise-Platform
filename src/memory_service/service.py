@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from dataclasses import replace
 from typing import Any
 
@@ -309,6 +310,55 @@ class ThreadMemory:
             session_state=head.get("session_state"),
             curation=report,
         )
+
+    async def apply_retention(
+        self, days: int, scope: str | None = None
+    ) -> list[tuple[str, str]]:
+        """Forgets the threads untouched for longer than `days`.
+
+        Off by default, and never silent: deleting conversations is a product
+        decision, and the line that says which ones went is the only trace left.
+        Bounded to one scope unless a caller with no scope asks for all of them:
+        a maintenance call inside one tenant must not reach into another.
+        """
+        if days <= 0:
+            return []
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        expired = await self._durable.threads_older_than(cutoff, scope)
+        for scope, thread_id in expired:
+            await self.forget(scope, thread_id)
+        if expired:
+            logger.info(
+                "Retention of %d days: %d threads forgotten (%s).",
+                days,
+                len(expired),
+                ", ".join(thread_id for _, thread_id in expired[:10]),
+            )
+        return expired
+
+    async def reindex(self, scope: str, thread_id: str | None = None) -> int:
+        """Rebuilds the semantic index from the transcripts, which are the source.
+
+        The vector index is reconstructible by design: losing Redis has to cost
+        a rebuild, not the memories. Without this command that design claim was
+        true and unusable.
+        """
+        if self._embedder is None or self._memories is None:
+            logger.warning("Reindex asked for, but semantic search is not configured.")
+            return 0
+
+        threads = [thread_id] if thread_id else await self._durable.threads_of(scope)
+        indexed = 0
+        for thread in threads:
+            seqs = await self._durable.seqs_of(scope, thread)
+            if seqs:
+                await self._memories.forget_thread(scope, thread, seqs)
+            await self._durable.set_indexed_upto(scope, thread, 0)
+            before = await self._memories.count(scope)
+            await self._index_memories(scope, thread)
+            indexed += await self._memories.count(scope) - before
+        logger.info("Reindex of %s: %d memories rebuilt.", thread_id or scope, indexed)
+        return indexed
 
     async def forget_scope(self, scope: str) -> int:
         """Forget all threads in a scope and return their count."""

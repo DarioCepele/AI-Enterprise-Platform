@@ -6,8 +6,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pymongo import ASCENDING, DESCENDING, AsyncMongoClient, ReturnDocument
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, OperationFailure
 
+from ..migrations import missing_migrations
 from ..models import NewMessage, StoredMessage
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,25 @@ class MongoTranscripts:
         self._bucket_size = bucket_size
 
     async def ensure_indexes(self) -> None:
-        """Create indexes idempotently on startup. Unique scope/thread/bucket keys allow safe concurrent bucket creation without transactions; losing writers retry."""
+        """Create indexes idempotently on startup. Unique scope/thread/bucket keys allow safe concurrent bucket creation without transactions; losing writers retry.
+
+        An index that cannot be built usually means the documents underneath are
+        older than the code: the error says which migration is missing, instead
+        of a raw duplicate key on a field nobody recognizes.
+        """
+        try:
+            await self._create_indexes()
+        except (DuplicateKeyError, OperationFailure) as error:
+            missing = await missing_migrations(self._db)
+            if not missing:
+                raise
+            raise RuntimeError(
+                f"indexes not created: migrations {missing} have not been applied to "
+                f"'{self._db.name}'. Call run_migrations(db) before ensure_indexes(): "
+                f"the stored documents are older than this code. ({error})"
+            ) from error
+
+    async def _create_indexes(self) -> None:
         await self._db[TURNS].create_index(
             [("scope", ASCENDING), ("thread_id", ASCENDING), ("bucket", ASCENDING)],
             unique=True,
@@ -283,6 +302,20 @@ class MongoTranscripts:
     async def seqs_of(self, scope: str, thread_id: str) -> list[int]:
         """Return message positions for removing a thread from the index."""
         return [message.seq for message in await self.history(scope, thread_id)]
+
+    async def threads_older_than(
+        self, cutoff: datetime, scope: str | None = None
+    ) -> list[tuple[str, str]]:
+        """Scope and id of the threads untouched since `cutoff`, oldest first."""
+        query: dict[str, Any] = {"updated_at": {"$lt": cutoff}}
+        if scope is not None:
+            query["scope"] = scope
+        cursor = (
+            self._db[THREADS]
+            .find(query, projection={"scope": 1, "thread_id": 1, "_id": 0})
+            .sort("updated_at", ASCENDING)
+        )
+        return [(str(doc["scope"]), str(doc["thread_id"])) async for doc in cursor]
 
     async def threads_of(self, scope: str) -> list[str]:
         """Return thread identifiers within a scope."""
