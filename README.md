@@ -169,7 +169,8 @@ Read at request time, so the same image serves any environment. The
 | `demo-knowledge-agent` | sottoagente di knowledge base, esposto via A2A |
 | `demo-memory-service` | memoria delle conversazioni: transcript, riassunti, fatti, ricordi |
 | `demo-frontend` | interfaccia Next.js |
-| `demo-infra` | compose, documentazione (questo repo) |
+| `demo-process-service` | processi durevoli: definizioni versionate, istanze |
+| `demo-infra` | compose, contratti, manifest, documentazione (questo repo) |
 
 I repo devono stare nella stessa cartella padre: `compose.yaml` li costruisce da
 percorsi fratelli.
@@ -178,6 +179,7 @@ percorsi fratelli.
 
 | Servizio | Porta sull'host | A cosa serve |
 |---|---|---|
+| process-service | — | processi durevoli, istanze su Postgres |
 | `frontend` | 3000 | l'interfaccia |
 | `master-agent` | 8000 | AG-UI su SSE, `/logs` |
 | `memory-service` | — | memoria conversazionale, interna |
