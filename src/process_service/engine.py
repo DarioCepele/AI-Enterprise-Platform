@@ -1,23 +1,25 @@
 """What makes an instance move, and what makes it survive.
 
-Every step is a DBOS step: its result is written down when it finishes, so a
-process that dies and comes back does not run it again. The instance itself is
-a DBOS workflow keyed on the instance id, which is what makes starting it twice
-harmless.
+Every step is a workflow of its own, keyed on the instance and the step, and
+inside it every effect is a DBOS step: a process that dies and comes back does
+not do again what it already wrote down. The instance is the workflow that
+starts them and waits for them, keyed on the instance id, which is what makes
+starting it twice harmless.
 
-What is not here yet, by design: agents and approvals suspend the instance and
-wait for the blocks that come after this one. A suspended instance is a row, not
-a held connection.
+An instance that is waiting -- for an agent, for a person -- is a row, not a
+held connection: that is the property everything else here is built to keep.
 """
 from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
 from dbos import DBOS, SetWorkflowID
 
+from . import open_goal
 from .agents import NEEDS_INPUT, AgentGateway
 from .catalog import Catalog
 from .definitions import ProcessDefinition, Step
@@ -35,7 +37,6 @@ COMPLETED = "completed"
 FAILED = "failed"
 SKIPPED = "skipped"
 
-SUSPENDING_TYPES = ("agent", "approval", "open_goal")
 
 _ENGINE: "Engine | None" = None
 
@@ -67,10 +68,14 @@ class Engine:
         catalog: Catalog,
         store: InstanceStore,
         agents: AgentGateway | None = None,
+        pursue: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.catalog = catalog
         self.store = store
         self.agents = agents
+        # What runs an open goal. Injectable because the real one is an LLM
+        # planning loop: a test that had to run it would be testing the model.
+        self.pursue = pursue or open_goal.pursue
 
     async def start(self, instance_id: UUID, scope: str) -> None:
         """Starts the workflow of an instance, once.
@@ -289,11 +294,56 @@ async def note_question(instance_id: str, step_id: str, question: str) -> None:
 
 
 @DBOS.step()
-async def suspend(instance_id: str, step_id: str, reason: str) -> None:
+async def run_open_goal(
+    instance_id: str, scope: str, step_id: str, context: dict[str, Any]
+) -> dict[str, Any]:
+    """Runs a step that was given a goal instead of a path.
+
+    Everything the manager and the participants say to each other stays inside
+    this step: what comes out is the answer and what it cost, which is what the
+    history needs to stay replayable. A node whose internals leaked into the
+    history would be a node nobody could replay without the models.
+    """
     engine = current_engine()
-    await engine.store.mark_step(instance_id=UUID(instance_id), step_id=step_id, status=WAITING)
-    await engine.store.set_status(instance_id=UUID(instance_id), status=WAITING)
-    logger.info("Instance %s waits on step %s: %s.", instance_id, step_id, reason)
+    plan = await read_plan(instance_id, scope)
+    step = engine.catalog.get(plan["process_id"], plan["process_version"]).step(step_id)
+    if step is None or step.limits is None:
+        raise RuntimeError(f"step '{step_id}' is not an open goal with limits")
+    if engine.agents is None:
+        raise RuntimeError("no agents are configured: an open goal cannot run")
+
+    goal = str(step.input.get("goal") or context.get("goal") or step_id)
+    participants = [(name, await engine.agents.describe(name)) for name in step.participants]
+    await engine.store.mark_step(instance_id=UUID(instance_id), step_id=step_id, status=RUNNING)
+
+    reached = await engine.pursue(
+        goal=goal,
+        participants=participants,
+        gateway=engine.agents,
+        max_rounds=step.limits.max_rounds,
+        max_tokens=step.limits.max_tokens,
+    )
+
+    await engine.store.record_event(
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        kind="step_usage",
+        data={
+            "agent": "open_goal",
+            "rounds": reached.get("rounds", 0),
+            "input_tokens": reached.get("input_tokens", 0),
+            "output_tokens": reached.get("output_tokens", 0),
+            "stopped_by": reached.get("stopped_by", ""),
+        },
+    )
+    await engine.store.finish_step(
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        status=COMPLETED,
+        output=reached,
+        note=f"stopped by: {reached.get('stopped_by', '?')}",
+    )
+    return reached
 
 
 @DBOS.step()
@@ -401,9 +451,8 @@ async def _do_step(
             # A refusal is not a failure: it is an answer, and the instance stops
             # in a state that says which one it got.
             return _stopped(step_id, REJECTED, output=outcome)
-    elif step.type in SUSPENDING_TYPES:
-        await suspend(instance_id, step_id, f"{step.type} step")
-        return _stopped(step_id, WAITING)
+    elif step.type == "open_goal":
+        outcome = await run_open_goal(instance_id, scope, step_id, context)
     else:
         outcome = await _run_step(instance_id, step, context)
 

@@ -145,6 +145,7 @@ class AgentGateway:
         self._urls = agents
         self._public_url = public_url
         self._clients: dict[str, Client] = {}
+        self._cards: dict[str, str] = {}
 
     def knows(self, name: str) -> bool:
         return name in self._urls
@@ -152,9 +153,20 @@ class AgentGateway:
     def known(self) -> list[str]:
         return sorted(self._urls)
 
+    async def describe(self, name: str) -> str:
+        """What an agent says it is for, from its own card.
+
+        A manager choosing between participants needs to know what each one
+        does, and the card is where they say it -- reading it here also builds
+        the client that will be used a moment later.
+        """
+        await self._client(name)
+        return self._cards.get(name) or f"the '{name}' agent"
+
     async def _client(self, name: str) -> Client:
         if name not in self._clients:
             card = await fetch_card(self._urls[name])
+            self._cards[name] = card.description
             self._clients[name] = ClientFactory(
                 ClientConfig(httpx_client=httpx.AsyncClient(timeout=60.0), streaming=False)
             ).create(card)
@@ -211,6 +223,48 @@ class AgentGateway:
         return await self._send(
             agent=agent, text=question, scope=scope, instance_id=instance_id, step_id=step_id
         )
+
+    async def converse(self, *, agent: str, question: str) -> dict[str, Any]:
+        """Asks and waits, holding the call open until the agent is done.
+
+        This is the opposite of how an `agent` step works, and it is on purpose:
+        inside an open goal the manager is holding a conversation, so there is
+        nobody to wake up later. It is one of the reasons that node is capped
+        while a step is not.
+        """
+        if not self.knows(agent):
+            raise KeyError(f"agent '{agent}' is not configured. Known: {', '.join(self.known())}")
+
+        client = await self._client(agent)
+        request = SendMessageRequest(
+            message=Message(
+                message_id=uuid4().hex, role=Role.ROLE_USER, parts=[Part(text=question)]
+            )
+        )
+
+        pieces: list[str] = []
+        usage: dict[str, int] = {}
+        task_id = ""
+        async for response in client.send_message(request):
+            if response.HasField("task"):
+                task_id = response.task.id
+            elif response.HasField("status_update"):
+                task_id = response.status_update.task_id or task_id
+            elif response.HasField("artifact_update"):
+                for part in response.artifact_update.artifact.parts:
+                    if part.HasField("text"):
+                        pieces.append(part.text)
+                    elif part.HasField("data"):
+                        usage = usage or _usage_of(MessageToDict(part.data))
+
+        text = "".join(pieces).strip()
+        if not text and task_id:
+            # The agent streamed its answer as status messages and put it in an
+            # artifact this call did not see: the task has both.
+            read = await self.result_of(agent=agent, task_id=task_id)
+            text, usage = read["text"], read["usage"] or usage
+        logger.info("Open goal: %s answered in one call (%d characters).", agent, len(text))
+        return {"text": text, "usage": usage, "task_id": task_id}
 
     async def result_of(self, *, agent: str, task_id: str) -> dict[str, Any]:
         """Reads the task itself, because a notification is a signal, not the answer.

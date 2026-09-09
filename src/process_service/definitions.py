@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 STEP_TYPES = ("tool", "agent", "approval", "decision", "open_goal")
 
@@ -24,6 +24,20 @@ class Branch(BaseModel):
 
     when: str
     goto: str
+
+
+class Limits(BaseModel):
+    """The ceilings an open-ended step has to declare.
+
+    A node that decides its own path can decide to keep going, and the only
+    thing between that and a bill is a number written down in advance. All
+    three are required: rounds bound the conversation, agents bound how wide it
+    spreads, tokens bound what it can spend before it is stopped.
+    """
+
+    max_rounds: int = Field(gt=0)
+    max_agents: int = Field(gt=0)
+    max_tokens: int = Field(gt=0)
 
 
 class Step(BaseModel):
@@ -43,6 +57,7 @@ class Step(BaseModel):
     timeout_seconds: float | None = None
     on_timeout: str | None = None
     goto: str | None = None
+    limits: Limits | None = None
     idempotency_key: str | None = None
     compensate_with: str | None = None
     input: dict[str, Any] = {}
@@ -166,6 +181,22 @@ def _check_required_fields(definition: ProcessDefinition) -> None:
         required = REQUIRED_BY_TYPE.get(step.type)
         if required and not getattr(step, required[0]):
             raise DefinitionError(f"step '{step.id}': {required[1]}")
+
+        if step.type == "open_goal" and step.limits is None:
+            # A node that chooses its own path and has no ceiling is not a step,
+            # it is an open account. Refusing it at startup is the only place
+            # where refusing it costs nothing.
+            raise DefinitionError(
+                f"step '{step.id}': an open goal needs 'limits' with max_rounds, "
+                "max_agents and max_tokens. A node without a ceiling does not go "
+                "into a process."
+            )
+        if step.limits and step.type == "open_goal":
+            if len(step.participants) > step.limits.max_agents:
+                raise DefinitionError(
+                    f"step '{step.id}': {len(step.participants)} participants but "
+                    f"max_agents is {step.limits.max_agents}"
+                )
 
 
 def _check_references(definition: ProcessDefinition) -> None:

@@ -43,6 +43,8 @@ steps:
 ```
 
 I tipi di passo sono `tool`, `agent`, `approval`, `decision`, `open_goal`.
+L'ultimo ha una sezione tutta sua, piu' avanti, perche' e' il piu' caro e
+l'unico che va tenuto a freno da una dichiarazione.
 
 **Cosa si rifiuta all'avvio**, con il nome del passo o del file: un id
 duplicato, una dipendenza che non esiste, un ramo che punta nel vuoto, un ciclo,
@@ -171,6 +173,70 @@ resto:
 Un passo che solleva un'eccezione **fallisce come passo**, con il messaggio
 sulla riga: l'istanza si ferma in `failed` invece di sparire dentro uno stack
 trace.
+
+## Il passo a cui si da' un obiettivo, non un percorso
+
+Tutti gli altri passi dicono **cosa fare**. `open_goal` dice **dove arrivare**, e
+lascia che un manager decida chi lavora e in che ordine -- l'orchestrazione
+Magentic di `agent-framework-orchestrations`, con gli agenti A2A del laboratorio
+come partecipanti.
+
+```yaml
+  - id: work_it_out
+    type: open_goal
+    participants: [knowledge, analysis]
+    limits:                     # obbligatori: senza, la definizione si rifiuta
+      max_rounds: 4
+      max_agents: 2
+      max_tokens: 30000
+    input:
+      goal: "Stabilisci se la coda anomala si spiega con quello che dicono i documenti."
+```
+
+**I tetti non sono opzionali.** Una definizione con un `open_goal` senza
+`limits` non parte: viene rifiutata all'avvio, con il nome del passo. Un nodo
+che sceglie da se' il percorso e non ha un tetto non e' un passo, e' un conto
+aperto. I round li tiene l'orchestratore, che sa fermarsi con grazia; il budget
+di token lo tengono i **partecipanti**, perche' sono loro a spenderlo: quando e'
+finito rispondono «stop, budget esaurito» invece di sollevare un'eccezione, e il
+manager lo legge come una risposta e chiude.
+
+Un giro puo' sforare: quanto costa si sa dopo averlo pagato. Quello che il
+budget garantisce e' che non ci sia un giro **dopo** quello che ha passato la
+riga.
+
+**Dentro il nodo non c'e' durabilita'.** Il manager tiene una conversazione: non
+c'e' nessuno da svegliare piu' tardi, quindi qui gli agenti si chiamano e si
+aspetta la risposta, al contrario di un passo `agent`. E' un'altra ragione per
+cui questo nodo ha un tetto e un passo no. Quello che esce e' un normale output
+di passo -- testo e costo -- cosi' la storia e il replay non devono sapere
+niente di come ci si e' arrivati.
+
+### Quando non usarlo
+
+Un giro vero, contro gli agenti veri, con l'obiettivo dell'esempio qui sopra:
+
+| | `open_goal` | due passi `agent` scritti |
+| --- | --- | --- |
+| tempo | **297 s** | 14 s |
+| token | 5902 in + 2154 out | 2966 in + 509 out |
+| round | 3 | 2 |
+
+Le due domande non sono identiche -- il nodo aperto ne riceve una sola, composta
+-- ma l'ordine di grandezza e' quello: **venti volte il tempo e il doppio dei
+token** per arrivare a una conclusione che, sapendo gia' il percorso, si scrive
+in due passi.
+
+Il manager e' un modello in piu' che gira a ogni round, sopra a quelli degli
+agenti. Quindi:
+
+- **se il percorso si sa, si scrive.** Due passi `agent` in parallelo e una
+  `decision` costano meno, si leggono, e il replay li rigioca senza modelli;
+- **se il percorso dipende dai dati** ma le strade sono poche, e' una
+  `decision`, non un nodo aperto;
+- **resta a un nodo aperto** quello che non si sa scomporre in anticipo: e anche
+  li' vale la pena rileggere il primo giro e chiedersi se, ora che il percorso e'
+  noto, non convenga scriverlo.
 
 ## Quanto costa davvero il ventaglio
 

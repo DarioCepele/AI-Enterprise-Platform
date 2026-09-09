@@ -68,23 +68,6 @@ BRANCHING = parse_definition(
     }
 )
 
-NOT_IMPLEMENTED_YET = parse_definition(
-    {
-        "id": "with-open-goal",
-        "version": 1,
-        "steps": [
-            {"id": "before", "type": "tool", "tool": "count_one"},
-            {
-                "id": "work_it_out",
-                "type": "open_goal",
-                "participants": ["knowledge"],
-                "depends_on": ["before"],
-            },
-            {"id": "after", "type": "tool", "tool": "count_two", "depends_on": ["work_it_out"]},
-        ],
-    }
-)
-
 CALLS: list[str] = []
 
 
@@ -108,7 +91,7 @@ def count_three(context):
 
 @pytest.fixture
 def catalog() -> Catalog:
-    return Catalog([THREE_STEPS, WITH_EFFECT, BRANCHING, NOT_IMPLEMENTED_YET])
+    return Catalog([THREE_STEPS, WITH_EFFECT, BRANCHING])
 
 
 @pytest.fixture
@@ -142,7 +125,12 @@ async def test_the_steps_already_done_are_not_done_again_after_a_crash(engine, s
     await handle.get_result()
     CALLS.clear()
 
-    resumed = await DBOS.fork_workflow_async(handle.workflow_id, start_step=1)
+    # The application version has to be said out loud: a fork inherits the
+    # version of the workflow it comes from, and only an executor running that
+    # version will pick it up -- after a deploy, that is nobody.
+    resumed = await DBOS.fork_workflow_async(
+        handle.workflow_id, start_step=1, application_version=DBOS.application_version
+    )
 
     assert await resumed.get_result() == "completed"
     assert CALLS == []
@@ -183,26 +171,6 @@ async def test_the_other_branch_runs_when_the_rule_says_so(engine, store, scope)
     await advance_instance(str(instance.id), scope)
 
     assert CALLS == ["one", "three"]
-
-
-async def test_a_step_of_a_kind_not_implemented_yet_suspends_instead_of_failing(
-    engine, store, scope
-):
-    """An open goal has no engine behind it yet, and must not lose the instance.
-
-    Waiting is a state, not a failure: what resumes the step arrives with a
-    later block, and until then the instance is a row, not a held request.
-    Agent steps and approvals, which wait for real, have their own tests.
-    """
-    instance = await store.create(scope=scope, definition=NOT_IMPLEMENTED_YET, payload={})
-
-    result = await advance_instance(str(instance.id), scope)
-
-    read = await store.get(scope=scope, instance_id=instance.id)
-    assert result == "waiting"
-    assert read.status == "waiting"
-    assert next(step for step in read.steps if step.step_id == "work_it_out").status == "waiting"
-    assert CALLS == ["one"]
 
 
 async def test_an_instance_keeps_running_its_own_version(engine, store, scope, catalog):

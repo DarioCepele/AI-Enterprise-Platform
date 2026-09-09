@@ -229,7 +229,12 @@ async def test_undoing_twice_undoes_once(engine, store, scope):
     assert await handle.get_result() == "compensated"
     CALLS.clear()
 
-    again = await DBOS.fork_workflow_async(str(instance.id), start_step=1)
+    # The application version has to be said out loud: a fork inherits the
+    # version of the workflow it comes from, and only an executor running that
+    # version will pick it up -- after a deploy, that is nobody.
+    again = await DBOS.fork_workflow_async(
+        str(instance.id), start_step=1, application_version=DBOS.application_version
+    )
     assert await again.get_result() == "compensated"
 
     # 'book' declared an idempotency key, so its undo is recorded under one too
