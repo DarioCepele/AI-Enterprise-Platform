@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Scritto dal tooling di sviluppo, non fa parte del progetto
+AGENTS.md
+CLAUDE.md
