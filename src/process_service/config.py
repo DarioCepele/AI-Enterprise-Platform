@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     json_logs: bool = Field(default=False)
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)
+    port: int = Field(default=8300, ge=1, le=65535)
     public_url: str = Field(default="http://localhost:8300")
     push_secret: str = Field(default="laboratory-without-a-secret")
     agents: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
@@ -50,6 +51,7 @@ FIELD_NOTES = {
     "json_logs": "Structured logs for a collector instead of the readable line.",
     "pool_min_size": "Connections kept open.",
     "pool_max_size": "Connections at most.",
+    "port": "Where the service listens when started locally.",
     "public_url": "How a remote agent reaches this service back, for notifications.",
     "push_secret": "Signs notification tokens. Change it: the default is public.",
     "agents": 'Agents a step may delegate to, as JSON: {"knowledge": "http://..."}.',

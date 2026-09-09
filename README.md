@@ -141,6 +141,24 @@ Un passo che solleva un'eccezione **fallisce come passo**, con il messaggio
 sulla riga: l'istanza si ferma in `failed` invece di sparire dentro uno stack
 trace.
 
+## Disfare quello che si era gia' fatto
+
+Un passo puo' dichiarare `compensate_with: <tool>`. Quando l'istanza si ferma
+per un fallimento o per un rifiuto, i passi gia' conclusi che l'hanno dichiarato
+vengono **disfatti in ordine inverso**: disfare prima quello che veniva dopo
+significherebbe togliere qualcosa su cui il passo successivo si appoggia ancora.
+
+- **una compensazione che fallisce non ferma le altre**: quel passo resta
+  `compensation_failed` col motivo scritto, gli altri vengono comunque disfatti;
+- **quello che il passo aveva fatto resta nella storia**: lo stato diventa
+  `compensated`, l'output no;
+- **un'istanza compensata lo dice**: stato `compensated`, e la nota e'
+  `failed: notify; undone: apply` -- non un `failed` che lascia aperta la
+  domanda se qualcosa sia stato ripreso;
+- **si disfa una volta sola**: se il passo aveva una `idempotency_key`, la sua
+  compensazione ne ha una propria. Chi non la dichiara puo' essere disfatto due
+  volte, che e' il motivo per cui l'effetto che conta la dichiara.
+
 ## L'approvazione
 
 Un passo `approval` mette l'istanza in `waiting_approval` e scrive sulla riga

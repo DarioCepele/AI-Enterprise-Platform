@@ -44,6 +44,8 @@ WAITING_APPROVAL = "waiting_approval"
 ESCALATED = "escalated"
 REJECTED = "rejected"
 APPROVED = "approved"
+COMPENSATED = "compensated"
+COMPENSATION_FAILED = "compensation_failed"
 
 DEFAULT_AGENT_TIMEOUT_SECONDS = 3600.0
 
@@ -420,6 +422,8 @@ async def advance_instance(instance_id: str, scope: str) -> str:
     await set_instance_status(instance_id, RUNNING)
     context: dict[str, Any] = dict(plan["context"])
     done: set[str] = set()
+    # In the order they finished, because undoing goes the other way round.
+    finished: list[str] = []
     ready = [step.id for step in definition.entry_steps()]
 
     while ready:
@@ -442,6 +446,7 @@ async def advance_instance(instance_id: str, scope: str) -> str:
             if result["state"] != COMPLETED:
                 continue
             done.add(result["step_id"])
+            finished.append(result["step_id"])
             if isinstance(result["output"], dict):
                 context.update(
                     {key: value for key, value in result["output"].items() if value is not None}
@@ -459,7 +464,7 @@ async def advance_instance(instance_id: str, scope: str) -> str:
             if result["state"] != COMPLETED and not result.get("goto")
         ]
         if stopped:
-            return await _stop_here(instance_id, stopped)
+            return await _stop_here(instance_id, definition, stopped, finished, context)
 
         for result in results:
             step = definition.step(result["step_id"])
@@ -470,21 +475,64 @@ async def advance_instance(instance_id: str, scope: str) -> str:
     return COMPLETED
 
 
-async def _stop_here(instance_id: str, stopped: list[dict[str, Any]]) -> str:
-    """Says where the instance stopped, and because of which steps.
+async def _stop_here(
+    instance_id: str,
+    definition: ProcessDefinition,
+    stopped: list[dict[str, Any]],
+    finished: list[str],
+    context: dict[str, Any],
+) -> str:
+    """Says where the instance stopped, because of which steps, and undoes what it can.
 
     With several steps running together the state alone is not an answer: what
-    somebody needs is the name of the ones that did not get through.
+    somebody needs is the name of the ones that did not get through -- and, when
+    the process is not going to continue, the work already done outside has to
+    be taken back.
     """
     for state in (FAILED, REJECTED, ESCALATED, WAITING):
         named = [result["step_id"] for result in stopped if result["state"] == state]
         if not named:
             continue
-        await set_instance_status(instance_id, state, f"{state}: {', '.join(named)}")
-        logger.info("Instance %s is %s because of %s.", instance_id, state, ", ".join(named))
-        return state
+
+        undone = []
+        if state in (FAILED, REJECTED):
+            undone = await _compensate(instance_id, definition, finished, context)
+
+        final = COMPENSATED if state == FAILED and undone else state
+        note = f"{state}: {', '.join(named)}"
+        if undone:
+            note += f"; undone: {', '.join(undone)}"
+        await set_instance_status(instance_id, final, note)
+        logger.info("Instance %s is %s -- %s.", instance_id, final, note)
+        return final
 
     return WAITING
+
+
+async def _compensate(
+    instance_id: str,
+    definition: ProcessDefinition,
+    finished: list[str],
+    context: dict[str, Any],
+) -> list[str]:
+    """Undoes the steps that declared how, last first.
+
+    Reverse order is not a detail: a step undone before the one that came after
+    it would be undoing something the other still relies on.
+    """
+    undone: list[str] = []
+    for step_id in reversed(finished):
+        step = definition.step(step_id)
+        if step is None or not step.compensate_with:
+            continue
+        key = (
+            f"undo:{instance_id}:{step.id}:{context.get(step.idempotency_key, '')}"
+            if step.idempotency_key
+            else ""
+        )
+        if await compensate_step(instance_id, step.id, step.compensate_with, key, context):
+            undone.append(step.id)
+    return undone
 
 
 async def _run_agent_step(
@@ -560,6 +608,49 @@ async def read_result(owner: str, task_id: str) -> str:
     except Exception:
         logger.warning("Task %s of %s could not be read back.", task_id[:8], owner, exc_info=True)
         return ""
+
+
+@DBOS.step()
+async def compensate_step(
+    instance_id: str, step_id: str, tool_name: str, key: str, context: dict[str, Any]
+) -> bool:
+    """Undoes one step, and says whether it managed.
+
+    A compensation that raises must not stop the ones after it: what has been
+    done to the outside world is undone as far as it can be, and what could not
+    be undone is written where somebody will read it.
+    """
+    engine = current_engine()
+    if key and not await engine.store.record_effect(
+        instance_id=UUID(instance_id), step_id=f"{step_id}:undo", key=key
+    ):
+        # Already undone, by an earlier attempt of this same instance.
+        return True
+
+    try:
+        output = get_tool(tool_name)(context)
+        if inspect.isawaitable(output):
+            output = await output
+    except Exception as error:  # noqa: BLE001 - one compensation, not the run
+        await engine.store.note_step(
+            instance_id=UUID(instance_id),
+            step_id=step_id,
+            status=COMPENSATION_FAILED,
+            note=f"'{tool_name}' failed: {type(error).__name__}: {error}",
+        )
+        logger.error(
+            "Instance %s: step %s could not be undone.", instance_id, step_id, exc_info=True
+        )
+        return False
+
+    await engine.store.note_step(
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        status=COMPENSATED,
+        note=f"undone by '{tool_name}'",
+    )
+    logger.info("Instance %s: step %s undone by %s.", instance_id, step_id, tool_name)
+    return True
 
 
 @DBOS.step()

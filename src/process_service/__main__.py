@@ -8,6 +8,7 @@ import sys
 import uvicorn
 
 from .api import create_app
+from .config import get_settings
 
 
 def main() -> None:
@@ -18,7 +19,11 @@ def main() -> None:
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    uvicorn.run(create_app(), host="127.0.0.1", port=8300)
+    # Not `uvicorn.run`: it builds a loop of its own, which on Windows is the
+    # ProactorEventLoop the line above exists to avoid -- and then nothing can
+    # reach the database.
+    config = uvicorn.Config(create_app(), host="127.0.0.1", port=get_settings().port)
+    asyncio.run(uvicorn.Server(config).serve())
 
 
 if __name__ == "__main__":

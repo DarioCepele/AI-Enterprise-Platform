@@ -18,7 +18,19 @@ _TOOLS: dict[str, Tool] = {}
 
 
 def tool(name: str) -> Callable[[Tool], Tool]:
+    """Registers a tool under a name a definition can refer to.
+
+    Two tools with the same name is a mistake that shows up far away -- a
+    process quietly calling somebody else's function -- so it is refused here
+    instead.
+    """
     def register(function: Tool) -> Tool:
+        existing = _TOOLS.get(name)
+        if existing is not None and existing is not function:
+            raise KeyError(
+                f"tool '{name}' is already registered by "
+                f"{existing.__module__}.{existing.__qualname__}"
+            )
         _TOOLS[name] = function
         return function
 

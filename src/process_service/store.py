@@ -185,6 +185,21 @@ class InstanceStore:
                  instance_id, step_id),
             )
 
+    async def note_step(
+        self, *, instance_id: UUID, step_id: str, status: str, note: str
+    ) -> None:
+        """Changes the state of a step that is already over, keeping its output.
+
+        A compensated step is not an unfinished step: what it did is still part
+        of the history, next to the fact that it was undone.
+        """
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                "UPDATE instance_steps SET status = %s, note = %s "
+                "WHERE instance_id = %s AND step_id = %s",
+                (status, note, instance_id, step_id),
+            )
+
     async def record_effect(self, *, instance_id: UUID, step_id: str, key: str) -> bool:
         """Writes an effect under its key, and says whether it is the first one.
 
