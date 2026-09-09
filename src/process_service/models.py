@@ -14,6 +14,8 @@ class StepState(BaseModel):
     step_id: str
     status: str
     owner: str | None = None
+    task_id: str | None = None
+    question: str | None = None
     output: dict[str, Any] | None = None
     note: str | None = None
     started_at: datetime | None = None
@@ -33,6 +35,12 @@ class Instance(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     steps: list[StepState] = Field(default_factory=list)
+
+
+class AnswerRequest(BaseModel):
+    """What a person answers to a step that is waiting for a clarification."""
+
+    text: str
 
 
 class StartRequest(BaseModel):

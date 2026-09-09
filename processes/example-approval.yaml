@@ -20,7 +20,12 @@ steps:
     type: agent
     owner: knowledge
     depends_on: [collect]
+    input:
+      question: What should be known before deciding on this request?
+    # Nobody waits forever for an agent either: when the time is up the step is
+    # handed to the people who can decide without it.
     timeout_seconds: 120
+    on_timeout: approval
 
   - id: decide
     type: decision

@@ -138,6 +138,29 @@ class InstanceStore:
                 (status, instance_id, step_id),
             )
 
+    async def waiting_on(
+        self,
+        *,
+        instance_id: UUID,
+        step_id: str,
+        status: str,
+        task_id: str | None = None,
+        question: str | None = None,
+    ) -> None:
+        """Writes what a suspended step is waiting for, so it is answerable."""
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """
+                UPDATE instance_steps
+                   SET status = %s,
+                       task_id = COALESCE(%s, task_id),
+                       question = %s,
+                       started_at = COALESCE(started_at, now())
+                 WHERE instance_id = %s AND step_id = %s
+                """,
+                (status, task_id, question, instance_id, step_id),
+            )
+
     async def finish_step(
         self,
         *,
@@ -218,6 +241,8 @@ def _instance_of(row: dict[str, Any], steps: list[dict[str, Any]]) -> Instance:
                 step_id=step["step_id"],
                 status=step["status"],
                 owner=step["owner"],
+                task_id=step.get("task_id"),
+                question=step.get("question"),
                 output=step["output"],
                 note=step["note"],
                 started_at=_moment(step["started_at"]),

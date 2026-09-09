@@ -8,14 +8,15 @@ from typing import Any
 from uuid import UUID
 
 from dbos import DBOS
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 
+from .agents import AgentGateway, TOKEN_HEADER, NEEDS_INPUT, TERMINAL, summary_of, token_is_valid
 from .catalog import Catalog, load_catalog
 from .config import Settings, get_settings
 from .definitions import DefinitionError
-from .engine import Engine, current_engine, use_engine
+from .engine import Engine, current_engine, human_topic, use_engine
 from .migrations import run_migrations
-from .models import Instance, StartRequest
+from .models import AnswerRequest, Instance, StartRequest
 from .observability import configure_logging, configure_tracing
 from .store import InstanceStore, build_pool
 
@@ -28,6 +29,7 @@ def create_app(
     catalog: Catalog | None = None,
     store: InstanceStore | None = None,
     settings: Settings | None = None,
+    agents: AgentGateway | None = None,
 ) -> FastAPI:
     """Builds the app. `catalog` and `store` are passed in tests."""
     config = settings or get_settings()
@@ -36,12 +38,13 @@ def create_app(
     # Loaded here, not on the first request: a broken definition has to stop the
     # boot, not surface in front of whoever is using the process.
     definitions = catalog if catalog is not None else load_catalog(config.definitions_path)
+    gateway = agents if agents is not None else AgentGateway(config.agents, config.public_url)
     state: dict[str, Any] = {"store": store} if store is not None else {}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if store is not None:
-            use_engine(Engine(definitions, store))
+            use_engine(Engine(definitions, store, gateway))
             yield
             return
 
@@ -51,7 +54,7 @@ def create_app(
             await run_migrations(connection)
         running_store = InstanceStore(pool)
         state["store"] = running_store
-        use_engine(Engine(definitions, running_store))
+        use_engine(Engine(definitions, running_store, gateway))
 
         # DBOS owns the durability: it keeps the ledger of what each instance has
         # already done, and on launch it picks up the workflows this process --
@@ -150,6 +153,51 @@ def create_app(
         await current_engine().start(instance.id, scope)
         return instance
 
+
+    @app.post("/a2a/push/{scope}/{instance_id}/{step_id}")
+    async def agent_notification(
+        scope: str,
+        instance_id: UUID,
+        step_id: str,
+        request: Request,
+        token: str | None = Header(default=None, alias=TOKEN_HEADER),
+    ) -> dict[str, str]:
+        """The remote agent says a task moved, and the instance wakes up.
+
+        The correlation is in the URL and the authenticity in the signed token:
+        an open webhook here would let anyone push an outcome into somebody
+        else's process. Only terminal states and questions wake an instance;
+        progress is noise.
+        """
+        if not token_is_valid(str(instance_id), step_id, token):
+            logger.warning(
+                "Notification refused for instance %s step %s: invalid token.",
+                instance_id,
+                step_id,
+            )
+            raise HTTPException(status_code=403, detail="invalid token")
+
+        task_id, state, text = summary_of(await request.json())
+
+        if state not in TERMINAL and state != NEEDS_INPUT:
+            return {"state": "progress ignored"}
+
+        logger.info(
+            "Instance %s step %s: task %s is %s (%d characters).",
+            instance_id,
+            step_id,
+            task_id[:8] or "?",
+            state,
+            len(text),
+        )
+        await DBOS.send_async(
+            destination_id=str(instance_id),
+            message={"task_id": task_id, "state": state, "text": text},
+            topic=step_id,
+            idempotency_key=f"{instance_id}:{step_id}:{task_id}:{state}",
+        )
+        return {"state": "received"}
+
     @app.get("/instances/{instance_id}")
     async def read_instance(
         instance_id: UUID,
@@ -160,6 +208,40 @@ def create_app(
         if instance is None:
             raise HTTPException(status_code=404, detail="unknown instance")
         return instance
+
+    @app.post("/instances/{instance_id}/steps/{step_id}/answer")
+    async def answer_step(
+        instance_id: UUID,
+        step_id: str,
+        request: AnswerRequest,
+        scope: str = Depends(current_scope),
+        store: InstanceStore = Depends(current_store),
+    ) -> dict[str, str]:
+        """A person answers what the agent stopped to ask.
+
+        The answer belongs to the step that is waiting for it, so it is refused
+        anywhere else: an answer sent to a step nobody asked about would sit in
+        the mailbox and be read by the next question.
+        """
+        instance = await store.get(scope=scope, instance_id=instance_id)
+        if instance is None:
+            raise HTTPException(status_code=404, detail="unknown instance")
+
+        waiting = next((step for step in instance.steps if step.step_id == step_id), None)
+        if waiting is None:
+            raise HTTPException(status_code=404, detail=f"unknown step '{step_id}'")
+        if waiting.status != "waiting_human":
+            raise HTTPException(
+                status_code=409,
+                detail=f"step '{step_id}' is {waiting.status}, it is not waiting for an answer",
+            )
+
+        await DBOS.send_async(
+            destination_id=str(instance_id),
+            message={"text": request.text},
+            topic=human_topic(step_id),
+        )
+        return {"state": "answered"}
 
     @app.get("/instances")
     async def list_instances(

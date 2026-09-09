@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS side_effects (
 """
 
 
+STEP_TASKS = """
+ALTER TABLE instance_steps ADD COLUMN IF NOT EXISTS task_id text;
+ALTER TABLE instance_steps ADD COLUMN IF NOT EXISTS question text;
+"""
+
+
 @dataclass(frozen=True)
 class Migration:
     version: int
@@ -72,6 +78,7 @@ class Migration:
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "instances and steps", (INSTANCES, STEPS)),
     Migration(2, "effects that must not repeat", (EFFECTS,)),
+    Migration(3, "the remote task a step waits on", (STEP_TASKS,)),
 )
 
 LATEST_VERSION = max(migration.version for migration in MIGRATIONS)

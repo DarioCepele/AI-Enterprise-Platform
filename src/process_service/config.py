@@ -1,11 +1,13 @@
 """Configuration read from environment variables."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Annotated
 
 from dotenv import load_dotenv
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 load_dotenv()
 
@@ -24,6 +26,18 @@ class Settings(BaseSettings):
     json_logs: bool = Field(default=False)
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)
+    public_url: str = Field(default="http://localhost:8300")
+    push_secret: str = Field(default="laboratory-without-a-secret")
+    agents: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
+
+    @field_validator("agents", mode="before")
+    @classmethod
+    def _agents(cls, value: object) -> object:
+        """A JSON object of name -> url. Empty means no agent steps can run."""
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        return json.loads(text) if text else {}
 
 
 # What each variable decides, next to the fields it decides for. The table in
@@ -36,6 +50,9 @@ FIELD_NOTES = {
     "json_logs": "Structured logs for a collector instead of the readable line.",
     "pool_min_size": "Connections kept open.",
     "pool_max_size": "Connections at most.",
+    "public_url": "How a remote agent reaches this service back, for notifications.",
+    "push_secret": "Signs notification tokens. Change it: the default is public.",
+    "agents": 'Agents a step may delegate to, as JSON: {"knowledge": "http://..."}.',
 }
 
 

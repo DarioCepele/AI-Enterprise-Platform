@@ -41,6 +41,7 @@ class Step(BaseModel):
     branches: list[Branch] = []
     participants: list[str] = []
     timeout_seconds: float | None = None
+    on_timeout: str | None = None
     idempotency_key: str | None = None
     compensate_with: str | None = None
     input: dict[str, Any] = {}
@@ -134,6 +135,10 @@ def _check_references(definition: ProcessDefinition) -> None:
                 raise DefinitionError(
                     f"step '{step.id}' depends on '{dependency}', which does not exist"
                 )
+        if step.on_timeout and step.on_timeout not in known:
+            raise DefinitionError(
+                f"step '{step.id}' escalates to '{step.on_timeout}', which does not exist"
+            )
         for branch in step.branches:
             if branch.goto not in known:
                 raise DefinitionError(

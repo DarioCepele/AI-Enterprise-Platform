@@ -17,6 +17,7 @@ from uuid import UUID
 
 from dbos import DBOS, SetWorkflowID
 
+from .agents import NEEDS_INPUT, AgentGateway
 from .catalog import Catalog
 from .definitions import ProcessDefinition, Step
 from .expressions import ConditionError, evaluate
@@ -37,12 +38,28 @@ SUSPENDING_TYPES = ("agent", "approval", "open_goal")
 _ENGINE: "Engine | None" = None
 
 
+WAITING_HUMAN = "waiting_human"
+ESCALATED = "escalated"
+
+DEFAULT_AGENT_TIMEOUT_SECONDS = 3600.0
+
+# An agent that keeps asking is an agent that is not going to finish: after this
+# many rounds the step is handed on rather than looping in front of a person.
+MAX_CLARIFICATIONS = 5
+
+
 class Engine:
     """Runs instances. One per process, wired at startup."""
 
-    def __init__(self, catalog: Catalog, store: InstanceStore) -> None:
+    def __init__(
+        self,
+        catalog: Catalog,
+        store: InstanceStore,
+        agents: AgentGateway | None = None,
+    ) -> None:
         self.catalog = catalog
         self.store = store
+        self.agents = agents
 
     async def start(self, instance_id: UUID, scope: str) -> None:
         """Starts the workflow of an instance, once.
@@ -140,6 +157,72 @@ async def decide_branch(
 
 
 @DBOS.step()
+async def ask_agent(
+    instance_id: str, step_id: str, scope: str, owner: str, question: str
+) -> dict[str, Any]:
+    """Starts the remote task and writes down which one it is.
+
+    Recorded as a step because asking twice would start two tasks: after a
+    crash the recovered instance reads the task it already started.
+    """
+    engine = current_engine()
+    if engine.agents is None:
+        raise RuntimeError("no agents are configured: an agent step cannot run")
+    started = await engine.agents.ask(
+        agent=owner, question=question, scope=scope, instance_id=instance_id, step_id=step_id
+    )
+    await engine.store.waiting_on(
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        status=WAITING,
+        task_id=started["task_id"],
+    )
+    await engine.store.set_status(instance_id=UUID(instance_id), status=WAITING)
+    return started
+
+
+def human_topic(step_id: str) -> str:
+    """The topic a person answers on, kept apart from what the agent notifies."""
+    return f"{step_id}:human"
+
+
+@DBOS.step()
+async def reply_to_agent(
+    instance_id: str, step_id: str, scope: str, owner: str, task_id: str, answer: str
+) -> None:
+    """Hands the person's answer to the agent that asked for it."""
+    engine = current_engine()
+    if engine.agents is None:
+        raise RuntimeError("no agents are configured: an agent step cannot run")
+    await engine.agents.reply(
+        agent=owner,
+        answer=answer,
+        scope=scope,
+        instance_id=instance_id,
+        step_id=step_id,
+        task_id=task_id,
+    )
+    await engine.store.waiting_on(
+        instance_id=UUID(instance_id), step_id=step_id, status=WAITING, task_id=task_id
+    )
+    await engine.store.set_status(instance_id=UUID(instance_id), status=WAITING)
+
+
+@DBOS.step()
+async def note_question(instance_id: str, step_id: str, question: str) -> None:
+    """The agent stopped and asked something: the step now waits for a person."""
+    engine = current_engine()
+    await engine.store.waiting_on(
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        status=WAITING_HUMAN,
+        question=question,
+    )
+    await engine.store.set_status(instance_id=UUID(instance_id), status=WAITING_HUMAN)
+    logger.info("Instance %s step %s waits for an answer: %s", instance_id, step_id, question)
+
+
+@DBOS.step()
 async def suspend(instance_id: str, step_id: str, reason: str) -> None:
     engine = current_engine()
     await engine.store.mark_step(instance_id=UUID(instance_id), step_id=step_id, status=WAITING)
@@ -193,11 +276,15 @@ async def advance_instance(instance_id: str, scope: str) -> str:
         if step is None or step_id in done:
             continue
 
-        if step.type in SUSPENDING_TYPES:
+        if step.type == "agent":
+            outcome = await _run_agent_step(instance_id, scope, step, context)
+            if outcome is None:
+                return WAITING if step.on_timeout is None else ESCALATED
+        elif step.type in SUSPENDING_TYPES:
             await suspend(instance_id, step_id, f"{step.type} step")
             return WAITING
-
-        outcome = await _run_step(instance_id, step, context)
+        else:
+            outcome = await _run_step(instance_id, step, context)
         if outcome is FAILED:
             await set_instance_status(instance_id, FAILED)
             return FAILED
@@ -210,6 +297,112 @@ async def advance_instance(instance_id: str, scope: str) -> str:
 
     await set_instance_status(instance_id, COMPLETED)
     return COMPLETED
+
+
+async def _run_agent_step(
+    instance_id: str, scope: str, step: Step, context: dict[str, Any]
+) -> Any:
+    """Delegates to a remote agent and waits, for as long as the step allows.
+
+    The wait is durable: the workflow is not holding a connection, and a process
+    that dies here comes back waiting for the same answer. What wakes it is the
+    webhook, which sends a message to this instance under the step's name.
+    """
+    question = str(step.input.get("question") or context.get("question") or "").strip()
+    if not question:
+        question = f"{step.id}: {context}"
+
+    started = await ask_agent(instance_id, step.id, scope, step.owner or "", question)
+
+    timeout = step.timeout_seconds or DEFAULT_AGENT_TIMEOUT_SECONDS
+    answer = await DBOS.recv_async(topic=step.id, timeout_seconds=timeout)
+    if answer is None:
+        return await _timed_out(instance_id, step, timeout)
+
+    for _ in range(MAX_CLARIFICATIONS):
+        if answer.get("state") != NEEDS_INPUT:
+            break
+        # The agent stopped to ask something. A person answers it, and the answer
+        # goes back into the same task: starting a new one would throw away what
+        # the agent had already worked out.
+        await note_question(instance_id, step.id, answer.get("text", ""))
+        from_a_person = await DBOS.recv_async(topic=human_topic(step.id), timeout_seconds=timeout)
+        if from_a_person is None:
+            return await _timed_out(instance_id, step, timeout)
+
+        await reply_to_agent(
+            instance_id,
+            step.id,
+            scope,
+            step.owner or "",
+            answer.get("task_id") or started.get("task_id", ""),
+            str(from_a_person.get("text", "")),
+        )
+        answer = await DBOS.recv_async(topic=step.id, timeout_seconds=timeout)
+        if answer is None:
+            return await _timed_out(instance_id, step, timeout)
+
+    if answer.get("state") == NEEDS_INPUT:
+        await escalate(instance_id, step.id, step.on_timeout, timeout)
+        return None
+
+    task_id = answer.get("task_id") or started.get("task_id", "")
+    text = answer.get("text", "")
+    if not text and task_id:
+        text = await read_result(step.owner or "", task_id)
+    output = {"agent": step.owner, "text": text, "task_id": task_id}
+    await write_step_output(instance_id, step.id, output)
+    return output
+
+
+async def _timed_out(instance_id: str, step: Step, timeout: float) -> None:
+    """A step that ran out of time, handed on where the definition says."""
+    await escalate(instance_id, step.id, step.on_timeout, timeout)
+    return None
+
+
+@DBOS.step()
+async def read_result(owner: str, task_id: str) -> str:
+    """Asks the agent for the answer the notification did not carry."""
+    engine = current_engine()
+    if engine.agents is None:
+        raise RuntimeError("no agents are configured: an agent step cannot run")
+    try:
+        return await engine.agents.result_of(agent=owner, task_id=task_id)
+    except Exception:
+        logger.warning("Task %s of %s could not be read back.", task_id[:8], owner, exc_info=True)
+        return ""
+
+
+@DBOS.step()
+async def write_step_output(instance_id: str, step_id: str, output: dict[str, Any]) -> None:
+    engine = current_engine()
+    await engine.store.finish_step(
+        instance_id=UUID(instance_id), step_id=step_id, status=COMPLETED, output=output
+    )
+
+
+@DBOS.step()
+async def escalate(
+    instance_id: str, step_id: str, goes_to: str | None, timeout: float
+) -> None:
+    engine = current_engine()
+    note = (
+        f"no answer within {timeout:.0f}s, escalated to '{goes_to}'"
+        if goes_to
+        else f"no answer within {timeout:.0f}s"
+    )
+    await engine.store.finish_step(
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        status=ESCALATED if goes_to else FAILED,
+        output=None,
+        note=note,
+    )
+    await engine.store.set_status(
+        instance_id=UUID(instance_id), status=ESCALATED if goes_to else FAILED
+    )
+    logger.warning("Instance %s step %s: %s.", instance_id, step_id, note)
 
 
 async def _run_step(instance_id: str, step: Step, context: dict[str, Any]) -> Any:
