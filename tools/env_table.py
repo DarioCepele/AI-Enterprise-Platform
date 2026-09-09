@@ -49,6 +49,15 @@ Read at request time, so the same image serves any environment. The
 | `KNOWLEDGE_SERVICE_TOKEN` | *(empty)* | Token that unlocks the extended card. Empty means nobody gets it. |
 | `KNOWLEDGE_JSON_LOGS` | `false` | Structured logs for a collector. |
 | `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_CHAT_COMPLETION_MODEL` | *(as the master agent)* | The model this agent reads its corpus with. |
+
+### analysis agent
+
+| Variable | Default | What it decides |
+|---|---|---|
+| `ANALYSIS_BASE_URL` | `http://localhost:8400/` | The url this agent declares in its own card. |
+| `ANALYSIS_SERVICE_TOKEN` | *(empty)* | Token that unlocks the extended card. Empty means nobody gets it. |
+| `ANALYSIS_JSON_LOGS` | `false` | Structured logs for a collector. |
+| `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_CHAT_COMPLETION_MODEL` | *(as the master agent)* | The model this agent reasons with. It computes with tools, not with the model. |
 """
 
 

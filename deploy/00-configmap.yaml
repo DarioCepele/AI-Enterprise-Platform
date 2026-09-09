@@ -13,3 +13,7 @@ data:
   PRODUCT_NAME: AG-UI Lab
   MEMORY_MONGO_DATABASE: agui_lab
   MEMORY_RETENTION_DAYS: "0"
+  # Which agents exist, by the names the model and the definitions use. The
+  # tokens of the extended cards are in the Secret, so this list carries none.
+  PROCESS_AGENTS: |
+    {"knowledge": "http://knowledge-agent:8200/", "analysis": "http://analysis-agent:8400/"}

@@ -1,30 +1,35 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: master-agent
+  name: process-service
   labels:
-    app.kubernetes.io/name: master-agent
+    app.kubernetes.io/name: process-service
     app.kubernetes.io/part-of: agui-lab
 spec:
+  # Two on purpose, like the master agent: an instance that survives its own
+  # process is the claim this service makes, and two replicas are what turns it
+  # into something a cluster can contradict. What holds them together is
+  # Postgres -- the ledger, the waiting steps and the messages that wake them
+  # all live there, so either replica can pick up what the other left.
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: master-agent
+      app.kubernetes.io/name: process-service
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: master-agent
+        app.kubernetes.io/name: process-service
     spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: master-agent
-          image: ghcr.io/<owner>/demo-master-agent:<tag>
+        - name: process-service
+          image: ghcr.io/<owner>/demo-process-service:<tag>
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8000
+            - containerPort: 8300
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -40,27 +45,21 @@ spec:
           livenessProbe:
             httpGet:
               path: /health/live
-              port: 8000
+              port: 8300
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /health/ready
-              port: 8000
+              port: 8300
             periodSeconds: 5
             failureThreshold: 3
           env:
-            - name: DEMO_PUBLIC_URL
-              value: http://master-agent:8000
-            - name: DEMO_MEMORY_SERVICE_URL
-              value: http://memory-service:8100
-            # The two subagents by name. The tokens of their extended cards
-            # come from the Secret, so they are not written here: a subagent
-            # without a token still answers, it just serves the public card.
-            - name: DEMO_SUBAGENTS
-              value: |
-                [{"name": "knowledge", "url": "http://knowledge-agent:8200/"},
-                 {"name": "analysis", "url": "http://analysis-agent:8400/"}]
-            - name: DEMO_JSON_LOGS
+            # Where a remote agent sends its notifications back. It is the
+            # Service and not a pod: whichever replica receives it, the message
+            # goes through Postgres to the step that is waiting.
+            - name: PROCESS_PUBLIC_URL
+              value: http://process-service:8300
+            - name: PROCESS_JSON_LOGS
               value: "true"
           envFrom:
             - secretRef:
@@ -71,10 +70,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: master-agent
+  name: process-service
 spec:
   selector:
-    app.kubernetes.io/name: master-agent
+    app.kubernetes.io/name: process-service
   ports:
-    - port: 8000
-      targetPort: 8000
+    - port: 8300
+      targetPort: 8300

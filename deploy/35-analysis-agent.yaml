@@ -1,30 +1,30 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: master-agent
+  name: analysis-agent
   labels:
-    app.kubernetes.io/name: master-agent
+    app.kubernetes.io/name: analysis-agent
     app.kubernetes.io/part-of: agui-lab
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: master-agent
+      app.kubernetes.io/name: analysis-agent
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: master-agent
+        app.kubernetes.io/name: analysis-agent
     spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: master-agent
-          image: ghcr.io/<owner>/demo-master-agent:<tag>
+        - name: analysis-agent
+          image: ghcr.io/<owner>/demo-analysis-agent:<tag>
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8000
+            - containerPort: 8400
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -40,27 +40,18 @@ spec:
           livenessProbe:
             httpGet:
               path: /health/live
-              port: 8000
+              port: 8400
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /health/ready
-              port: 8000
+              port: 8400
             periodSeconds: 5
             failureThreshold: 3
           env:
-            - name: DEMO_PUBLIC_URL
-              value: http://master-agent:8000
-            - name: DEMO_MEMORY_SERVICE_URL
-              value: http://memory-service:8100
-            # The two subagents by name. The tokens of their extended cards
-            # come from the Secret, so they are not written here: a subagent
-            # without a token still answers, it just serves the public card.
-            - name: DEMO_SUBAGENTS
-              value: |
-                [{"name": "knowledge", "url": "http://knowledge-agent:8200/"},
-                 {"name": "analysis", "url": "http://analysis-agent:8400/"}]
-            - name: DEMO_JSON_LOGS
+            - name: ANALYSIS_BASE_URL
+              value: http://analysis-agent:8400/
+            - name: ANALYSIS_JSON_LOGS
               value: "true"
           envFrom:
             - secretRef:
@@ -71,10 +62,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: master-agent
+  name: analysis-agent
 spec:
   selector:
-    app.kubernetes.io/name: master-agent
+    app.kubernetes.io/name: analysis-agent
   ports:
-    - port: 8000
-      targetPort: 8000
+    - port: 8400
+      targetPort: 8400

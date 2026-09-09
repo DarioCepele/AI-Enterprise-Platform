@@ -80,6 +80,10 @@ Quello che degrada, invece di rompersi, quando manca un pezzo:
 | `MEMORY_EMBEDDING_MODEL` | `cerca_nei_ricordi` non trova niente e lo dichiara |
 | `KNOWLEDGE_SERVICE_TOKEN` | la card estesa non e' accessibile: il modello interroga il sottoagente senza sapere cosa contiene |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | nessuna traccia esportata, tutto il resto uguale |
+| `PROCESS_POSTGRES_DSN` (irraggiungibile) | il servizio dei processi non parte: non c'e' una modalita' in memoria, sarebbe un motore che dice di essere durevole e non lo e' |
+| `PROCESS_AGENTS` | i passi `agent` e `open_goal` falliscono col nome dell'agente cercato; i processi di soli `tool` e `decision` girano lo stesso |
+| `OPENAI_API_KEY` sul process-service | fallisce solo `open_goal`: e' l'unico posto dove quel servizio parla con un modello |
+| `ANALYSIS_SERVICE_TOKEN` | come per il knowledge agent: card estesa non accessibile |
 
 E i default che valgono per un tenant solo: `DEMO_DEFAULT_SCOPE` e' una
 costante, `DEMO_SCOPE_HEADER` e' vuoto, la ritenzione e' spenta.
@@ -175,6 +179,15 @@ Read at request time, so the same image serves any environment. The
 | `KNOWLEDGE_JSON_LOGS` | `false` | Structured logs for a collector. |
 | `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_CHAT_COMPLETION_MODEL` | *(as the master agent)* | The model this agent reads its corpus with. |
 
+### analysis agent
+
+| Variable | Default | What it decides |
+|---|---|---|
+| `ANALYSIS_BASE_URL` | `http://localhost:8400/` | The url this agent declares in its own card. |
+| `ANALYSIS_SERVICE_TOKEN` | *(empty)* | Token that unlocks the extended card. Empty means nobody gets it. |
+| `ANALYSIS_JSON_LOGS` | `false` | Structured logs for a collector. |
+| `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_CHAT_COMPLETION_MODEL` | *(as the master agent)* | The model this agent reasons with. It computes with tools, not with the model. |
+
 <!-- env-table:end -->
 
 ## Repo
@@ -183,6 +196,7 @@ Read at request time, so the same image serves any environment. The
 |---|---|
 | `demo-master-agent` | agente principale, endpoint AG-UI su SSE |
 | `demo-knowledge-agent` | sottoagente di knowledge base, esposto via A2A |
+| `demo-analysis-agent` | sottoagente che misura e confronta numeri, via A2A |
 | `demo-memory-service` | memoria delle conversazioni: transcript, riassunti, fatti, ricordi |
 | `demo-frontend` | interfaccia Next.js |
 | `demo-process-service` | processi durevoli: definizioni versionate, istanze |
@@ -195,17 +209,25 @@ percorsi fratelli.
 
 | Servizio | Porta sull'host | A cosa serve |
 |---|---|---|
-| process-service | — | processi durevoli, istanze su Postgres |
 | `frontend` | 3000 | l'interfaccia |
 | `master-agent` | 8000 | AG-UI su SSE, `/logs` |
+| `process-service` | loopback 8300 | processi durevoli, istanze su Postgres |
+| `knowledge-agent` | loopback 8200 | sottoagente A2A: legge un corpus |
+| `analysis-agent` | loopback 8400 | sottoagente A2A: misura e confronta |
 | `memory-service` | — | memoria conversazionale, interna |
-| `knowledge-agent` | — | sottoagente A2A, interno |
 | `mongo` | loopback | transcript e fatti duraturi |
 | `redis` | loopback | coda calda e ricordi cercabili |
+| `postgres` | loopback | il libro mastro delle istanze |
 
-Memoria e sottoagente **non pubblicano porte**: li raggiunge solo il master
-agent dalla rete di compose. L'unico modo serio di dire "servizio interno" è non
-esporlo.
+La memoria **non pubblica porte**: la raggiunge solo il master agent dalla rete
+di compose. Gli altri sono sul **loopback**, che non e' la stessa cosa di
+esposti: servono a guardarli mentre si lavora -- e a misurarli, come fa
+`tools/measure_fan_out.py` -- e restano irraggiungibili da fuori la macchina.
+
+**Due sottoagenti, non uno.** Con un sottoagente solo l'instradamento non
+esiste: qualunque domanda va all'unico che c'e'. `knowledge` legge quello che
+qualcuno ha scritto, `analysis` lavora sui numeri che riceve nella richiesta;
+sono due domini davvero diversi, ed entrambi sono **esempi da sostituire**.
 
 ## Avvio con Docker
 
