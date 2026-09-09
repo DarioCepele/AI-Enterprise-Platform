@@ -200,16 +200,22 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 ## Blocco D — I dati hanno un ciclo di vita
 
+**Chiuso il 2026-09-09.** Una cosa emersa facendolo: la ritenzione deve essere
+**limitata allo scope che la chiede**. Scritta come spazzata globale cancellava
+i thread di un altro tenant, e se ne e' accorto un test che confrontava
+l'elenco di quello che aveva tolto. Lo scope e' un confine di autorizzazione
+anche per la manutenzione.
+
 ### Task D1 — Un runner di migrazioni
 
 **Files:** `demo-memory-service/src/memory_service/migrations/` (nuovo), `api.py`
 
 **Perche':** la rinomina dei campi dei fatti ha richiesto uno script a mano e ha impedito l'avvio del servizio finche' non e' stato eseguito. Un template non puo' consegnare quel problema a chi lo forka.
 
-- [ ] **Step 1:** test: una migrazione applicata due volte non cambia nulla la seconda; il numero di versione e' registrato in Mongo.
-- [ ] **Step 2:** runner che applica in ordine le migrazioni mancanti all'avvio, prima della creazione degli indici.
-- [ ] **Step 3:** prima migrazione: `chiave`/`valore` -> `key`/`value`, cioe' quella gia' fatta a mano, cosi' un clone vecchio si aggiorna da solo.
-- [ ] **Step 4:** la creazione degli indici fallisce con un messaggio che nomina la migrazione mancante, invece di un `E11000` grezzo.
+- [x] **Step 1:** test: una migrazione applicata due volte non cambia nulla la seconda; il numero di versione e' registrato in Mongo.
+- [x] **Step 2:** runner che applica in ordine le migrazioni mancanti all'avvio, prima della creazione degli indici.
+- [x] **Step 3:** prima migrazione: `chiave`/`valore` -> `key`/`value`, cioe' quella gia' fatta a mano, cosi' un clone vecchio si aggiorna da solo.
+- [x] **Step 4:** la creazione degli indici fallisce con un messaggio che nomina la migrazione mancante, invece di un `E11000` grezzo.
 
 **Fatto quando:** un database scritto dalla versione precedente si avvia senza intervento manuale.
 
@@ -217,9 +223,9 @@ Con Kubernetes nel bersaglio, questi smettono di essere note nel README e divent
 
 **Files:** `demo-memory-service/src/memory_service/stores/mongo.py`, `service.py`, `api.py`
 
-- [ ] **Step 1:** test: un thread piu' vecchio della ritenzione configurata non compare piu' nelle letture ed e' rimosso dai bucket.
-- [ ] **Step 2:** comando `POST /admin/reindex` che ricostruisce l'indice vettoriale dai transcript, a scope o a thread.
-- [ ] **Step 3:** ritenzione disattivata di default, con la variabile documentata: cancellare conversazioni e' una decisione di prodotto, non un default.
+- [x] **Step 1:** test: un thread piu' vecchio della ritenzione configurata non compare piu' nelle letture ed e' rimosso dai bucket.
+- [x] **Step 2:** comando `POST /admin/reindex` che ricostruisce l'indice vettoriale dai transcript, a scope o a thread.
+- [x] **Step 3:** ritenzione disattivata di default, con la variabile documentata: cancellare conversazioni e' una decisione di prodotto, non un default.
 
 **Fatto quando:** perdere Redis non significa perdere la ricerca semantica, e la crescita di Mongo ha un limite dichiarato.
 
