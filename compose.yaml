@@ -189,6 +189,11 @@ services:
           cpus: "1.0"
     build: ../demo-process-service
     environment:
+      # The model here is the manager of an `open_goal` step, and nothing else:
+      # every other kind of step decides with rules, not with a model.
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_COMPLETION_MODEL: ${OPENAI_CHAT_COMPLETION_MODEL}
       PROCESS_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       PROCESS_JSON_LOGS: ${JSON_LOGS:-false}
       PROCESS_PUBLIC_URL: http://process-service:8300
