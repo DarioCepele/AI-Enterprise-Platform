@@ -27,12 +27,15 @@ from a2a.types import (
 from agent_framework import Agent
 from .executor import KnowledgeExecutor
 from .extended import SCHEME, ServiceTokenOnly, build_extended_card, card_for_the_caller
+from .observability import configure_logging, configure_tracing
 from .push import EssentialNotifications
 from fastapi import FastAPI, HTTPException
 
 from .agent import build_knowledge_agent, catalogue
 
 logger = logging.getLogger(__name__)
+
+SERVICE_NAME = "knowledge-agent"
 
 SKILL = AgentSkill(
     id="language-comparison",
@@ -68,8 +71,7 @@ def build_agent_card(base_url: str) -> AgentCard:
 
 
 def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastAPI:
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(SERVICE_NAME, as_json=os.getenv("KNOWLEDGE_JSON_LOGS", "").lower() == "true")
 
     url = base_url or os.getenv("KNOWLEDGE_BASE_URL", "http://localhost:8200/")
     card = build_agent_card(url)
@@ -86,6 +88,7 @@ def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastA
     )
 
     app = FastAPI(title="Knowledge agent")
+    configure_tracing(SERVICE_NAME, app)
     app.add_middleware(ServiceTokenOnly)
 
     @app.get("/health")
