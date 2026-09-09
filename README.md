@@ -68,10 +68,10 @@ il sottoagente restituisce.
 Prima ogni chunk di testo partiva come artefatto anonimo: 205 artefatti per una
 risposta, nessuno con un nome, nessun dato. Ora il testo scorre come messaggio
 di stato mentre il task è `WORKING`, e alla fine parte **un** artefatto
-`scheda`, con una parte testo per il modello e una parte dati per l'interfaccia:
+`briefing`, con una parte testo per il modello e una parte dati per l'interfaccia:
 
 ```json
-{"component": "scheda", "domanda": "...", "documenti": ["go"], "estratto": "..."}
+{"component": "briefing", "question": "...", "documents": ["go"], "summary": "..."}
 ```
 
 Il master lo rende come artefatto in timeline, con le fonti sotto — non come
@@ -88,8 +88,8 @@ senza `new_task_from_user_message()` enqueued per primo, il client riceve
 nessun nome:
 
 ```
-name='leggi_documento' call_id='ee79b6' args=''
-name=''                call_id='ee79b6' args='{"nome": "'
+name='read_document' call_id='ee79b6' args=''
+name=''                call_id='ee79b6' args='{"name": "'
 name=''                call_id='ee79b6' args='go'
 name=''                call_id='ee79b6' args='"}'
 ```
@@ -106,7 +106,7 @@ deve poter distinguere "non ho trovato nulla" da "è andato tutto bene".
 
 Se la domanda è ambigua al punto che rispondere sarebbe indovinare — «come
 funziona la concorrenza?», col catalogo che ha Go, Python e Rust — l'agente
-risponde con la sola riga `[SERVE-CHIARIMENTO] <domanda>`. L'executor la
+risponde con la sola riga `[NEEDS-CLARIFICATION] <domanda>`. L'executor la
 riconosce e mette il task in `INPUT_REQUIRED` invece di completarlo: il task
 resta **aperto**, e chi lo ha chiesto può riprenderlo mandando un messaggio con
 lo stesso `task_id`.
@@ -115,7 +115,7 @@ lo stesso `task_id`.
 master, dal master alla persona, e la risposta torna giù per lo stesso task
 invece di aprirne uno nuovo che avrebbe perso il contesto.
 
-Il marcatore è testuale di proposito: un tool `chiedi_chiarimento` sarebbe
+Il marcatore è testuale di proposito: un tool `ask_for_clarification` sarebbe
 sembrato più pulito, ma l'agente lo avrebbe chiamato *e poi* continuato a
 rispondere, perché per il modello un tool è un passo intermedio. La riga sola è
 un punto di uscita.
@@ -124,7 +124,7 @@ un punto di uscita.
 
 `BasePushNotificationSender` notifica **ogni** evento della coda. In streaming
 sono decine di aggiornamenti di stato per task: 196 POST verso il master per due
-domande, tutti scartati da chi li riceveva. `NotificheEssenziali` (in
+domande, tutti scartati da chi li riceveva. `EssentialNotifications` (in
 `knowledge/push.py`) filtra sugli stati in cui il chiamante ha davvero qualcosa
 da fare — fine del task (`COMPLETED`, `FAILED`, `CANCELED`, `REJECTED`) e
 `INPUT_REQUIRED`. Stesso ciclo, 2 POST.
@@ -142,7 +142,7 @@ lì. Sta nella card estesa, servita solo a chi presenta un token di servizio.
 ```
 GET /extendedAgentCard                       401  WWW-Authenticate: Bearer realm="servizio"
 GET /extendedAgentCard  Bearer <sbagliato>   401
-GET /extendedAgentCard  Bearer <giusto>      200  skills: confronto-linguaggi, catalogo
+GET /extendedAgentCard  Bearer <giusto>      200  skills: language-comparison, catalogue
 ```
 
 Tre scelte, tutte discutibili e tutte volute.
