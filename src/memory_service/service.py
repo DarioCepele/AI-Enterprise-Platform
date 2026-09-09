@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
+from typing import Any
 
 from .curation import ContextPolicy, curate, summary_message, window_start
 from .embedder import Embedder
@@ -10,6 +11,7 @@ from .facts import facts_message, parse_facts
 from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .snapshots import new_messages
 from .stores.hot import HotTail
+from .stores.locks import InProcessLock
 from .stores.mongo import MongoTranscripts
 from .stores.vectors import Memory, RedisMemories
 from .summarizer import FactExtractor, Summarizer
@@ -45,6 +47,7 @@ class ThreadMemory:
         max_facts: int = 30,
         embedder: Embedder | None = None,
         memories: RedisMemories | None = None,
+        lock: Any | None = None,
     ) -> None:
         self._durable = durable
         self._hot = hot
@@ -54,7 +57,7 @@ class ThreadMemory:
         self._max_facts = max_facts
         self._embedder = embedder
         self._memories = memories
-        self._compacting: set[tuple[str, str]] = set()
+        self._lock = lock or InProcessLock()
 
     async def append(self, scope: str, thread_id: str, message: NewMessage) -> StoredMessage:
         stored = await self._durable.append(scope, thread_id, message)
@@ -101,17 +104,13 @@ class ThreadMemory:
         if nothing_to_do or not self._policy.max_messages:
             return
 
-        key = (scope, thread_id)
-        if key in self._compacting:
-            logger.info("Compaction of thread %s already running, skipping.", thread_id)
-            return
-        self._compacting.add(key)
-        try:
+        async with self._lock.hold(f"compaction:{scope}:{thread_id}") as taken:
+            if not taken:
+                logger.info("Compaction of thread %s already running, skipping.", thread_id)
+                return
             await self._compact(scope, thread_id)
             await self._learn_facts(scope, thread_id)
             await self._index_memories(scope, thread_id)
-        finally:
-            self._compacting.discard(key)
 
     async def _index_memories(self, scope: str, thread_id: str) -> None:
         """Index only turns leaving the context window. Messages still visible to the model do not need semantic retrieval."""

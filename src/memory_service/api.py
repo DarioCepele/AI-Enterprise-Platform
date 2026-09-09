@@ -14,6 +14,7 @@ from .curation import ContextPolicy
 from .models import NewMessage, SearchQuery, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
 from .stores.hot import HotTail
+from .stores.locks import RedisLock
 from .embedder import OpenAICompatibleEmbedder
 from .stores.mongo import MongoTranscripts, build_client
 from .stores.vectors import RedisMemories
@@ -80,6 +81,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             config.max_facts,
             embedder,
             memories,
+            RedisLock(redis),
         )
         try:
             yield
