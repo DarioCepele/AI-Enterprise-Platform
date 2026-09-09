@@ -97,7 +97,43 @@ class Measurements:
         ]
 
 
-def assessment(question: str, answer: str, measurements: list[dict[str, Any]]) -> list[Part]:
+class Effort:
+    """What the answer cost: model calls, and tokens in and out.
+
+    The caller is going to compare "two agents in parallel" against "one agent
+    doing both", and that comparison is worth nothing without the tokens. Every
+    provider reports them at the end of each model call, so the count of those
+    reports is also the number of rounds.
+    """
+
+    def __init__(self) -> None:
+        self.rounds = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def observe(self, update: Any) -> None:
+        for content in getattr(update, "contents", None) or []:
+            if getattr(content, "type", "") != "usage":
+                continue
+            details = getattr(content, "usage_details", None) or {}
+            self.rounds += 1
+            self.input_tokens += int(details.get("input_token_count") or 0)
+            self.output_tokens += int(details.get("output_token_count") or 0)
+
+    def as_data(self) -> dict[str, int]:
+        return {
+            "rounds": self.rounds,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+        }
+
+
+def assessment(
+    question: str,
+    answer: str,
+    measurements: list[dict[str, Any]],
+    effort: dict[str, int] | None = None,
+) -> list[Part]:
     """The subagent's output: text for the model, numbers for the interface."""
     data = ParseDict(
         {
@@ -105,6 +141,7 @@ def assessment(question: str, answer: str, measurements: list[dict[str, Any]]) -
             "question": question,
             "measurements": measurements,
             "summary": answer,
+            "usage": effort or {"rounds": 0, "input_tokens": 0, "output_tokens": 0},
         },
         Value(),
     )
@@ -135,9 +172,11 @@ class AnalysisExecutor(AgentExecutor):
         await updater.start_work()
 
         pieces: list[str] = []
+        effort = Effort()
         measured = Measurements()
         try:
             async for update in self._agent.run(question, stream=True):
+                effort.observe(update)
                 measured.observe(update)
                 text = getattr(update, "text", None)
                 if text:
@@ -172,16 +211,19 @@ class AnalysisExecutor(AgentExecutor):
             return
 
         await updater.add_artifact(
-            assessment(question, answer, measured.as_data()),
+            assessment(question, answer, measured.as_data(), effort.as_data()),
             name=ARTIFACT,
             last_chunk=True,
         )
         await updater.complete()
         logger.info(
-            "Task %s completed: %d characters, %d measurements.",
+            "Task %s completed: %d characters, %d measurements, %d rounds, %d/%d tokens.",
             task.id,
             len(answer),
             len(measured.calls),
+            effort.rounds,
+            effort.input_tokens,
+            effort.output_tokens,
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
