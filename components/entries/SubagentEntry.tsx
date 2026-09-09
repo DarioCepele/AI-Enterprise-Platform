@@ -4,12 +4,6 @@ const SIGNS = {
   failed: "✕",
 } as const;
 
-const LABELS = {
-  running: "in corso",
-  done: "concluso",
-  failed: "errore",
-} as const;
-
 interface Props {
   name: string;
   description: string;
@@ -28,7 +22,7 @@ export function SubagentEntry({ name, description, status, error }: Props) {
       </span>
       <span className="min-w-0">
         <span className="font-mono">{name}</span>
-        <span className="text-[var(--muted)]"> · {LABELS[status]}</span>
+        <span className="text-[var(--muted)]"> · {status}</span>
         {description && <span className="block text-[var(--muted)]">{description}</span>}
         {error && <span className="block text-red-600">{error}</span>}
       </span>

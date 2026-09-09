@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Entry } from "@/lib/agui/entries";
+import { emptyState } from "@/lib/config";
 import { EntryView } from "./entries";
 
 interface Props {
@@ -36,9 +37,9 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
       >
         {entries.length === 0 && (
           <div className="mx-auto max-w-lg py-12">
-            <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[var(--accent)]">Dalla richiesta al risultato</p>
-            <h2 className="text-3xl font-medium leading-tight tracking-tight">Un agente al lavoro.<br />Ogni passaggio, visibile.</h2>
-            <p className="mt-4 max-w-sm text-sm leading-relaxed text-[var(--muted)]">Chiedi un confronto: segui il ragionamento, i tool e la tabella finale. Il piano mostra a che punto siamo.</p>
+            <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[var(--accent)]">{emptyState.eyebrow}</p>
+            <h2 className="text-3xl font-medium leading-tight tracking-tight">{emptyState.headline}<br />{emptyState.subhead}</h2>
+            <p className="mt-4 max-w-sm text-sm leading-relaxed text-[var(--muted)]">{emptyState.body}</p>
           </div>
         )}
         <div>
@@ -51,7 +52,7 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
         {running && (
           <div className="flex items-center gap-3">
             <p role="status" className="font-mono text-[11px] uppercase tracking-wide text-[var(--muted)]">
-              Sto lavorando…
+              Working…
             </p>
             {onStop && (
               <button
@@ -59,12 +60,12 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
                 onClick={onStop}
                 className="rounded-full border border-[var(--border)] px-2 py-0.5 font-mono text-[11px] uppercase tracking-wide text-[var(--muted)]"
               >
-                interrompi
+                stop
               </button>
             )}
           </div>
         )}
-        {error && <p role="alert" className="text-xs text-red-600">errore: {error}</p>}
+        {error && <p role="alert" className="text-xs text-red-600">error: {error}</p>}
       </div>
 
       <form
@@ -81,9 +82,9 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
         <div className="flex items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2">
           <input
             name="q"
-            aria-label="Messaggio"
+            aria-label="Message"
             disabled={running}
-            placeholder="Scrivi un messaggio…"
+            placeholder="Write a message…"
             className="min-w-0 flex-1 bg-transparent text-sm focus-visible:outline-2 focus-visible:outline-offset-2"
           />
           <button
@@ -91,7 +92,7 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
             disabled={running}
             className="rounded-full bg-[var(--foreground)] px-4 py-1.5 text-xs text-[var(--background)] disabled:opacity-40"
           >
-            invia
+            send
           </button>
         </div>
       </form>

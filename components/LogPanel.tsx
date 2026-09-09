@@ -52,8 +52,8 @@ export function LogPanel({ running }: { running: boolean }) {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto font-mono text-[11px]">
-      {error && <p role="alert" className="py-1 text-red-600">log non raggiungibili: {error}</p>}
-      {dropped > 0 && <p role="status" className="py-1 text-amber-600">{dropped} righe di log non più disponibili</p>}
+      {error && <p role="alert" className="py-1 text-red-600">logs unreachable: {error}</p>}
+      {dropped > 0 && <p role="status" className="py-1 text-amber-600">{dropped} log lines no longer available</p>}
       {entries.length === 0 && !error && (
         <p className="py-1 text-[var(--muted)]">nessun log</p>
       )}

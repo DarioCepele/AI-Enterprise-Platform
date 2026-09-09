@@ -6,15 +6,15 @@ import type { AGUIEvent } from "@/lib/agui/types";
 import { LogPanel } from "./LogPanel";
 
 const FILTERS = {
-  all: { label: "tutti", match: () => true },
-  reasoning: { label: "ragionamento", match: (e: AGUIEvent) => e.type.startsWith("REASONING") },
+  all: { label: "all", match: () => true },
+  reasoning: { label: "reasoning", match: (e: AGUIEvent) => e.type.startsWith("REASONING") },
   tools: { label: "tool", match: (e: AGUIEvent) => e.type.startsWith("TOOL_CALL") },
-  subagents: { label: "sottoagenti", match: (e: AGUIEvent) => e.type.startsWith("SUBAGENT") },
+  subagents: { label: "subagents", match: (e: AGUIEvent) => e.type.startsWith("SUBAGENT") },
   state: {
-    label: "stato",
+    label: "state",
     match: (e: AGUIEvent) => e.type.startsWith("STATE") || e.type.startsWith("RUN"),
   },
-  text: { label: "testo", match: (e: AGUIEvent) => e.type.startsWith("TEXT_MESSAGE") },
+  text: { label: "text", match: (e: AGUIEvent) => e.type.startsWith("TEXT_MESSAGE") },
 } as const;
 
 const MAX_PAYLOAD = 50;
@@ -48,7 +48,7 @@ const EventRow = memo(function EventRow({ group }: { group: EventGroup }) {
           </pre>
           {count > shown.length && (
             <p className="pt-1 text-[var(--muted)]">
-              …primi {shown.length} di {count} eventi del gruppo
+              …first {shown.length} of {count} events in the group
             </p>
           )}
         </>
@@ -64,7 +64,7 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
 
   return (
     <section aria-label="Inspector" className="inspector flex min-h-0 flex-1 flex-col p-4">
-      <nav aria-label="Vista inspector" className="inspector-tabs mb-3 flex gap-4">
+      <nav aria-label="Inspector view" className="inspector-tabs mb-3 flex gap-4">
         <button
           type="button"
           onClick={() => setTab("events")}

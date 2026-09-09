@@ -114,7 +114,7 @@ describe("EntryView", () => {
     };
     render(<EntryView entry={entry} />);
 
-    expect(screen.getByText(/non so rendere/i)).toBeInTheDocument();
+    expect(screen.getByText(/cannot render/i)).toBeInTheDocument();
   });
 });
 
@@ -127,9 +127,9 @@ describe("Chat", () => {
     ];
     const { container } = render(<Chat entries={entries} running={false} error={null} onSend={onSend} />);
     expect(container.textContent?.indexOf("question")).toBeLessThan(container.textContent!.indexOf("answer"));
-    const input = screen.getByRole("textbox", { name: "Messaggio" });
+    const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "next question" } });
-    fireEvent.click(screen.getByRole("button", { name: "invia" }));
+    fireEvent.click(screen.getByRole("button", { name: "send" }));
     expect(onSend).toHaveBeenCalledExactlyOnceWith("next question");
     expect(input).toHaveValue("");
   });
@@ -137,15 +137,15 @@ describe("Chat", () => {
   it("ignores empty text and blocks sending during a run", () => {
     const onSend = vi.fn();
     const { container, rerender } = render(<Chat entries={[]} running={false} error={null} onSend={onSend} />);
-    const input = screen.getByRole("textbox", { name: "Messaggio" });
+    const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.submit(container.querySelector("form")!);
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: "do not send" } });
     rerender(<Chat entries={[]} running={true} error={null} onSend={onSend} />);
     expect(input).toBeDisabled();
-    expect(screen.getByRole("button", { name: "invia" })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Sto lavorando");
+    expect(screen.getByRole("button", { name: "send" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Working");
     fireEvent.submit(container.querySelector("form")!);
     expect(onSend).not.toHaveBeenCalled();
   });
@@ -155,9 +155,9 @@ describe("Chat", () => {
     const { rerender } = render(
       <Chat entries={[]} running={false} error={null} onSend={vi.fn()} onStop={onStop} />,
     );
-    expect(screen.queryByRole("button", { name: "interrompi" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "stop" })).toBeNull();
     rerender(<Chat entries={[]} running error={null} onSend={vi.fn()} onStop={onStop} />);
-    fireEvent.click(screen.getByRole("button", { name: "interrompi" }));
+    fireEvent.click(screen.getByRole("button", { name: "stop" }));
 
     expect(onStop).toHaveBeenCalledOnce();
   });
@@ -198,7 +198,7 @@ describe("subagents in the timeline", () => {
     render(<EntryView entry={entry} />);
 
     expect(screen.getByText("knowledge")).toBeInTheDocument();
-    expect(screen.getByText(/in corso/)).toBeInTheDocument();
+    expect(screen.getByText(/running/)).toBeInTheDocument();
     expect(screen.getByText("Come tipizza Rust?")).toBeInTheDocument();
   });
 
@@ -254,6 +254,6 @@ describe("briefing in the timeline", () => {
 
     expect(screen.getByText("Statica, verificata dal compilatore.")).toBeInTheDocument();
     expect(screen.getByText("knowledge")).toBeInTheDocument();
-    expect(screen.getByText(/fonti: go, rust/)).toBeInTheDocument();
+    expect(screen.getByText(/sources: go, rust/)).toBeInTheDocument();
   });
 });

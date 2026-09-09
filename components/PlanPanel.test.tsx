@@ -58,7 +58,7 @@ describe("PlanPanel", () => {
     status: "in_progress", steps: [{ ...PLAN.steps[0], title: { invalid: true } }],
   }])("handles a malformed plan snapshot: %j", (plan) => {
     render(<PlanPanel shared={{ plan }} />);
-    expect(screen.getByText(/nessun piano/i)).toBeInTheDocument();
+    expect(screen.getByText(/no plan/i)).toBeInTheDocument();
   });
 
   it("counts completed steps out of the total", () => {
@@ -78,13 +78,13 @@ describe("PlanPanel", () => {
   it("says there is no plan when the state is idle", () => {
     render(<PlanPanel shared={{ plan: { status: "idle", steps: [] } }} />);
 
-    expect(screen.getByText(/nessun piano/i)).toBeInTheDocument();
+    expect(screen.getByText(/no plan/i)).toBeInTheDocument();
   });
 
   it("copes with a shared state that has no plan", () => {
     render(<PlanPanel shared={{}} />);
 
-    expect(screen.getByText(/nessun piano/i)).toBeInTheDocument();
+    expect(screen.getByText(/no plan/i)).toBeInTheDocument();
   });
 
   it("shows the note of a failed step", () => {

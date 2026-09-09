@@ -21,7 +21,7 @@ export async function fetchLogs(cursor: string, signal?: AbortSignal): Promise<L
   const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
   const response = await fetch(`${LOGS_URL}${query}`, { signal, cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`/logs ha risposto ${response.status}`);
+    throw new Error(`/logs answered ${response.status}`);
   }
   return (await response.json()) as LogPage;
 }

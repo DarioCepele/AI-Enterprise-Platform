@@ -7,6 +7,7 @@ import { Chat } from "./Chat";
 import { Inspector } from "./Inspector";
 import { PlanPanel } from "./PlanPanel";
 import { LabHeader } from "./LabHeader";
+import { product } from "@/lib/config";
 
 export function Lab() {
   const [state, setState] = useState<LabState>(initialState);
@@ -58,7 +59,7 @@ export function Lab() {
     <div className="lab-shell flex flex-col">
       <LabHeader />
       <div className="lab-grid min-h-0 flex-1">
-      <main className="flex min-h-0 min-w-0 flex-col border-r border-[var(--border)]" aria-label="Conversazione">
+      <main className="flex min-h-0 min-w-0 flex-col border-r border-[var(--border)]" aria-label="Conversation">
         <Chat
           entries={state.entries}
           running={state.running}
@@ -67,13 +68,13 @@ export function Lab() {
           onStop={stop}
         />
       </main>
-      <aside className="lab-aside flex min-h-0 min-w-0 flex-col" aria-label="Piano e attività dell'agente">
+      <aside className="lab-aside flex min-h-0 min-w-0 flex-col" aria-label="Plan and agent activity">
         <PlanPanel shared={state.shared} />
         <Inspector events={state.events} running={state.running} />
       </aside>
       </div>
       <footer className="border-t border-[var(--border)] px-6 py-2 font-mono text-[10px] text-[var(--muted)]">
-        Esercizio di laboratorio · L&apos;agente può sbagliare. Segui il piano e ispeziona gli eventi.
+        {product.name} · {product.disclaimer}
       </footer>
     </div>
   );

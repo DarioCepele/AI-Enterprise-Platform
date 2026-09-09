@@ -7,7 +7,7 @@ export function UiTable({ artifact }: { artifact: Artifact }) {
   if (artifact.component !== "ui-table") {
     return (
       <div className="rounded-lg border border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted)]">
-        Non so rendere questo artefatto ({artifact.id}).
+        I cannot render this artifact ({artifact.id}).
       </div>
     );
   }

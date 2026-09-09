@@ -23,9 +23,9 @@ describe("Lab", () => {
       await new Promise<void>((resolve) => { finish = resolve; });
     });
     render(<Lab />);
-    const input = screen.getByRole("textbox", { name: "Messaggio" });
+    const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "Confronta Python e TypeScript" } });
-    fireEvent.click(screen.getByRole("button", { name: "invia" }));
+    fireEvent.click(screen.getByRole("button", { name: "send" }));
     await act(async () => {});
     expect(runMock).toHaveBeenCalledTimes(1);
     expect(runMock.mock.calls[0][0].messages[0]).toMatchObject({ role: "user", content: "Confronta Python e TypeScript" });

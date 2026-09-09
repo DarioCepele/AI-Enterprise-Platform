@@ -68,7 +68,7 @@ export function PlanPanel({ shared }: { shared: Record<string, unknown> }) {
         <h2 className="font-mono text-[11px] uppercase tracking-wide text-[var(--muted)]">
           Piano di lavoro
         </h2>
-        <p className="pt-1 text-xs text-[var(--muted)]">nessun piano in corso</p>
+        <p className="pt-1 text-xs text-[var(--muted)]">no plan in progress</p>
       </section>
     );
   }

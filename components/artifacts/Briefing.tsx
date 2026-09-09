@@ -16,7 +16,7 @@ export function Briefing({ artifact }: { artifact: Artifact }) {
       <p className="whitespace-pre-wrap text-sm leading-relaxed">{artifact.summary}</p>
       {artifact.documents.length > 0 && (
         <p className="mt-2 font-mono text-[11px] text-[var(--muted)]">
-          fonti: {artifact.documents.join(", ")}
+          sources: {artifact.documents.join(", ")}
         </p>
       )}
     </figure>

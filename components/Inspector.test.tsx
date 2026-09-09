@@ -25,12 +25,12 @@ describe("Inspector", () => {
 
   it("the reasoning filter shows only reasoning", () => {
     render(<Inspector events={EVENTS} running={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "ragionamento" }));
+    fireEvent.click(screen.getByRole("button", { name: "reasoning" }));
 
     const rows = screen.getAllByRole("group");
     const reasoning = EVENTS.filter((e) => e.type.startsWith("REASONING"));
     expect(rows).toHaveLength(groupEvents(reasoning).length);
-    expect(screen.getByRole("button", { name: "ragionamento" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "reasoning" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(String(EVENTS.length))).toBeInTheDocument();
     for (const row of rows) {
       expect(row.textContent).toMatch(/^REASONING_/);
@@ -72,7 +72,7 @@ describe("Inspector", () => {
     const payload = JSON.parse(container.querySelector("pre")!.textContent!);
     expect(Array.isArray(payload)).toBe(true);
     expect(payload).toHaveLength(50);
-    expect(screen.getByText(/primi 50 di 60 eventi/)).toBeInTheDocument();
+    expect(screen.getByText(/first 50 of 60 events/)).toBeInTheDocument();
   });
 
   it("the tool filter shows only TOOL_CALL_*", () => {
@@ -99,15 +99,15 @@ describe("Inspector", () => {
       { type: "EVENTO_FUTURO", value: 42 } as unknown as AGUIEvent,
     ];
     render(<Inspector events={events} running={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "testo" }));
+    fireEvent.click(screen.getByRole("button", { name: "text" }));
     expect(screen.getAllByRole("group")).toHaveLength(1);
     expect(screen.getByRole("group")).toHaveTextContent(/^TEXT_MESSAGE_CONTENT/);
-    fireEvent.click(screen.getByRole("button", { name: "stato" }));
+    fireEvent.click(screen.getByRole("button", { name: "state" }));
     expect(screen.getAllByRole("group")).toHaveLength(2);
     for (const row of screen.getAllByRole("group")) {
       expect(row.textContent).toMatch(/^(RUN_|STATE_)/);
     }
-    fireEvent.click(screen.getByRole("button", { name: "tutti" }));
+    fireEvent.click(screen.getByRole("button", { name: "all" }));
     const rows = screen.getAllByRole("group");
     expect(rows).toHaveLength(events.length);
     for (const [i, row] of rows.entries()) {
@@ -120,7 +120,7 @@ describe("Inspector", () => {
     const { rerender } = render(<Inspector events={[]} running={false} />);
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(screen.queryAllByRole("group")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "ragionamento" }));
+    fireEvent.click(screen.getByRole("button", { name: "reasoning" }));
     rerender(<Inspector events={[
       { type: "REASONING_START", messageId: "r" },
       { type: "RUN_STARTED", threadId: "t", runId: "run" },
@@ -135,14 +135,14 @@ describe("Inspector", () => {
     const eventButton = screen.getByRole("button", { name: "Event inspector 1" });
     const logButton = screen.getByRole("button", { name: "Log" });
     expect(eventButton).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "ragionamento" }));
+    fireEvent.click(screen.getByRole("button", { name: "reasoning" }));
     fireEvent.click(logButton);
     expect(logButton).toHaveAttribute("aria-pressed", "true");
     expect(eventButton).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByText("nessun log")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "ragionamento" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "reasoning" })).not.toBeInTheDocument();
     fireEvent.click(eventButton);
-    expect(screen.getByRole("button", { name: "ragionamento" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "reasoning" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("nessun log")).not.toBeVisible();
     expect(fetchMock).not.toHaveBeenCalled();
   });

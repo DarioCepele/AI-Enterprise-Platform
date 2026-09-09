@@ -6,7 +6,7 @@ import { LogPanel } from "./LogPanel";
 
 vi.mock("@/lib/agui/logs", () => ({ fetchLogs: vi.fn() }));
 const fetchMock = vi.mocked(fetchLogs);
-const page = (seq: number, message = `riga ${seq}`, dropped = 0): LogPage => ({
+const page = (seq: number, message = `line ${seq}`, dropped = 0): LogPage => ({
   cursor: String(seq), dropped,
   entries: [{ seq, ts: "2026-09-07T09:00:00Z", level: "INFO", source: "tools.plan_tools", message }],
 });
@@ -37,7 +37,7 @@ describe("LogPanel", () => {
     rerender(<LogPanel running={false} />);
     await settle();
     expect(fetchMock.mock.calls[2][0]).toBe("2");
-    expect(screen.getByText("riga 3")).toBeInTheDocument();
+    expect(screen.getByText("line 3")).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     rerender(<LogPanel running />);
@@ -82,14 +82,14 @@ describe("LogPanel", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("503");
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByText("riga 1")).toBeInTheDocument();
+    expect(screen.getByText("line 1")).toBeInTheDocument();
   });
 
   it("reports the lines the buffer dropped", async () => {
     fetchMock.mockResolvedValueOnce(page(8, "disponibile", 7));
     render(<LogPanel running />);
     await settle();
-    expect(screen.getByRole("status")).toHaveTextContent("7 righe di log non più disponibili");
+    expect(screen.getByRole("status")).toHaveTextContent("7 log lines no longer available");
     expect(screen.getByText("disponibile")).toBeInTheDocument();
   });
 });
