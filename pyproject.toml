@@ -10,6 +10,7 @@ dependencies = [
     "agent-framework-openai>=1.14.2",
     "fastapi>=0.139.2",
     "python-dotenv>=1.2.3",
+    "redis>=6.4.0",
     "uvicorn>=0.52.4",
 ]
 

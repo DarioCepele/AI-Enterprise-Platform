@@ -26,6 +26,7 @@ class Settings:
     allowed_origins: tuple[str, ...]
 
     memory_service_url: str
+    redis_uri: str
     knowledge_agent_url: str
     knowledge_service_token: str
     public_url: str
@@ -46,6 +47,7 @@ def get_settings() -> Settings:
         use_fake_client=os.getenv("DEMO_FAKE_CLIENT", "false").lower() == "true",
         allowed_origins=_read_origins(),
         memory_service_url=os.getenv("DEMO_MEMORY_SERVICE_URL", "").strip(),
+        redis_uri=os.getenv("DEMO_REDIS_URI", "").strip(),
         knowledge_agent_url=os.getenv("DEMO_KNOWLEDGE_AGENT_URL", "").strip(),
         knowledge_service_token=os.getenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "").strip(),
         public_url=os.getenv("DEMO_PUBLIC_URL", "").strip(),

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
+from redis.asyncio import Redis
 from agent_framework import Agent
 from agent_framework.ag_ui import (
     AGUIThreadSnapshotStore,
@@ -17,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..agents.master import build_master_agent
 from ..config import SINGLE_TENANT_SCOPE, get_settings
-from ..logging_bridge import LogCollector
+from ..logging_bridge import LogCollector, RedisLogStream
 from ..a2a.client import A2AClient, fetch_agent_card
 from ..a2a.push import HEADER, is_terminal, summary_of, token_is_valid
 from ..memory.remote_store import MemoryServiceSnapshotStore
@@ -47,6 +48,21 @@ def _default_snapshot_store() -> AGUIThreadSnapshotStore:
     logger.info("Thread memory in the memory service: %s", url)
     return MemoryServiceSnapshotStore(url)
 
+def _shared_log_stream(collector: LogCollector) -> RedisLogStream | None:
+    """The operational logs of every replica in one stream, when Redis is there.
+
+    Without it each replica answers with its own buffer, and the LOG tab shows
+    the half of the story that belongs to whoever picked up the request.
+    """
+    uri = get_settings().redis_uri
+    if not uri:
+        logger.info("Operational logs kept in this process: no DEMO_REDIS_URI configured.")
+        return None
+    stream = RedisLogStream(Redis.from_url(uri, decode_responses=True))
+    stream.attach(collector)
+    logger.info("Operational logs published to the shared stream on %s.", uri.split("@")[-1])
+    return stream
+
 def create_app(
     agent: Agent | None = None,
     collector: LogCollector | None = None,
@@ -61,14 +77,21 @@ def create_app(
 
     log_collector = collector if collector is not None else LogCollector()
     log_collector.attach()
+    log_stream = _shared_log_stream(log_collector)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-
-        try:
-            yield
-        finally:
-            log_collector.detach()
+        if log_stream is None:
+            try:
+                yield
+            finally:
+                log_collector.detach()
+            return
+        async with log_stream.running():
+            try:
+                yield
+            finally:
+                log_collector.detach()
 
     app = FastAPI(title="Laboratorio AG-UI", lifespan=lifespan)
 
@@ -167,12 +190,21 @@ def create_app(
         return {"state": "received"}
 
     @app.get("/logs")
-    async def logs(cursor: int = 0) -> dict[str, object]:
+    async def logs(cursor: str = "") -> dict[str, object]:
         """The application logs after `cursor`.
 
         A channel separate from the AG-UI stream: the protocol's CUSTOM events
         are reserved to the framework and application code cannot emit them.
+
+        The cursor is opaque: with a shared stream it carries a position in it,
+        without one it carries a sequence number local to this replica. A client
+        that hands back what it received works with either.
         """
+        if log_stream is not None:
+            try:
+                return await log_stream.since(cursor)
+            except Exception:
+                logger.warning("Shared logs unreadable: answering with this replica's own.")
         return log_collector.since(cursor)
 
     store = snapshot_store or _default_snapshot_store()

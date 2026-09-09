@@ -9,6 +9,7 @@ from a2a.types import AgentCapabilities, AgentCard
 
 from contracts import assert_shape, load, sample
 from demo.a2a.client import Artifact, Progress
+from demo.logging_bridge import LogCollector, RedisLogStream
 from demo.memory.remote_store import MemoryServiceSnapshotStore
 from demo.plan import PlanStore
 from demo.server.run_context import current_pending
@@ -172,3 +173,38 @@ def test_the_contracts_name_this_repository_on_both_sides():
     assert "demo-master-agent" in load("a2a/briefing")["consumed_by"]
     assert "demo-master-agent" in load("agui/shared-state")["produced_by"]
     assert "demo-master-agent" in load("memory/search")["consumed_by"]
+
+
+def test_the_logs_page_of_this_replica_matches_the_contract():
+    collector = LogCollector()
+    collector.append({"ts": "t", "level": "INFO", "source": "tools", "message": "one"})
+
+    assert_shape("agui/logs-page", collector.since(""))
+
+
+@pytest.mark.asyncio
+async def test_the_logs_page_of_the_shared_stream_matches_the_contract():
+    class Stream:
+        async def incrby(self, *args, **kwargs):
+            return 41
+
+        def pipeline(self):
+            return self
+
+        def xadd(self, *args, **kwargs):
+            return self
+
+        async def execute(self):
+            return []
+
+        async def xrange(self, key, min="-", max="+", count=None):
+            entry = sample("agui/logs-page")["entries"][0]
+            return [("1757404324517-0", {k: str(v) for k, v in entry.items()})]
+
+    collector = LogCollector()
+    stream = RedisLogStream(Stream())
+    stream.attach(collector)
+    collector.append({"ts": "t", "level": "INFO", "source": "tools", "message": "one"})
+    await stream.flush()
+
+    assert_shape("agui/logs-page", await stream.since(""))

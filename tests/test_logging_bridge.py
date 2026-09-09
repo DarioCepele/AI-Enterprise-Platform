@@ -6,7 +6,7 @@ def test_collects_application_logs():
     with LogCollector() as collector:
         logging.getLogger("demo.tools").info("plan written")
 
-    page = collector.since(0)
+    page = collector.since("")
 
     assert len(page["entries"]) == 1
     assert page["entries"][0]["level"] == "INFO"
@@ -22,32 +22,32 @@ def test_library_logs_never_reach_the_stream():
         logging.getLogger("openai").warning("retry")
         logging.getLogger("uvicorn.access").info("GET /agui")
 
-    assert collector.since(0)["entries"] == []
+    assert collector.since("")["entries"] == []
 
 def test_the_cursor_advances_and_does_not_repeat_entries():
     with LogCollector() as collector:
         logging.getLogger("demo.a").info("one")
-        first = collector.since(0)
+        first = collector.since("")
         logging.getLogger("demo.a").info("two")
         second = collector.since(first["cursor"])
 
     assert [e["message"] for e in first["entries"]] == ["one"]
     assert [e["message"] for e in second["entries"]] == ["two"]
-    assert second["cursor"] > first["cursor"]
+    assert int(second["cursor"]) > int(first["cursor"])
 
 def test_reading_twice_from_the_same_cursor_is_idempotent():
 
     with LogCollector() as collector:
         logging.getLogger("demo.a").info("one")
 
-    assert collector.since(0)["entries"] == collector.since(0)["entries"]
+    assert collector.since("")["entries"] == collector.since("")["entries"]
 
 def test_the_buffer_is_capped_and_reports_what_it_dropped():
     with LogCollector() as collector:
         for i in range(MAX_LOG_EVENTS + 50):
             logging.getLogger("demo.noise").info("line %d", i)
 
-    page = collector.since(0)
+    page = collector.since("")
 
     assert len(page["entries"]) == MAX_LOG_EVENTS
     assert page["dropped"] == 50
@@ -60,7 +60,7 @@ def test_detach_stops_collecting():
     collector.detach()
     logging.getLogger("demo.a").info("after detaching")
 
-    assert collector.since(0)["entries"] == []
+    assert collector.since("")["entries"] == []
 
 def test_attaching_twice_does_not_double_every_line():
     collector = LogCollector()
@@ -69,7 +69,7 @@ def test_attaching_twice_does_not_double_every_line():
     logging.getLogger("demo.a").info("only once")
     collector.detach()
 
-    assert len(collector.since(0)["entries"]) == 1
+    assert len(collector.since("")["entries"]) == 1
 
 def test_exceptions_arrive_as_text_not_as_objects():
     with LogCollector() as collector:
@@ -78,7 +78,7 @@ def test_exceptions_arrive_as_text_not_as_objects():
         except RuntimeError:
             logging.getLogger("demo.tools").exception("call failed")
 
-    entry = collector.since(0)["entries"][0]
+    entry = collector.since("")["entries"][0]
 
     assert entry["level"] == "ERROR"
     assert "the tool blew up" in entry["message"]

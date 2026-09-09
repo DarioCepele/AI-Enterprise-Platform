@@ -9,7 +9,7 @@ from demo.logging_bridge import LogCollector
 from demo.server.app import create_app
 
 @pytest.fixture
-def make_app():
+def make_app(monkeypatch):
     """Builds the app with an explicit agent on a fake client.
 
     Without an explicit `agent`, `create_app()` resolves the default
@@ -18,6 +18,10 @@ def make_app():
     credentials. The right pattern is already in conftest.py's fixtures:
     always pass a fake `chat_client`.
     """
+
+    # This endpoint has two sources -- the local buffer and the shared stream --
+    # and these tests are about the first. The shared one has its own tests.
+    monkeypatch.setenv("DEMO_REDIS_URI", "")
 
     def _make(collector: LogCollector | None = None):
         agent = build_master_agent(chat_client=FakeStreamingChatClient())
@@ -33,7 +37,7 @@ def test_logs_endpoint_returns_collected_lines(make_app):
         body = client.get("/logs").json()
 
     assert [e["message"] for e in body["entries"] if e["source"] == "tools"] == ["plan written"]
-    assert body["cursor"] > 0
+    assert body["cursor"] != ""
     assert body["dropped"] == 0
 
 def test_logs_endpoint_honours_the_cursor(make_app):
