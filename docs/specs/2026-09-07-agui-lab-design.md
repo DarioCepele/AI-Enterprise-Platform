@@ -117,7 +117,9 @@ C:\project\demo\                    cartella di lavoro, NON un repo
   demo-infra\                        REPO 5 -- orchestrazione e documentazione
     compose.yaml      6 servizi: master-agent, knowledge-agent, memory-service,
                       frontend, mongo, redis
-    docs/specs, docs/plans, docs/prompts
+    contracts/       campioni versionati di cio' che passa fra i repo
+    deploy/          manifest Kubernetes
+    docs/specs       il progetto e i vincoli verificati
 ```
 
 **Un repo per unita' deployabile, piu' un repo infra.** E' la forma della
