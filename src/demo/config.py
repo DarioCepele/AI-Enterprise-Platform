@@ -174,3 +174,56 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Builds the Settings from the environment. No cache: tests change the env."""
     return Settings()
+
+# What each variable decides, next to the fields it decides it for. The table in
+# the README is generated from here: one written by hand is one that lies after
+# the second change.
+FIELD_NOTES = {
+    "base_url": "Where the model lives. Any OpenAI-compatible endpoint.",
+    "api_key": "Credential for that endpoint. Required unless the fake client is on.",
+    "model": "Model the master agent talks to.",
+    "use_fake_client": "Deterministic answers without a model. For tests and offline work.",
+    "allowed_origins": "Comma-separated origins allowed by CORS.",
+    "product_name": "What the agent calls itself in its own instructions.",
+    "product_language": "Language the agent answers in.",
+    "default_scope": "Authorization boundary used when nothing else says otherwise.",
+    "scope_header": (
+        "Header carrying the scope, read **only** when this is set: naming it "
+        "means something in front has verified it."
+    ),
+    "json_logs": "Structured logs for a collector instead of the readable line.",
+    "memory_service_url": (
+        "Memory service. Without it the conversation lives in RAM and dies with the process."
+    ),
+    "redis_uri": (
+        "Shared logs, deduplicated notifications. Without it both are per replica."
+    ),
+    "knowledge_agent_url": "One subagent, the short way. Ignored when DEMO_SUBAGENTS is set.",
+    "knowledge_service_token": "Service token of that subagent, for its extended card.",
+    "subagents": 'Subagents as JSON: [{"name":"x","url":"http://...","token":""}].',
+    "public_url": "How a subagent reaches this agent back, for push notifications.",
+    "subagent_wait_seconds": (
+        "How long a turn waits before letting the outcome arrive by notification."
+    ),
+}
+
+
+def env_table() -> str:
+    """The environment table, generated from the fields themselves."""
+    rows = ["| Variable | Default | What it decides |", "|---|---|---|"]
+    for name, field in Settings.model_fields.items():
+        alias = (
+            next(iter(field.validation_alias.choices))
+            if field.validation_alias is not None
+            else name.upper()
+        )
+        default = field.get_default(call_default_factory=True)
+        if isinstance(default, tuple):
+            default = ", ".join(str(item) for item in default) or ""
+        shown = f"`{default}`" if default not in ("", None) else "*(empty)*"
+        rows.append(f"| `{alias}` | {shown} | {FIELD_NOTES.get(name, '')} |")
+    return "\n".join(rows)
+
+
+if __name__ == "__main__":
+    print(env_table())
