@@ -174,7 +174,7 @@ class AgentGateway:
 
     async def _send(
         self, *, agent: str, text: str, scope: str, instance_id: str, step_id: str,
-        task_id: str = "",
+        task_id: str = "", context_id: str = "",
     ) -> dict[str, Any]:
         """Sends a message and returns as soon as the agent has taken it.
 
@@ -188,6 +188,11 @@ class AgentGateway:
         message = Message(message_id=uuid4().hex, role=Role.ROLE_USER, parts=[Part(text=text)])
         if task_id:
             message.task_id = task_id
+        if context_id:
+            # A task belongs to a conversation, and so does the answer to it: a
+            # message without this opens a new one, and the agent refuses it as
+            # belonging somewhere else.
+            message.context_id = context_id
         request = SendMessageRequest(message=message)
         request.configuration.CopyFrom(
             SendMessageConfiguration(
@@ -202,9 +207,11 @@ class AgentGateway:
         async for response in client.send_message(request):
             if response.HasField("task"):
                 task_id = response.task.id
+                context_id = response.task.context_id or context_id
                 state = TaskState.Name(response.task.status.state)
             elif response.HasField("status_update"):
                 task_id = response.status_update.task_id or task_id
+                context_id = response.status_update.context_id or context_id
                 state = TaskState.Name(response.status_update.status.state)
         logger.info(
             "Instance %s step %s: told %s, task %s (%s).",
@@ -214,7 +221,7 @@ class AgentGateway:
             task_id[:8] or "?",
             state or "unknown",
         )
-        return {"task_id": task_id, "state": state}
+        return {"task_id": task_id, "context_id": context_id, "state": state}
 
     async def ask(
         self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str
@@ -289,7 +296,15 @@ class AgentGateway:
         return {"text": "".join(pieces).strip(), "usage": usage}
 
     async def reply(
-        self, *, agent: str, answer: str, scope: str, instance_id: str, step_id: str, task_id: str
+        self,
+        *,
+        agent: str,
+        answer: str,
+        scope: str,
+        instance_id: str,
+        step_id: str,
+        task_id: str,
+        context_id: str = "",
     ) -> dict[str, Any]:
         """Answers a clarification inside the task that asked for it.
 
@@ -298,5 +313,5 @@ class AgentGateway:
         """
         return await self._send(
             agent=agent, text=answer, scope=scope, instance_id=instance_id,
-            step_id=step_id, task_id=task_id,
+            step_id=step_id, task_id=task_id, context_id=context_id,
         )

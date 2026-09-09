@@ -110,12 +110,26 @@ class FakeAgent:
 
     async def ask(self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str):
         self.asked.append({"agent": agent, "question": question, "step_id": step_id})
-        return {"task_id": f"task-{len(self.asked)}", "state": "TASK_STATE_SUBMITTED"}
+        return {
+            "task_id": f"task-{len(self.asked)}",
+            "context_id": f"conversation-{len(self.asked)}",
+            "state": "TASK_STATE_SUBMITTED",
+        }
 
     async def reply(
-        self, *, agent: str, answer: str, scope: str, instance_id: str, step_id: str, task_id: str
+        self,
+        *,
+        agent: str,
+        answer: str,
+        scope: str,
+        instance_id: str,
+        step_id: str,
+        task_id: str,
+        context_id: str = "",
     ):
-        self.answered.append({"answer": answer, "task_id": task_id})
+        self.answered.append(
+            {"answer": answer, "task_id": task_id, "context_id": context_id}
+        )
         return {"task_id": task_id, "state": "TASK_STATE_WORKING"}
 
     async def result_of(self, *, agent: str, task_id: str) -> dict[str, Any]:
@@ -278,7 +292,11 @@ async def test_a_clarification_puts_the_step_in_front_of_a_person(
         if agents.answered:
             break
         await asyncio.sleep(0.05)
-    assert agents.answered == [{"answer": "2026", "task_id": "task-1"}]
+    # The answer goes back into the same task **and** the same conversation:
+    # without the second one the agent refuses it as belonging somewhere else.
+    assert agents.answered == [
+        {"answer": "2026", "task_id": "task-1", "context_id": "conversation-1"}
+    ]
     assert len(agents.asked) == 1
 
     await answer(str(instance.id), "ask", completion("task-1", "in 2026, yes"))

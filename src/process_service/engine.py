@@ -259,7 +259,13 @@ def human_topic(step_id: str) -> str:
 
 @DBOS.step()
 async def reply_to_agent(
-    instance_id: str, step_id: str, scope: str, owner: str, task_id: str, answer: str
+    instance_id: str,
+    step_id: str,
+    scope: str,
+    owner: str,
+    task_id: str,
+    answer: str,
+    context_id: str = "",
 ) -> None:
     """Hands the person's answer to the agent that asked for it."""
     engine = current_engine()
@@ -272,6 +278,7 @@ async def reply_to_agent(
         instance_id=instance_id,
         step_id=step_id,
         task_id=task_id,
+        context_id=context_id,
     )
     await engine.store.waiting_on(
         instance_id=UUID(instance_id), step_id=step_id, status=WAITING, task_id=task_id
@@ -654,6 +661,7 @@ async def _run_agent_step(
             step.owner or "",
             answer.get("task_id") or started.get("task_id", ""),
             str(from_a_person.get("text", "")),
+            started.get("context_id", ""),
         )
         answer = await DBOS.recv_async(topic=step.id, timeout_seconds=timeout)
         if answer is None:
