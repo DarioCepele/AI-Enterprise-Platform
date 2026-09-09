@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 
 import httpx
 import pytest
@@ -47,6 +48,16 @@ def test_a_notification_is_read_without_trusting_its_shape():
 
 
 @pytest.fixture
+def thread() -> str:
+    """A thread of its own for each test.
+
+    The notifications already seen are remembered in Redis, and remembering is
+    the point: two tests sharing a thread would read each other's leftovers.
+    """
+    return f"t-{uuid.uuid4().hex[:12]}"
+
+
+@pytest.fixture
 def app():
     return create_app(
         agent=build_master_agent(chat_client=FakeStreamingChatClient(chunks=["ok"]))
@@ -64,45 +75,45 @@ async def send(app, thread_id: str, token: str | None) -> httpx.Response:
 
 
 @pytest.mark.asyncio
-async def test_a_signed_notification_is_accepted(app, caplog):
+async def test_a_signed_notification_is_accepted(app, caplog, thread):
     with caplog.at_level(logging.INFO, logger="demo.server.app"):
-        response = await send(app, "t1", token_for("t1"))
+        response = await send(app, thread, token_for(thread))
 
     assert response.status_code == 200
     assert "completed task task-99" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_an_unsigned_notification_is_refused(app, caplog):
+async def test_an_unsigned_notification_is_refused(app, caplog, thread):
     # An open webhook is a way to let anyone write into a conversation's
     # memory.
     with caplog.at_level(logging.WARNING, logger="demo.server.app"):
-        response = await send(app, "t1", None)
+        response = await send(app, thread, None)
 
     assert response.status_code == 403
     assert "invalid token" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_a_notification_signed_for_another_thread_is_refused(app):
-    response = await send(app, "t1", token_for("t2"))
+async def test_a_notification_signed_for_another_thread_is_refused(app, thread):
+    response = await send(app, thread, token_for("another"))
 
     assert response.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_without_a_memory_service_the_outcome_stays_in_the_logs(app, caplog, monkeypatch):
+async def test_without_a_memory_service_the_outcome_stays_in_the_logs(app, caplog, monkeypatch, thread):
     monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "")
 
     with caplog.at_level(logging.WARNING, logger="demo.server.app"):
-        response = await send(app, "t1", token_for("t1"))
+        response = await send(app, thread, token_for(thread))
 
     assert response.status_code == 200
     assert "stays in the logs" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_the_outcome_is_written_into_the_thread_memory(app, monkeypatch):
+async def test_the_outcome_is_written_into_the_thread_memory(app, monkeypatch, thread):
     received: list[tuple[str, dict]] = []
 
     def transport(request: httpx.Request) -> httpx.Response:
@@ -123,13 +134,13 @@ async def test_the_outcome_is_written_into_the_thread_memory(app, monkeypatch):
 
     monkeypatch.setattr("demo.server.app.httpx.AsyncClient", fake)
 
-    response = await send(app, "t1", token_for("t1"))
+    response = await send(app, thread, token_for(thread))
     await asyncio.sleep(0)
 
     assert response.status_code == 200
     assert received, "nothing was written to memory"
     url, body = received[0]
-    assert url.endswith("/threads/t1/messages")
+    assert url.endswith(f"/threads/{thread}/messages")
     assert "Goroutines are lightweight." in body["content"]
 
 
@@ -137,14 +148,14 @@ PROGRESS = {"statusUpdate": {"taskId": "task-99", "status": {"state": "TASK_STAT
 
 
 @pytest.mark.asyncio
-async def test_progress_notifications_are_ignored(app, caplog):
+async def test_progress_notifications_are_ignored(app, caplog, thread):
     transport = httpx.ASGITransport(app=app)
     with caplog.at_level(logging.INFO, logger="demo.server.app"):
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
-                "/a2a/push/tenant-a/t1",
+                f"/a2a/push/tenant-a/{thread}",
                 json=PROGRESS,
-                headers={HEADER: token_for("t1")},
+                headers={HEADER: token_for(thread)},
             )
 
     # The subagent notifies every event: writing to memory on every progress
@@ -176,7 +187,7 @@ def test_a_token_of_the_previous_window_still_works(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_same_notification_is_written_once(app, monkeypatch):
+async def test_the_same_notification_is_written_once(app, monkeypatch, thread):
     received: list[tuple[str, dict]] = []
 
     def transport(request: httpx.Request) -> httpx.Response:
@@ -195,8 +206,8 @@ async def test_the_same_notification_is_written_once(app, monkeypatch):
 
     monkeypatch.setattr("demo.server.app.httpx.AsyncClient", fake)
 
-    first = await send(app, "t1", token_for("t1"))
-    second = await send(app, "t1", token_for("t1"))
+    first = await send(app, thread, token_for(thread))
+    second = await send(app, thread, token_for(thread))
     await asyncio.sleep(0)
 
     # A2A delivery is at-least-once: the same outcome arriving twice must not
