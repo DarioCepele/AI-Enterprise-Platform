@@ -48,9 +48,9 @@ l'unico che va tenuto a freno da una dichiarazione.
 
 **Cosa si rifiuta all'avvio**, con il nome del passo o del file: un id
 duplicato, una dipendenza che non esiste, un ramo che punta nel vuoto, un ciclo,
-un passo `agent` senza `owner`, un `on_timeout` o un `goto` che non
-esistono, un tipo sconosciuto. Una definizione che
-fallisse alla prima istanza fallirebbe davanti a chi la sta usando.
+un passo `agent` senza `owner`, un `on_timeout` o un `goto` che non esistono,
+un `open_goal` senza `limits`, un tipo sconosciuto. Una definizione che fallisse
+alla prima istanza fallirebbe davanti a chi la sta usando.
 
 **Un passo raggiunto da un ramo dice da se' dove va**, con `goto`: non puo'
 essere aspettato con `depends_on`, perche' l'altro lato del ramo non arriverebbe
@@ -61,6 +61,93 @@ rifiutano: da un passo si esce da una parte sola.
 punta.** Un passo raggiungibile solo attraverso un ramo non parte da solo:
 partirebbero entrambi i lati della decisione, che e' l'opposto di cio' a cui
 serve un ramo.
+
+## Tutti i campi di un passo
+
+| campo | vale per | cosa fa |
+| --- | --- | --- |
+| `id` | tutti | il nome del passo. Unico, e usato in `depends_on`, `goto`, `on_timeout` |
+| `type` | tutti | `tool`, `agent`, `approval`, `decision`, `open_goal` |
+| `depends_on` | tutti | i passi che devono essere finiti prima. Vuoto = passo iniziale |
+| `input` | tutti | dati fissi per il passo, uniti al contesto dell'istanza |
+| `goto` | tutti | dove si va dopo, quando `depends_on` non puo' dirlo (rami) |
+| `tool` | `tool` | il nome registrato con `@tool` |
+| `idempotency_key` | `tool` | il campo del contesto che identifica l'effetto: due tentativi, un effetto |
+| `compensate_with` | `tool` | il tool che disfa questo, se il processo si ferma piu' avanti |
+| `owner` | `agent` | quale agente lo esegue, fra quelli in `PROCESS_AGENTS` |
+| `timeout_seconds` | `agent`, `approval` | quanto si aspetta prima di passare avanti |
+| `on_timeout` | `agent`, `approval` | il passo a cui va il lavoro quando il tempo scade |
+| `approvers` | `approval` | chi puo' decidere. Vuoto = chiunque |
+| `branches` | `decision` | `when` e `goto`: vince la prima condizione vera |
+| `participants` | `open_goal` | gli agenti che il manager puo' usare |
+| `limits` | `open_goal` | `max_rounds`, `max_agents`, `max_tokens`. **Obbligatori** |
+
+Le condizioni di `when` sono `campo operatore valore` (`amount > 10000`) oppure
+`true`. Non c'e' un `eval`: quello che non e' in questa forma viene rifiutato,
+perche' un linguaggio di espressioni dentro una definizione e' un linguaggio da
+mantenere e una superficie da difendere.
+
+## Cosa si tocca, e cosa si butta
+
+**Si butta:**
+
+- `processes/example-approval.yaml` -- l'esempio esiste per esercitare ogni tipo
+  di passo una volta;
+- i quattro tool d'esempio in `src/process_service/tools.py`
+  (`collect_request`, `apply_request`, `revert_request`, `notify_requester`):
+  stanno li' perche' "questo non deve succedere due volte" sia una cosa che un
+  test puo' verificare, non un commento.
+
+**Si tiene, ed e' quasi tutto:** il motore, le migrazioni, il catalogo, la
+storia, il replay, il webhook firmato, la compensazione, le sonde. Nessuno di
+questi sa niente del dominio.
+
+**Si scrive:** i tool veri (una funzione che riceve il contesto e restituisce un
+dizionario, registrata con `@tool("nome")`), e le definizioni. Un tool puo'
+essere `async`: chi parla con qualcun altro non deve tenere fermo il loop.
+
+```python
+@tool("send_invoice")
+async def send_invoice(context: dict[str, Any]) -> dict[str, Any]:
+    async with httpx.AsyncClient() as http:
+        answer = await http.post(BILLING, json={"id": context["request_id"]})
+    return {"invoice": answer.json()["number"]}
+```
+
+Il passo che lo chiama dichiara `idempotency_key: request_id` e
+`compensate_with: void_invoice`, e il motore fa il resto.
+
+## Limiti dichiarati
+
+Quello che questo servizio **non** fa, detto qui invece che scoperto dopo.
+
+**Senza Postgres non parte.** Non c'e' una modalita' in memoria: sarebbe un
+motore che dice di essere durevole e non lo e'. Le migrazioni girano all'avvio,
+e se il database non risponde la readiness resta rossa.
+
+**Senza agenti configurati** (`PROCESS_AGENTS` vuoto) i passi `agent` e
+`open_goal` falliscono con il nome dell'agente che cercavano. Il resto del
+motore gira: un processo di soli `tool` e `decision` non ha bisogno di nessun
+modello.
+
+**Senza modello** (`OPENAI_API_KEY`) fallisce solo `open_goal`, che e' l'unico
+posto dove questo servizio parla con un modello. Tutte le altre decisioni sono
+regole.
+
+**Gli approvatori sono nomi, non identita'.** `approvers: [reviewer]` e' un
+confine dichiarato, non autenticato: chi chiama l'API dice chi e'. Come per lo
+scope, la giuntura c'e' e l'autenticazione ci si attacca -- ma finche' non c'e',
+un'approvazione dice *che qualcuno ha deciso*, non *chi*.
+
+**Lo scope non e' un tenant.** Separa le istanze e non i database: due scope
+condividono le tabelle e il catalogo delle definizioni.
+
+**Le definizioni si caricano all'avvio.** Aggiungerne una vuol dire riavviare il
+servizio. E' voluto: un catalogo che cambia mentre le istanze girano e' la
+strada piu' breve verso istanze che non si sanno spiegare.
+
+**Non c'e' un editor di processi, e non c'e' un limite globale di spesa.** Il
+tetto e' per nodo `open_goal`, non per istanza ne' per giornata.
 
 ## Le versioni
 
