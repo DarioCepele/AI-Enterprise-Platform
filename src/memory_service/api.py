@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from .config import Settings, get_settings
 from .curation import ContextPolicy
 from .migrations import run_migrations
+from .observability import configure_logging, configure_tracing
 from .models import NewMessage, ReindexRequest, RetentionRequest, SearchQuery, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
 from .stores.hot import HotTail
@@ -23,13 +24,13 @@ from .summarizer import OpenAICompatibleSummarizer
 
 logger = logging.getLogger(__name__)
 
+SERVICE_NAME = "memory-service"
+
 
 def create_app(memory: ThreadMemory | None = None, settings: Settings | None = None) -> FastAPI:
     """Build the application. Pass memory explicitly in tests."""
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-
     config = settings or get_settings()
+    configure_logging(SERVICE_NAME, as_json=config.json_logs)
     state: dict[str, object] = {"memory": memory} if memory is not None else {}
 
     @asynccontextmanager
@@ -92,6 +93,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             await redis.aclose()
 
     app = FastAPI(title="Memoria conversazionale", lifespan=lifespan)
+    configure_tracing(SERVICE_NAME, app)
 
     def current_memory() -> ThreadMemory:
         instance = state.get("memory")

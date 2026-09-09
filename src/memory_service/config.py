@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     bucket_size: int = Field(default=50, ge=1, le=500)
     retention_days: int = Field(default=0, ge=0)
+    json_logs: bool = Field(default=False)
 
     hot_tail_seconds: int = Field(default=1800, ge=1)
     hot_tail_messages: int = Field(default=100, ge=1)
