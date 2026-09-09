@@ -36,16 +36,22 @@
 
 Oggi chi forka deve cercare le stringhe. `SINGLE_TENANT_SCOPE = "local-laboratory"` sta in `config.py`, il titolo sta in `LabHeader.tsx`, la lingua delle risposte sta dentro il prompt del master, il nome del sottoagente sta dentro `subagent_tools.py`. Sono cinque posti per un'informazione sola.
 
+**Chiuso il 2026-09-09**, meno il Step 4 di A3 (la sezione "dove si aggancia l'autenticazione" nel README, che arriva col README del template in F2). Tre cose emerse facendolo:
+
+- `pydantic-settings` rilegge il `.env` a ogni istanza: con `env_file` impostato, il file vince su una variabile che un test ha appena tolto. Il `.env` si carica una volta sola nell'ambiente, e le Settings leggono solo da li'.
+- una variabile vuota (`DEMO_SUBAGENTS=`) non e' una lista vuota per pydantic, e' un errore di parsing: serve un validatore che lo dica.
+- la descrizione letta dalla card va **pubblicata sul FunctionTool**, non solo tenuta nell'oggetto interno: quella dell'oggetto non la legge nessuno, ed e' il pezzo che faceva sparire il catalogo della card estesa.
+
 ### Task A1 — Un modulo di configurazione unico per il master agent
 
 **Files:** `demo-master-agent/src/demo/config.py`, `demo-master-agent/tests/test_config.py`, `.env.example`
 
 **Perche':** il servizio di memoria usa gia' `pydantic-settings` e fallisce all'avvio se manca qualcosa; il master agent usa `os.getenv` con default silenziosi, quindi un URL sbagliato si scopre al primo turno invece che al boot.
 
-- [ ] **Step 1:** test che una configurazione senza `OPENAI_API_KEY` (e senza fake client) fallisca all'avvio con un messaggio che nomina la variabile.
-- [ ] **Step 2:** test che `PRODUCT_NAME`, `PRODUCT_LANGUAGE` e `DEFAULT_SCOPE` abbiano default e siano leggibili da una sola struttura.
-- [ ] **Step 3:** portare `Settings` su `pydantic-settings`, mantenendo `get_settings()` senza cache (i test cambiano l'ambiente).
-- [ ] **Step 4:** aggiornare `.env.example` con le nuove variabili e una riga di commento per ciascuna.
+- [x] **Step 1:** test che una configurazione senza `OPENAI_API_KEY` (e senza fake client) fallisca all'avvio con un messaggio che nomina la variabile.
+- [x] **Step 2:** test che `PRODUCT_NAME`, `PRODUCT_LANGUAGE` e `DEFAULT_SCOPE` abbiano default e siano leggibili da una sola struttura.
+- [x] **Step 3:** portare `Settings` su `pydantic-settings`, mantenendo `get_settings()` senza cache (i test cambiano l'ambiente).
+- [x] **Step 4:** aggiornare `.env.example` con le nuove variabili e una riga di commento per ciascuna.
 
 **Fatto quando:** avviare il master senza una variabile obbligatoria produce un errore che dice quale, e nessun modulo legge piu' `os.getenv` direttamente.
 
@@ -55,10 +61,10 @@ Oggi chi forka deve cercare le stringhe. `SINGLE_TENANT_SCOPE = "local-laborator
 
 **Perche':** "Laboratorio AG-UI", "Studio 02", "Esercizio di laboratorio" sono il nome di *questo* progetto dentro il codice di *qualsiasi* progetto.
 
-- [ ] **Step 1:** test frontend: il titolo e il sottotitolo vengono da `lib/config.ts` e non da JSX letterale.
-- [ ] **Step 2:** estrarre nome, sottotitolo, disclaimer e badge tecnologici in `lib/config.ts`, alimentato da variabili `NEXT_PUBLIC_*` con default.
-- [ ] **Step 3:** portare il copy in inglese; le stringhe italiane restano solo nei test che verificano quel copy, quindi si aggiornano insieme.
-- [ ] **Step 4:** master agent: `INSTRUCTIONS` diventa una funzione di `settings.product_language`, con la riga "Answer in {language}" al posto di "Answer in Italian".
+- [x] **Step 1:** test frontend: il titolo e il sottotitolo vengono da `lib/config.ts` e non da JSX letterale.
+- [x] **Step 2:** estrarre nome, sottotitolo, disclaimer e badge tecnologici in `lib/config.ts`, alimentato da variabili `NEXT_PUBLIC_*` con default.
+- [x] **Step 3:** portare il copy in inglese; le stringhe italiane restano solo nei test che verificano quel copy, quindi si aggiornano insieme.
+- [x] **Step 4:** master agent: `INSTRUCTIONS` diventa una funzione di `settings.product_language`, con la riga "Answer in {language}" al posto di "Answer in Italian".
 
 **Fatto quando:** cambiare due variabili d'ambiente cambia nome del prodotto e lingua delle risposte, senza toccare un file `.tsx` o un prompt.
 
@@ -68,9 +74,9 @@ Oggi chi forka deve cercare le stringhe. `SINGLE_TENANT_SCOPE = "local-laborator
 
 **Perche':** `_resolve_snapshot_scope` ignora la richiesta e restituisce una costante. E' corretto per un laboratorio a tenant singolo, ed e' esattamente la funzione che l'autenticazione dovra' rimpiazzare. Se resta una costante, chi aggiunge l'autenticazione deve riscrivere la catena; se diventa una funzione con un default a tenant singolo, deve solo sostituire l'implementazione.
 
-- [ ] **Step 1:** test: senza intestazioni la risoluzione restituisce `settings.default_scope`.
-- [ ] **Step 2:** test: con l'intestazione di scope configurata la risoluzione la usa, e uno scope vuoto o malformato ricade sul default invece di propagare stringhe arbitrarie.
-- [ ] **Step 3:** implementare `scope_resolver` iniettabile in `create_app`, con il resolver a tenant singolo come default.
+- [x] **Step 1:** test: senza intestazioni la risoluzione restituisce `settings.default_scope`.
+- [x] **Step 2:** test: con l'intestazione di scope configurata la risoluzione la usa, e uno scope vuoto o malformato ricade sul default invece di propagare stringhe arbitrarie.
+- [x] **Step 3:** implementare `scope_resolver` iniettabile in `create_app`, con il resolver a tenant singolo come default.
 - [ ] **Step 4:** README: una sezione "dove si aggancia l'autenticazione" che nomina questa funzione, gli `security_schemes` della card e il token di servizio.
 
 **Fatto quando:** esiste un punto solo da cambiare per passare da un tenant a molti, ed e' documentato.
@@ -81,10 +87,10 @@ Oggi chi forka deve cercare le stringhe. `SINGLE_TENANT_SCOPE = "local-laborator
 
 **Perche':** oggi il master conosce un URL e chiama il tool `ask_knowledge`. Un template deve permettere zero o due sottoagenti senza modificare il codice dei tool.
 
-- [ ] **Step 1:** test: con due sottoagenti configurati vengono costruiti due tool distinti, con nomi e descrizioni derivati dalla card di ciascuno.
-- [ ] **Step 2:** test: con nessun sottoagente configurato l'agente parte lo stesso e non espone tool di sottoagente.
-- [ ] **Step 3:** configurazione: da `DEMO_KNOWLEDGE_AGENT_URL` a una lista `SUBAGENTS` (nome + url + token opzionale).
-- [ ] **Step 4:** `answer_subagent` risolve il sottoagente da riprendere leggendo `subagent_pending["agent"]`, che gia' scriviamo e finora non leggevamo.
+- [x] **Step 1:** test: con due sottoagenti configurati vengono costruiti due tool distinti, con nomi e descrizioni derivati dalla card di ciascuno.
+- [x] **Step 2:** test: con nessun sottoagente configurato l'agente parte lo stesso e non espone tool di sottoagente.
+- [x] **Step 3:** configurazione: da `DEMO_KNOWLEDGE_AGENT_URL` a una lista `SUBAGENTS` (nome + url + token opzionale).
+- [x] **Step 4:** `answer_subagent` risolve il sottoagente da riprendere leggendo `subagent_pending["agent"]`, che gia' scriviamo e finora non leggevamo.
 
 **Fatto quando:** aggiungere un sottoagente e' una riga di configurazione, e `subagent_pending` porta abbastanza informazione per riprendere quello giusto.
 
