@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:8.2.3
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The contracts are the only copy, and they live in demo-infra: without
+      # this checkout the contract tests fail instead of passing quietly, which
+      # is the whole point of them.
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/demo-infra
+          path: .contracts
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+      - run: uv run pytest -q
+        env:
+          AGUI_LAB_CONTRACTS: ${{ github.workspace }}/.contracts/contracts
+          DEMO_REDIS_URI: redis://127.0.0.1:6379/1
+          DEMO_FAKE_CLIENT: "true"
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: master-agent:ci
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: master-agent:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
