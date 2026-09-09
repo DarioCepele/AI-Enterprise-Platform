@@ -145,6 +145,7 @@ e' una tabella che mente al secondo cambiamento.
 | `PROCESS_JSON_LOGS` | `False` | Structured logs for a collector instead of the readable line. |
 | `PROCESS_POOL_MIN_SIZE` | `1` | Connections kept open. |
 | `PROCESS_POOL_MAX_SIZE` | `10` | Connections at most. |
+| `PROCESS_PORT` | `8300` | Where the service listens when started locally. |
 | `PROCESS_PUBLIC_URL` | `http://localhost:8300` | How a remote agent reaches this service back, for notifications. |
 | `PROCESS_PUSH_SECRET` | `laboratory-without-a-secret` | Signs notification tokens. Change it: the default is public. |
 | `PROCESS_AGENTS` | `{}` | Agents a step may delegate to, as JSON: {"knowledge": "http://..."}. |
