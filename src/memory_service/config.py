@@ -39,3 +39,38 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Cache one configuration instance per process; configuration is not reloaded live."""
     return Settings()
+
+# See the note in the master agent's config: the README table is generated here.
+FIELD_NOTES = {
+    "mongo_uri": "Durable transcripts. Required.",
+    "mongo_database": "Database name inside that Mongo.",
+    "redis_uri": "Hot tail, semantic index, compaction lock. Required.",
+    "bucket_size": "Messages per bucket document.",
+    "retention_days": "Days of inactivity after which a thread is forgotten. 0 = never.",
+    "json_logs": "Structured logs for a collector instead of the readable line.",
+    "hot_tail_seconds": "How long the cached tail of a conversation survives.",
+    "hot_tail_messages": "How many messages that tail keeps.",
+    "max_context_messages": "Window handed back to the agent, in messages.",
+    "drop_reasoning": "Whether past reasoning leaves the rebuilt context.",
+    "keep_tool_results": "How many recent tool results keep their content.",
+    "summary_base_url": "Endpoint of the model that summarizes and extracts facts.",
+    "summary_api_key": "Credential for that endpoint.",
+    "summary_model": "Model for summaries. Empty means no compaction and no durable facts.",
+    "embedding_model": "Embedding model. Empty means no semantic search.",
+    "max_facts": "How many durable facts are injected into a context.",
+}
+
+
+def env_table() -> str:
+    """The environment table, generated from the fields themselves."""
+    prefix = Settings.model_config.get("env_prefix", "")
+    rows = ["| Variable | Default | What it decides |", "|---|---|---|"]
+    for name, field in Settings.model_fields.items():
+        default = field.get_default(call_default_factory=True)
+        shown = f"`{default}`" if default not in ("", None) else "*(empty)*"
+        rows.append(f"| `{prefix.upper()}{name.upper()}` | {shown} | {FIELD_NOTES.get(name, '')} |")
+    return "\n".join(rows)
+
+
+if __name__ == "__main__":
+    print(env_table())
