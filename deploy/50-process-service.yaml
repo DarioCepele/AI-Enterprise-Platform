@@ -65,6 +65,10 @@ spec:
               value: http://process-service:8300
             - name: PROCESS_JSON_LOGS
               value: "true"
+            # Da quali pagine un browser puo' leggere questa API. In produzione
+            # e' l'origine dell'interfaccia, non `localhost`.
+            - name: PROCESS_ALLOWED_ORIGINS
+              value: https://lab.example
           envFrom:
             - secretRef:
                 name: agui-lab

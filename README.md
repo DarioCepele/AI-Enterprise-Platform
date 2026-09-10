@@ -82,6 +82,8 @@ Quello che degrada, invece di rompersi, quando manca un pezzo:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | nessuna traccia esportata, tutto il resto uguale |
 | `PROCESS_POSTGRES_DSN` (irraggiungibile) | il servizio dei processi non parte: non c'e' una modalita' in memoria, sarebbe un motore che dice di essere durevole e non lo e' |
 | `PROCESS_AGENTS` | i passi `agent` e `open_goal` falliscono col nome dell'agente cercato; i processi di soli `tool` e `decision` girano lo stesso |
+| `PROCESS_URL` (frontend) | il tab **Istanze** dice che non c'e' un servizio dei processi, invece di mostrare un errore |
+| `DEMO_PROCESS_SERVICE_URL` (master) | l'agente non ha i tool per avviare o leggere un processo: non li vede proprio, quindi non prova a usarli |
 | `OPENAI_API_KEY` sul process-service | fallisce solo `open_goal`: e' l'unico posto dove quel servizio parla con un modello |
 | `ANALYSIS_SERVICE_TOKEN` | come per il knowledge agent: card estesa non accessibile |
 
@@ -115,6 +117,7 @@ e' una tabella che mente al secondo cambiamento.
 | `DEMO_KNOWLEDGE_SERVICE_TOKEN` | *(empty)* | Service token of that subagent, for its extended card. |
 | `DEMO_SUBAGENTS` | *(empty)* | Subagents as JSON: [{"name":"x","url":"http://...","token":""}]. |
 | `DEMO_PUBLIC_URL` | *(empty)* | How a subagent reaches this agent back, for push notifications. |
+| `DEMO_PROCESS_SERVICE_URL` | *(empty)* | Where durable processes live. Empty: the agent cannot start one. |
 | `DEMO_SUBAGENT_WAIT_SECONDS` | `60.0` | How long a turn waits before letting the outcome arrive by notification. |
 
 ### memory service
@@ -150,6 +153,7 @@ e' una tabella che mente al secondo cambiamento.
 | `PROCESS_POOL_MIN_SIZE` | `1` | Connections kept open. |
 | `PROCESS_POOL_MAX_SIZE` | `10` | Connections at most. |
 | `PROCESS_PORT` | `8300` | Where the service listens when started locally. |
+| `PROCESS_ALLOWED_ORIGINS` | `('http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001', 'http://127.0.0.1:3001')` | Which pages may read this API from a browser. Comma-separated. |
 | `PROCESS_PUBLIC_URL` | `http://localhost:8300` | How a remote agent reaches this service back, for notifications. |
 | `PROCESS_PUSH_SECRET` | `laboratory-without-a-secret` | Signs notification tokens. Change it: the default is public. |
 | `PROCESS_AGENTS` | `{}` | Agents a step may delegate to, as JSON: {"knowledge": "http://..."}. |

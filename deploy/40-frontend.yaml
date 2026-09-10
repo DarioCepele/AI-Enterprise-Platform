@@ -57,6 +57,11 @@ spec:
           env:
             - name: AGUI_URL
               value: http://master-agent:8000/agui
+            # Il browser chiama il servizio dei processi **direttamente**, quindi
+            # questo e' un indirizzo di fuori: dentro il cluster sarebbe un nome
+            # che la macchina di chi guarda non risolve. Va con l'ingress.
+            - name: PROCESS_URL
+              value: https://processi.example
             # Il server di Next ascolta su `HOSTNAME`, e in un pod quella
             # variabile e' il nome del pod: si legherebbe al proprio indirizzo e
             # basta. Il Service funzionerebbe lo stesso, un `port-forward` no --

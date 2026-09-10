@@ -57,6 +57,8 @@ spec:
               value: http://master-agent:8000
             - name: DEMO_MEMORY_SERVICE_URL
               value: http://memory-service:8100
+            - name: DEMO_PROCESS_SERVICE_URL
+              value: http://process-service:8300
             # The two subagents by name. The tokens of their extended cards
             # come from the Secret, so they are not written here: a subagent
             # without a token still answers, it just serves the public card.

@@ -23,6 +23,7 @@ services:
           "token": "${KNOWLEDGE_SERVICE_TOKEN}"},
          {"name": "analysis", "url": "http://analysis-agent:8400/",
           "token": "${ANALYSIS_SERVICE_TOKEN}"}]
+      DEMO_PROCESS_SERVICE_URL: http://process-service:8300
       DEMO_PUBLIC_URL: http://master-agent:8000
       DEMO_PUSH_SECRET: ${DEMO_PUSH_SECRET:?required in .env}
       DEMO_KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?required in .env}
@@ -134,6 +135,9 @@ services:
     build: ../demo-frontend
     environment:
       AGUI_URL: ${AGUI_URL:-http://localhost:8000/agui}
+      # Il browser parla col servizio dei processi direttamente: e' pubblicato
+      # sul loopback, e la pagina gira sulla macchina di chi guarda.
+      PROCESS_URL: ${PROCESS_URL:-http://localhost:8300}
       PRODUCT_NAME: ${PRODUCT_NAME:-AG-UI Lab}
     ports:
       - "3000:3000"
