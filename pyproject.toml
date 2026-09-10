@@ -7,7 +7,6 @@ dependencies = [
     "agent-framework-core==1.17.0",
     "agent-framework-openai",
     "a2a-sdk[http-server]",
-    "sse-starlette",
     "fastapi>=0.120",
     "uvicorn[standard]>=0.40",
     "python-dotenv>=1.1",
