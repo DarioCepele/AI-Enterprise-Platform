@@ -3,7 +3,7 @@
   "version": 1,
   "produced_by": ["demo-master-agent"],
   "consumed_by": ["demo-frontend"],
-  "description": "GET /logs?cursor=<opaque>. The operational logs the LOG tab polls. The cursor is opaque and belongs to whoever produced it: with a shared Redis stream it carries a position in that stream, without one it carries a sequence number local to the replica. A client hands back what it received and does not read inside it. `dropped` counts the lines that left the buffer between two reads, so a hole is not read as continuity.",
+  "description": "GET /logs?cursor=<opaque>. The operational logs the LOG tab polls. The cursor is opaque and belongs to whoever produced it: with a shared table it carries a sequence number from the database, without one it carries a sequence number local to the replica. A client hands back what it received and does not read inside it. `dropped` counts the lines that left the buffer between two reads, so a hole is not read as continuity.",
   "opaque_fields": {
     "cursor": "produced by the log sink; the client only echoes it back"
   },

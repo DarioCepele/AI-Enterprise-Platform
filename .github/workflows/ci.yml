@@ -37,10 +37,6 @@ jobs:
       - name: the compose file is valid with the example environment
         run: |
           cp .env.example .env
-          sed -i 's/^\(MONGO_INITDB_ROOT_USERNAME\)=.*/\1=ci/' .env
-          sed -i 's/^\(MONGO_INITDB_ROOT_PASSWORD\)=.*/\1=ci/' .env
-          sed -i 's/^\(MONGO_INITDB_DATABASE\)=.*/\1=ci/' .env
-          sed -i 's/^\(REDIS_PASSWORD\)=.*/\1=ci/' .env
           sed -i 's/^\(DEMO_PUSH_SECRET\)=.*/\1=ci/' .env
           sed -i 's/^\(KNOWLEDGE_SERVICE_TOKEN\)=.*/\1=ci/' .env
           sed -i 's/^\(ANALYSIS_SERVICE_TOKEN\)=.*/\1=ci/' .env

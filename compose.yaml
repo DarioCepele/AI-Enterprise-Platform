@@ -15,7 +15,7 @@ services:
       DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
       DEMO_ALLOWED_ORIGINS: ${DEMO_ALLOWED_ORIGINS:-}
       DEMO_MEMORY_SERVICE_URL: http://memory-service:8100
-      DEMO_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/1
+      DEMO_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/agente
       DEMO_JSON_LOGS: ${JSON_LOGS:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       DEMO_SUBAGENTS: >-
@@ -37,7 +37,7 @@ services:
         condition: service_healthy
       analysis-agent:
         condition: service_healthy
-      redis:
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
@@ -54,7 +54,6 @@ services:
     build: ../demo-memory-service
     environment:
       MEMORY_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/memoria
-      MEMORY_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/0
       MEMORY_SUMMARY_BASE_URL: ${OPENAI_BASE_URL}
       MEMORY_SUMMARY_API_KEY: ${OPENAI_API_KEY}
       MEMORY_SUMMARY_MODEL: ${MEMORY_SUMMARY_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
@@ -64,8 +63,6 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health/ready')"]
@@ -144,23 +141,6 @@ services:
       master-agent:
         condition: service_healthy
 
-  redis:
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: "0.5"
-    image: redis:8.2.3@sha256:0908d9af26bf9b985e984a40a5eb82eed229b07a3317eee6843832c3cc3a9619
-    restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?required in .env}", "--appendonly", "no"]
-    ports:
-      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
   process-service:
     deploy:
       resources:
@@ -203,7 +183,9 @@ services:
         limits:
           memory: 512M
           cpus: "1.0"
-    image: postgres:17-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    # Postgres con pgvector: la ricerca semantica sta accanto ai trascritti da
+    # cui si ricostruisce, invece che in un secondo datastore.
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?serve in .env}

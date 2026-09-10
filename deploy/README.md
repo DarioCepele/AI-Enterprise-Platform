@@ -11,16 +11,17 @@ al processo che l'ha avviata.
 
 ## Cosa non c'e', e perche'
 
-**Postgres e Redis.** Un database dentro un `Deployment` senza operator sembra
+**Postgres.** Un database dentro un `Deployment` senza operator sembra
 funzionare finche' non serve davvero: niente backup, niente failover ordinato,
-un `kubectl rollout restart` che diventa una perdita di dati. Qui si punta a
-servizi gestiti (RDS, Cloud SQL, Azure Flexible Server, ElastiCache) o a
-operator veri, e i loro indirizzi arrivano dal Secret.
+un `kubectl rollout restart` che diventa una perdita di dati. Qui si punta a un
+servizio gestito (RDS, Cloud SQL, Azure Flexible Server) o a un operator vero,
+e il suo indirizzo arriva dal Secret.
 
-Per Postgres la posta e' piu' alta: **tiene sia le istanze dei processi sia i
-trascritti della memoria**, in due database sullo stesso server. Redis perde
-una coda di log e una cache ricostruibile; Postgres perde processi a meta' e
-conversazioni. Se un fork ne mette uno solo gestito, che sia questo.
+E' **l'unico** database del laboratorio, con tre database dentro: le istanze
+dei processi, i trascritti della memoria, e il poco stato che il master
+condivide fra le repliche. Serve l'estensione `pgvector` per la ricerca
+semantica: i servizi gestiti la offrono, un cluster fatto in casa la deve
+installare.
 
 **Ingress e TLS.** Dipendono dal cluster: nginx, Traefik, il controller del
 cloud. C'e' un `Service` per il frontend e per il master agent, e da li' si
@@ -37,8 +38,7 @@ kubectl -n agui-lab create secret generic agui-lab \
   --from-literal=DEMO_PUSH_SECRET=... \
   --from-literal=KNOWLEDGE_SERVICE_TOKEN=... \
   --from-literal=MEMORY_POSTGRES_DSN=postgresql://... \
-  --from-literal=MEMORY_REDIS_URI=redis://... \
-  --from-literal=DEMO_REDIS_URI=redis://... \
+  --from-literal=DEMO_POSTGRES_DSN=postgresql://... \
   --from-literal=ANALYSIS_SERVICE_TOKEN=... \
   --from-literal=PROCESS_PUSH_SECRET=... \
   --from-literal=PROCESS_POSTGRES_DSN=postgresql://...
@@ -60,7 +60,7 @@ k3d cluster create agui-lab --agents 1 --network demo-infra_default
 ```
 
 La rete non e' un dettaglio: mettendo il cluster **sulla rete del compose**, i
-pod raggiungono `redis` e `postgres` per nome. E' la stessa forma della
+pod raggiungono `postgres` per nome. E' la stessa forma della
 produzione -- i database stanno fuori dal cluster -- senza dover installare
 niente in piu'.
 
@@ -86,8 +86,7 @@ kubectl -n agui-lab create secret generic agui-lab \
   --from-literal=DEMO_PUSH_SECRET=... --from-literal=PROCESS_PUSH_SECRET=... \
   --from-literal=KNOWLEDGE_SERVICE_TOKEN=... --from-literal=ANALYSIS_SERVICE_TOKEN=... \
   --from-literal=MEMORY_POSTGRES_DSN='postgresql://<utente>:<password>@postgres:5432/memoria' \
-  --from-literal=MEMORY_REDIS_URI='redis://:<password>@redis:6379/0' \
-  --from-literal=DEMO_REDIS_URI='redis://:<password>@redis:6379/1' \
+  --from-literal=DEMO_POSTGRES_DSN='postgresql://<utente>:<password>@postgres:5432/agente' \
   --from-literal=PROCESS_POSTGRES_DSN='postgresql://<utente>:<password>@postgres:5432/processi'
 
 kubectl apply -k ../k3s        # gli stessi manifest, con le immagini locali

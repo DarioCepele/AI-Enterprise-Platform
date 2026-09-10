@@ -74,8 +74,7 @@ Quello che degrada, invece di rompersi, quando manca un pezzo:
 | Se manca | Cosa succede |
 |---|---|
 | `DEMO_MEMORY_SERVICE_URL` | la conversazione vive in RAM e muore col processo |
-| `DEMO_REDIS_URI` | i log operativi restano per replica, e con due repliche il tab LOG ne mostra meta'; le notifiche push non si deduplicano |
-| `MEMORY_REDIS_URI` | niente coda calda, niente ricerca semantica, lock di compattazione solo di processo |
+| `DEMO_POSTGRES_DSN` | i log operativi restano per replica, e con due repliche il tab LOG ne mostra meta'; le notifiche push non si deduplicano |
 | `MEMORY_SUMMARY_MODEL` | i turni fuori finestra escono dal contesto senza riassunto, e non si imparano fatti duraturi |
 | `MEMORY_EMBEDDING_MODEL` | `cerca_nei_ricordi` non trova niente e lo dichiara |
 | `KNOWLEDGE_SERVICE_TOKEN` | la card estesa non e' accessibile: il modello interroga il sottoagente senza sapere cosa contiene |
@@ -112,7 +111,7 @@ e' una tabella che mente al secondo cambiamento.
 | `DEMO_SCOPE_HEADER` | *(empty)* | Header carrying the scope, read **only** when this is set: naming it means something in front has verified it. |
 | `DEMO_JSON_LOGS` | `False` | Structured logs for a collector instead of the readable line. |
 | `DEMO_MEMORY_SERVICE_URL` | *(empty)* | Memory service. Without it the conversation lives in RAM and dies with the process. |
-| `DEMO_REDIS_URI` | *(empty)* | Shared logs, deduplicated notifications. Without it both are per replica. |
+| `DEMO_POSTGRES_DSN` | *(empty)* | Shared logs and deduplicated notifications. Without it both are per replica. |
 | `DEMO_KNOWLEDGE_AGENT_URL` | *(empty)* | One subagent, the short way. Ignored when DEMO_SUBAGENTS is set. |
 | `DEMO_KNOWLEDGE_SERVICE_TOKEN` | *(empty)* | Service token of that subagent, for its extended card. |
 | `DEMO_SUBAGENTS` | *(empty)* | Subagents as JSON: [{"name":"x","url":"http://...","token":""}]. |
@@ -125,14 +124,11 @@ e' una tabella che mente al secondo cambiamento.
 | Variable | Default | What it decides |
 |---|---|---|
 | `MEMORY_POSTGRES_DSN` | `postgresql://127.0.0.1:5432/memoria` | Durable transcripts, summaries and facts. Required. |
-| `MEMORY_REDIS_URI` | `redis://127.0.0.1:6379/0` | Hot tail, semantic index, compaction lock. Required. |
 | `MEMORY_PORT` | `8100` | Where the service listens when started locally. |
 | `MEMORY_POOL_MIN_SIZE` | `1` | Connections kept open. |
 | `MEMORY_POOL_MAX_SIZE` | `10` | Connections at most. |
 | `MEMORY_RETENTION_DAYS` | `0` | Days of inactivity after which a thread is forgotten. 0 = never. |
 | `MEMORY_JSON_LOGS` | `False` | Structured logs for a collector instead of the readable line. |
-| `MEMORY_HOT_TAIL_SECONDS` | `1800` | How long the cached tail of a conversation survives. |
-| `MEMORY_HOT_TAIL_MESSAGES` | `100` | How many messages that tail keeps. |
 | `MEMORY_SUMMARY_MODEL` | *(empty)* | Model for summaries. Empty means no compaction and no durable facts. |
 | `MEMORY_SUMMARY_BASE_URL` | `https://openrouter.ai/api/v1` | Endpoint of the model that summarizes and extracts facts. |
 | `MEMORY_SUMMARY_API_KEY` | *(empty)* | Credential for that endpoint. |
@@ -220,8 +216,7 @@ percorsi fratelli.
 | `knowledge-agent` | loopback 8200 | sottoagente A2A: legge un corpus |
 | `analysis-agent` | loopback 8400 | sottoagente A2A: misura e confronta |
 | `memory-service` | — | memoria conversazionale, interna |
-| `redis` | loopback | coda calda e ricordi cercabili |
-| `postgres` | loopback | istanze dei processi **e** trascritti della memoria |
+| `postgres` | loopback | **l'unico database**: processi, memoria, stato condiviso dell'agente |
 
 La memoria **non pubblica porte**: la raggiunge solo il master agent dalla rete
 di compose. Gli altri sono sul **loopback**, che non e' la stessa cosa di
@@ -365,41 +360,44 @@ di conversazione non e' nessuna delle due: e' append-only, uniforme, letto a
 coda. E tre sistemi al 99,9% fanno 99,7% combinato — 26 ore di disservizio
 l'anno invece di 8,7.
 
-## Redis
+## C'era Redis, e non c'e' piu'
 
-Memoria a breve termine del servizio di memoria: la coda calda delle
-conversazioni. Requisiti opposti a quelli del durevole — latenza bassa e scadenza
-automatica invece di durata e storia completa — per questo è un servizio a sé e
-non un'altra collezione.
+Redis teneva quattro cose: la coda calda della memoria, l'indice semantico, il
+lock di compattazione, e lo stream dei log operativi condiviso fra le repliche.
+Erano quattro scelte ragionevoli, e tre di esse in Postgres diventano piu'
+semplici, non solo diverse.
 
-```bash
-docker compose up -d redis
-docker compose ps redis          # atteso: Up (healthy)
-```
+| Cosa faceva | Adesso | Cosa cambia |
+| --- | --- | --- |
+| coda calda con TTL | una query indicizzata | sparisce la cache **e** il ragionamento sulle due copie |
+| indice semantico | `pgvector` | l'indice sta accanto ai trascritti da cui si ricostruisce |
+| lock di compattazione | `pg_try_advisory_lock` | niente lease da far scadere, niente Lua per rilasciare il proprio |
+| log fra repliche | una tabella, potata | il cursore c'era gia' |
 
-Password obbligatoria dal `.env` (`REDIS_PASSWORD`), porta su loopback
-(`REDIS_HOST_PORT`, default 6379). **Nessun volume, ed è voluto**: quello che
-vive qui deve essere sempre ricostruibile da Postgres. Se perdere Redis perdesse
-dati, sarebbe il posto sbagliato dove tenerli.
+**Dove Redis restava la scelta migliore**: lo stream dei log. Redis Streams con
+`MAXLEN` e' fatto esattamente per quello, e una tabella potata a ogni scrittura
+e' un compromesso. Il punto e' che quel tab e' una **comodita' di laboratorio**: in un
+deployment vero i log vanno a un collector (c'e' gia' OTLP), e tenere in piedi
+un secondo datastore per una finestra di 500 righe non regge il conto.
 
-L'immagine è `redis:8.2.3`, non `redis-stack`: da Redis 8 il Query Engine sta
-nella distribuzione open source (AGPLv3) e redis-stack non è più mantenuta.
-Verificato sull'istanza: `FT.CREATE` e `VADD` rispondono, quindi la ricerca
-vettoriale è disponibile qui senza aggiungere un terzo datastore.
+**Quando tornerebbe la risposta giusta**: p99 sotto il millisecondo, fanout a
+molti consumatori, o un volume di log che una tabella non regge. Sono condizioni
+misurabili, e nessuna e' vera qui.
 
 ## I log operativi con piu' di una replica
 
 Il tab LOG legge `GET /logs` con un cursore. Il collettore in RAM di ogni
-processo resta, ma quando `DEMO_REDIS_URI` e' configurato le righe finiscono
-anche in uno stream Redis condiviso, e l'endpoint legge da li': due repliche
-raccontano una storia sola invece di meta' ciascuna.
+processo resta, ma quando `DEMO_POSTGRES_DSN` e' configurato le righe finiscono
+anche in una tabella condivisa, e l'endpoint legge da li': due repliche
+raccontano una storia sola invece di meta' ciascuna. Il numero di sequenza
+arriva dal database, non dal processo: due repliche che numerassero le proprie
+righe si scontrerebbero alla prima lettura.
 
-Il cursore e' **opaco**: con lo stream porta una posizione piu' il numero di
-sequenza globale, senza porta il numero di sequenza locale. Il client lo
-rimanda com'e'. `dropped` dice quante righe sono uscite dal buffer fra due
-letture, cosi' un buco non si legge come continuita'.
+Il cursore e' **opaco**: il client lo rimanda com'e'. `dropped` dice quante
+righe sono uscite dalla finestra fra due letture, cosi' un buco non si legge
+come continuita'.
 
-Senza Redis non si rompe niente: ogni replica mostra le proprie righe, e lo
+Senza database non si rompe niente: ogni replica mostra le proprie righe, e lo
 dichiara nei log all'avvio.
 
 ## Sonde, log e tracce
@@ -412,8 +410,8 @@ quella che il compose usa per `service_healthy`.
 Cosa conta come dipendenza cambia per servizio: per il master il servizio di
 memoria si' e i sottoagenti no -- uno giu' degrada un turno e il tool lo
 dichiara, mentre senza memoria ogni thread ripartirebbe da zero in silenzio.
-Per la memoria, Postgres e' obbligatorio e Redis no: e' una cache, e senza si e'
-piu' lenti, non incapaci.
+Per la memoria Postgres e' obbligatorio, ed e' l'unica dipendenza rimasta: non
+c'e' piu' una cache da cui degradare.
 
 Con `JSON_LOGS=true` le righe diventano oggetti con servizio, logger e thread
 del turno. Con `OTEL_EXPORTER_OTLP_ENDPOINT` le tracce attraversano i tre
@@ -433,7 +431,7 @@ ricostruire niente. Prima quelle variabili finivano nel bundle a build time.
 
 I manifest Kubernetes stanno in `deploy/`, con due repliche di default sul
 master agent e sul servizio di memoria: non e' dimensionamento, e' la sonda che
-fa emergere subito una regressione dello stato di processo. Postgres e Redis
+fa emergere subito una regressione dello stato di processo. Postgres
 restano fuori, e il perche' e' scritto in `deploy/README.md`.
 
 ## Contratti fra i repo
@@ -453,14 +451,16 @@ Dettagli e regole di modifica in `contracts/README.md`.
 ## Test
 
 ```bash
-cd ../demo-master-agent && uv run pytest        # 140
-cd ../demo-knowledge-agent && uv run pytest     # 39
-cd ../demo-memory-service && uv run pytest     # 122, contro Postgres e Redis veri
-cd ../demo-frontend && npm test                # 139
+cd ../demo-master-agent && uv run pytest        # 209
+cd ../demo-knowledge-agent && uv run pytest     # 40
+cd ../demo-analysis-agent && uv run pytest      # 36
+cd ../demo-memory-service && uv run pytest      # 118, contro un Postgres vero
+cd ../demo-process-service && uv run pytest     # 84, contro un Postgres vero
+cd ../demo-frontend && npm test                 # 139
 ```
 
 I test della memoria e dei processi girano contro i database veri
-(`docker compose up -d postgres redis`): una conversazione e un'istanza sono
+(`docker compose up -d postgres`): una conversazione e un'istanza sono
 righe che devono sopravvivere al processo che le ha scritte, e un finto in
 memoria non proverebbe niente al riguardo. Ognuno si crea il proprio database
 `_test`, cosi' non tocca quello di un servizio in esecuzione. Gli altri repo
