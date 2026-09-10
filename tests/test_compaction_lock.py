@@ -9,7 +9,7 @@ import pytest
 from memory_service.curation import ContextPolicy
 from memory_service.models import Snapshot
 from memory_service.service import ThreadMemory
-from memory_service.stores.locks import InProcessLock, RedisLock
+from memory_service.stores.locks import InProcessLock, PostgresLock
 
 from conftest import needs_backends
 
@@ -37,20 +37,19 @@ class SlowSummarizer:
         return "a summary"
 
 
-def a_replica(transcripts, hot, summarizer, lock) -> ThreadMemory:
+def a_replica(transcripts, summarizer, lock) -> ThreadMemory:
     return ThreadMemory(
         transcripts,
-        hot,
         ContextPolicy(max_messages=4),
         summarizer=summarizer,
         lock=lock,
     )
 
 
-async def test_two_replicas_compact_a_thread_once(transcripts, hot, redis_client, scope):
+async def test_two_replicas_compact_a_thread_once(transcripts, pool, scope):
     summarizer = SlowSummarizer()
-    first = a_replica(transcripts, hot, summarizer, RedisLock(redis_client))
-    second = a_replica(transcripts, hot, summarizer, RedisLock(redis_client))
+    first = a_replica(transcripts, summarizer, PostgresLock(pool))
+    second = a_replica(transcripts, summarizer, PostgresLock(pool))
     await first.save_snapshot(scope, "t1", Snapshot(messages=TURNS))
 
     await asyncio.gather(
@@ -62,12 +61,10 @@ async def test_two_replicas_compact_a_thread_once(transcripts, hot, redis_client
     assert summarizer.calls == 1
 
 
-async def test_the_replica_that_finds_the_lock_taken_says_so(
-    transcripts, hot, redis_client, scope, caplog
-):
+async def test_the_replica_that_finds_the_lock_taken_says_so(transcripts, pool, scope, caplog):
     summarizer = SlowSummarizer()
-    first = a_replica(transcripts, hot, summarizer, RedisLock(redis_client))
-    second = a_replica(transcripts, hot, summarizer, RedisLock(redis_client))
+    first = a_replica(transcripts, summarizer, PostgresLock(pool))
+    second = a_replica(transcripts, summarizer, PostgresLock(pool))
     await first.save_snapshot(scope, "t1", Snapshot(messages=TURNS))
 
     with caplog.at_level(logging.INFO, logger="memory_service.service"):
@@ -79,11 +76,9 @@ async def test_the_replica_that_finds_the_lock_taken_says_so(
     assert "already running" in caplog.text
 
 
-async def test_the_lock_is_released_and_the_next_compaction_runs(
-    transcripts, hot, redis_client, scope
-):
+async def test_the_lock_is_released_and_the_next_compaction_runs(transcripts, pool, scope):
     summarizer = SlowSummarizer()
-    replica = a_replica(transcripts, hot, summarizer, RedisLock(redis_client))
+    replica = a_replica(transcripts, summarizer, PostgresLock(pool))
     await replica.save_snapshot(scope, "t1", Snapshot(messages=TURNS))
 
     await replica.compact_if_needed(scope, "t1")
@@ -94,13 +89,14 @@ async def test_the_lock_is_released_and_the_next_compaction_runs(
     await replica.save_snapshot(scope, "t1", Snapshot(messages=TURNS + later))
     await replica.compact_if_needed(scope, "t1")
 
-    # A lock never released would make the thread uncompactable until its TTL.
+    # A lock never released would make the thread uncompactable for good: an
+    # advisory lock has no lease to wait out.
     assert summarizer.calls == 2
 
 
-async def test_two_threads_do_not_wait_for_each_other(transcripts, hot, redis_client, scope):
+async def test_two_threads_do_not_wait_for_each_other(transcripts, pool, scope):
     summarizer = SlowSummarizer()
-    replica = a_replica(transcripts, hot, summarizer, RedisLock(redis_client))
+    replica = a_replica(transcripts, summarizer, PostgresLock(pool))
     await replica.save_snapshot(scope, "t1", Snapshot(messages=TURNS))
     await replica.save_snapshot(scope, "t2", Snapshot(messages=TURNS))
 
@@ -112,33 +108,54 @@ async def test_two_threads_do_not_wait_for_each_other(transcripts, hot, redis_cl
     assert summarizer.calls == 2
 
 
-async def test_a_lock_of_another_holder_is_not_released(redis_client):
-    mine = RedisLock(redis_client)
-    yours = RedisLock(redis_client)
+async def test_a_lock_taken_is_not_given_to_somebody_else(pool):
+    mine = PostgresLock(pool)
+    yours = PostgresLock(pool)
 
     async with mine.hold("shared") as taken:
         assert taken is True
         async with yours.hold("shared") as also_taken:
+            # Leaving the second block must not release the first one's lock:
+            # with an advisory lock it cannot, because the lock belongs to the
+            # connection that took it.
             assert also_taken is False
-        # Releasing on the way out of a lock we never took would hand the work
-        # to whoever comes next while the holder is still working.
-        assert await redis_client.get("lock:shared") is not None
+
+    # And once the holder is done, the next one gets it.
+    async with yours.hold("shared") as free_now:
+        assert free_now is True
 
 
-async def test_an_expired_lock_is_reported(redis_client, caplog):
-    lock = RedisLock(redis_client, ttl_seconds=1)
+async def test_a_lock_goes_with_the_connection_that_took_it(pool):
+    """No lease, so nothing to expire -- and nothing to leak either.
 
-    with caplog.at_level(logging.WARNING, logger="memory_service.stores.locks"):
-        async with lock.hold("slow") as taken:
-            assert taken is True
-            await asyncio.sleep(1.2)
+    The Redis version needed a TTL: long enough to outlast the work, short
+    enough to unstick a replica that died holding it. Here the lock dies with
+    the connection, so both problems are the same problem, already solved.
+    """
+    lock = PostgresLock(pool)
 
-    assert "expired before the work finished" in caplog.text
+    async with lock.hold("slow") as taken:
+        assert taken is True
+        async with pool.connection() as connection:
+            held = await (
+                await connection.execute(
+                    "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'"
+                )
+            ).fetchone()
+            assert held[0] >= 1
+
+    async with pool.connection() as connection:
+        left = await (
+            await connection.execute(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'"
+            )
+        ).fetchone()
+    assert left[0] == 0
 
 
-async def test_without_redis_the_lock_still_guards_one_process(transcripts, hot, scope):
+async def test_without_a_database_the_lock_still_guards_one_process(transcripts, scope):
     summarizer = SlowSummarizer()
-    replica = a_replica(transcripts, hot, summarizer, InProcessLock())
+    replica = a_replica(transcripts, summarizer, InProcessLock())
     await replica.save_snapshot(scope, "t1", Snapshot(messages=TURNS))
 
     await asyncio.gather(

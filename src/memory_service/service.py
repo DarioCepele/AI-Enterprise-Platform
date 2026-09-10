@@ -11,10 +11,9 @@ from .embedder import Embedder
 from .facts import facts_message, parse_facts
 from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .snapshots import new_messages
-from .stores.hot import HotTail
 from .stores.locks import InProcessLock
 from .stores.postgres import PostgresTranscripts
-from .stores.vectors import Memory, RedisMemories
+from .stores.vectors import Memory, PostgresMemories
 from .summarizer import FactExtractor, Summarizer
 
 logger = logging.getLogger(__name__)
@@ -36,22 +35,26 @@ def _payload_of(message: StoredMessage) -> dict:
 
 
 class ThreadMemory:
-    """Always write to Postgres first, then update Redis. Reading from Redis is optional; no cache entry may be the only copy of a message."""
+    """Conversations, their summaries, the facts of a scope, and the search over them.
+
+    There is no cache in front of the durable store. There was one, in Redis,
+    because reading the tail meant opening bucket documents; reading it now is
+    an index and a limit. A second copy that saves nothing measurable is a
+    second copy that can go stale.
+    """
 
     def __init__(
         self,
         durable: PostgresTranscripts,
-        hot: HotTail,
         policy: ContextPolicy | None = None,
         summarizer: Summarizer | None = None,
         extractor: FactExtractor | None = None,
         max_facts: int = 30,
         embedder: Embedder | None = None,
-        memories: RedisMemories | None = None,
+        memories: PostgresMemories | None = None,
         lock: Any | None = None,
     ) -> None:
         self._durable = durable
-        self._hot = hot
         self._policy = policy or ContextPolicy()
         self._summarizer = summarizer
         self._extractor = extractor
@@ -61,25 +64,11 @@ class ThreadMemory:
         self._lock = lock or InProcessLock()
 
     async def append(self, scope: str, thread_id: str, message: NewMessage) -> StoredMessage:
-        stored = await self._durable.append(scope, thread_id, message)
-        try:
-            await self._hot.append(scope, thread_id, stored)
-        except Exception:
-            logger.warning("Hot tail not updated for thread %s.", thread_id, exc_info=True)
-        return stored
+        return await self._durable.append(scope, thread_id, message)
 
     async def tail(self, scope: str, thread_id: str, limit: int) -> Transcript:
-        try:
-            cached = await self._hot.tail(scope, thread_id, limit)
-        except Exception:
-            logger.warning("Hot tail unreadable, falling back to Postgres.", exc_info=True)
-            cached = None
-
-        if cached is not None:
-            return Transcript(thread_id=thread_id, messages=cached, source="hot")
-
         messages = await self._durable.tail(scope, thread_id, limit)
-        return Transcript(thread_id=thread_id, messages=messages, source="durable")
+        return Transcript(thread_id=thread_id, messages=messages)
 
     async def save_snapshot(self, scope: str, thread_id: str, snapshot: Snapshot) -> int:
         """Store a snapshot and return the number of new turns. Messages are append-only, so repeated full snapshots add no duplicates."""
@@ -339,8 +328,8 @@ class ThreadMemory:
     async def reindex(self, scope: str, thread_id: str | None = None) -> int:
         """Rebuilds the semantic index from the transcripts, which are the source.
 
-        The vector index is reconstructible by design: losing Redis has to cost
-        a rebuild, not the memories. Without this command that design claim was
+        The index is reconstructible by design: losing it has to cost a
+        rebuild, not the memories. Without this command that design claim was
         true and unusable.
         """
         if self._embedder is None or self._memories is None:
@@ -371,17 +360,12 @@ class ThreadMemory:
         return len(threads)
 
     async def check(self) -> dict[str, str]:
-        """Report storage health. A Postgres failure prevents durable writes; a Redis failure degrades to durable reads."""
+        """Whether this service can serve: without the database it cannot."""
         await self._durable.ping()
-        try:
-            await self._hot.ping()
-        except Exception:
-            logger.warning("Redis unreachable: degraded service.", exc_info=True)
-            return {"status": "degraded", "durable": "ok", "hot": "down"}
-        return {"status": "ok", "durable": "ok", "hot": "ok"}
+        return {"status": "ok", "durable": "ok"}
 
     async def forget(self, scope: str, thread_id: str) -> int:
-        """Delete durable records first, then cache and index entries."""
+        """Delete the conversation first, then what points at it."""
         seqs = await self._durable.seqs_of(scope, thread_id) if self._memories else []
         removed = await self._durable.forget(scope, thread_id)
         if self._memories and seqs:
@@ -394,9 +378,4 @@ class ThreadMemory:
                     exc_info=True,
                 )
                 raise
-        try:
-            await self._hot.forget(scope, thread_id)
-        except Exception:
-            logger.error("Hot tail NOT cleared for thread %s.", thread_id, exc_info=True)
-            raise
         return removed

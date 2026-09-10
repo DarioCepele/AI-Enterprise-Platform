@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -29,7 +29,6 @@ class Transcript(BaseModel):
 
     thread_id: str
     messages: list[StoredMessage]
-    source: Literal["hot", "durable"]
 
 
 class SearchQuery(BaseModel):

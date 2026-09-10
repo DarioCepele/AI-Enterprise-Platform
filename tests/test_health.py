@@ -17,27 +17,13 @@ class Unreachable:
         raise ConnectionError("postgres unreachable")
 
 
-class BrokenHot:
-    async def ping(self) -> None:
-        raise ConnectionError("redis unreachable")
-
-    async def append(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis unreachable")
-
-    async def tail(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis unreachable")
-
-    async def forget(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis unreachable")
-
-
 async def client_for(memory: ThreadMemory) -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=create_app(memory=memory))
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
 
-async def test_liveness_answers_without_touching_a_database(transcripts, hot):
-    memory = ThreadMemory(Unreachable(), BrokenHot())
+async def test_liveness_answers_without_touching_a_database():
+    memory = ThreadMemory(Unreachable())
 
     async with await client_for(memory) as client:
         alive = await client.get("/health/live")
@@ -49,7 +35,7 @@ async def test_liveness_answers_without_touching_a_database(transcripts, hot):
 
 
 async def test_readiness_fails_when_the_durable_store_is_gone():
-    memory = ThreadMemory(Unreachable(), BrokenHot())
+    memory = ThreadMemory(Unreachable())
 
     async with await client_for(memory) as client:
         ready = await client.get("/health/ready")
@@ -59,29 +45,18 @@ async def test_readiness_fails_when_the_durable_store_is_gone():
     assert ready.status_code == 503
 
 
-async def test_readiness_passes_degraded_without_redis(transcripts):
-    memory = ThreadMemory(transcripts, BrokenHot())
-
-    async with await client_for(memory) as client:
-        ready = await client.get("/health/ready")
-
-    # Redis is a cache: without it the service is slower, not unable.
-    assert ready.status_code == 200
-    assert ready.json()["status"] == "degraded"
-
-
-async def test_readiness_is_green_with_both(transcripts, hot):
-    memory = ThreadMemory(transcripts, hot)
+async def test_readiness_is_green_with_the_database(transcripts):
+    memory = ThreadMemory(transcripts)
 
     async with await client_for(memory) as client:
         ready = await client.get("/health/ready")
 
     assert ready.status_code == 200
-    assert ready.json() == {"status": "ok", "durable": "ok", "hot": "ok"}
+    assert ready.json() == {"status": "ok", "durable": "ok"}
 
 
-async def test_the_old_health_path_still_answers(transcripts, hot):
-    memory = ThreadMemory(transcripts, hot)
+async def test_the_old_health_path_still_answers(transcripts):
+    memory = ThreadMemory(transcripts)
 
     async with await client_for(memory) as client:
         health = await client.get("/health")

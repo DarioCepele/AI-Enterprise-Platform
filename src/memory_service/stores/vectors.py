@@ -1,12 +1,23 @@
-"""Semantic memory search using Redis 8 vector sets. Redis already serves the hot cache, avoiding another datastore. The index is reconstructible from the transcripts in Postgres; losing it requires reindexing rather than losing conversations."""
+"""Semantic search over the memories, with pgvector.
+
+The index now sits next to the transcripts it is rebuilt from, in the same
+database: losing it is still a reindex and not a loss, but there is one system
+left to run instead of two. pgvector is the ordinary answer when vector search
+is **one feature among many** -- it holds to the low tens of millions of
+vectors per node, and this laboratory is five orders of magnitude below that.
+
+A dedicated engine becomes the right answer when somebody can name the
+bottleneck: past ~10M vectors, or when the search is the dominant workload
+rather than a feature of it.
+"""
 from __future__ import annotations
 
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
 
-from redis.asyncio import Redis
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -21,19 +32,11 @@ class Memory:
     similarity: float
 
 
-class RedisMemories:
-    """Use one vector set per scope; scope isolation is encoded in the key."""
+class PostgresMemories:
+    """One row per indexed turn, and cosine distance to find them again."""
 
-    def __init__(self, redis: Redis) -> None:
-        self._redis = redis
-
-    @staticmethod
-    def _key(scope: str) -> str:
-        return f"memories:{scope}"
-
-    @staticmethod
-    def _element(thread_id: str, seq: int) -> str:
-        return f"{thread_id}:{seq}"
+    def __init__(self, pool: AsyncConnectionPool) -> None:
+        self._pool = pool
 
     async def index(
         self,
@@ -43,70 +46,81 @@ class RedisMemories:
     ) -> int:
         """Index entries containing thread_id, seq, and text."""
         added = 0
-        for (thread_id, seq, text), vector in zip(entries, vectors, strict=True):
-            attributes = json.dumps(
-                {"thread_id": thread_id, "seq": seq, "text": text}, ensure_ascii=False
-            )
-            await self._redis.execute_command(
-                "VADD",
-                self._key(scope),
-                "VALUES",
-                len(vector),
-                *[repr(value) for value in vector],
-                self._element(thread_id, seq),
-                "SETATTR",
-                attributes,
-            )
-            added += 1
+        async with self._pool.connection() as connection:
+            for (thread_id, seq, text), vector in zip(entries, vectors, strict=True):
+                await connection.execute(
+                    """
+                    INSERT INTO memories (scope, thread_id, seq, text, embedding)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (scope, thread_id, seq) DO UPDATE
+                        SET text = EXCLUDED.text,
+                            embedding = EXCLUDED.embedding
+                    """,
+                    (scope, thread_id, seq, text, _vector(vector)),
+                )
+                added += 1
         return added
 
     async def search(self, scope: str, vector: list[float], limit: int) -> list[Memory]:
-        """Find memories closest to the query vector."""
-        raw: list[Any] = await self._redis.execute_command(
-            "VSIM",
-            self._key(scope),
-            "VALUES",
-            len(vector),
-            *[repr(value) for value in vector],
-            "WITHSCORES",
-            "COUNT",
-            limit,
-        )
-        if not raw:
-            return []
+        """The memories closest to the query, nearest first.
 
-        pairs = raw.items() if isinstance(raw, dict) else zip(raw[0::2], raw[1::2], strict=False)
-
-        found: list[Memory] = []
-        for element, score in pairs:
-            attributes = await self._redis.execute_command(
-                "VGETATTR", self._key(scope), element
+        `<=>` is cosine distance: zero is identical, so the similarity handed
+        back is one minus it -- the number the rest of the service already
+        speaks in.
+        """
+        async with self._pool.connection() as connection, connection.cursor(
+            row_factory=dict_row
+        ) as cursor:
+            await cursor.execute(
+                """
+                SELECT thread_id, seq, text, 1 - (embedding <=> %s::vector) AS similarity
+                FROM memories
+                WHERE scope = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+                """,
+                (_vector(vector), scope, _vector(vector), limit),
             )
-            if not attributes:
-                continue
-            data = json.loads(attributes)
-            found.append(
-                Memory(
-                    thread_id=str(data.get("thread_id", "")),
-                    seq=int(data.get("seq", 0)),
-                    text=str(data.get("text", "")),
-                    similarity=float(score),
-                )
+            rows = await cursor.fetchall()
+        return [
+            Memory(
+                thread_id=row["thread_id"],
+                seq=int(row["seq"]),
+                text=row["text"],
+                similarity=float(row["similarity"]),
             )
-        return found
+            for row in rows
+        ]
 
     async def forget_thread(self, scope: str, thread_id: str, seqs: list[int]) -> int:
-        """Remove a deleted thread from the index using positions read from durable storage; vector sets cannot be scanned by prefix."""
-        removed = 0
-        for seq in seqs:
-            gone = await self._redis.execute_command(
-                "VREM", self._key(scope), self._element(thread_id, seq)
+        """Take a deleted thread out of the index.
+
+        The positions still arrive from the caller, because that is what the
+        durable store knows; here a `DELETE ... WHERE thread_id` would do as
+        well, and the signature stays so the caller does not have to care which
+        index is underneath.
+        """
+        async with self._pool.connection() as connection:
+            removed = await connection.execute(
+                "DELETE FROM memories WHERE scope = %s AND thread_id = %s AND seq = ANY(%s)",
+                (scope, thread_id, list(seqs)),
             )
-            removed += int(gone or 0)
-        return removed
+            return removed.rowcount or 0
 
     async def forget_scope(self, scope: str) -> None:
-        await self._redis.delete(self._key(scope))
+        async with self._pool.connection() as connection:
+            await connection.execute("DELETE FROM memories WHERE scope = %s", (scope,))
 
     async def count(self, scope: str) -> int:
-        return int(await self._redis.execute_command("VCARD", self._key(scope)) or 0)
+        async with self._pool.connection() as connection:
+            counted = await (
+                await connection.execute(
+                    "SELECT count(*) FROM memories WHERE scope = %s", (scope,)
+                )
+            ).fetchone()
+        return int(counted[0]) if counted else 0
+
+
+def _vector(values: list[float]) -> str:
+    """pgvector reads a vector as its text form: `[0.1,0.2,...]`."""
+    return json.dumps([float(value) for value in values])

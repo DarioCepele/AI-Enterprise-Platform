@@ -10,7 +10,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: memoria
           POSTGRES_PASSWORD: memoria
@@ -20,14 +20,6 @@ jobs:
           --health-cmd "pg_isready -U memoria"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:8.2.3
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 3s
           --health-retries 5
 
     steps:
@@ -52,7 +44,6 @@ jobs:
           # La suite si deriva il proprio database e se lo crea: quello che
           # lascia dietro non tocca il database di un servizio.
           MEMORY_POSTGRES_DSN: postgresql://memoria:memoria@127.0.0.1:5432/memoria
-          MEMORY_REDIS_URI: redis://127.0.0.1:6379/0
 
   image:
     runs-on: ubuntu-latest

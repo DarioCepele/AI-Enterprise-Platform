@@ -13,16 +13,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MEMORY_", extra="ignore")
 
     postgres_dsn: str = "postgresql://127.0.0.1:5432/memoria"
-    redis_uri: str = "redis://127.0.0.1:6379/0"
 
     port: int = Field(default=8100, ge=1, le=65535)
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)
     retention_days: int = Field(default=0, ge=0)
     json_logs: bool = Field(default=False)
-
-    hot_tail_seconds: int = Field(default=1800, ge=1)
-    hot_tail_messages: int = Field(default=100, ge=1)
 
     summary_model: str = ""
     summary_base_url: str = "https://openrouter.ai/api/v1"
@@ -44,14 +40,11 @@ def get_settings() -> Settings:
 # See the note in the master agent's config: the README table is generated here.
 FIELD_NOTES = {
     "postgres_dsn": "Durable transcripts, summaries and facts. Required.",
-    "redis_uri": "Hot tail, semantic index, compaction lock. Required.",
     "port": "Where the service listens when started locally.",
     "pool_min_size": "Connections kept open.",
     "pool_max_size": "Connections at most.",
     "retention_days": "Days of inactivity after which a thread is forgotten. 0 = never.",
     "json_logs": "Structured logs for a collector instead of the readable line.",
-    "hot_tail_seconds": "How long the cached tail of a conversation survives.",
-    "hot_tail_messages": "How many messages that tail keeps.",
     "max_context_messages": "Window handed back to the agent, in messages.",
     "drop_reasoning": "Whether past reasoning leaves the rebuilt context.",
     "keep_tool_results": "How many recent tool results keep their content.",

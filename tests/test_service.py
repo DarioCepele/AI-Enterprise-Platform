@@ -14,24 +14,8 @@ pytestmark = [needs_backends, pytest.mark.integration]
 
 
 @pytest.fixture
-def memory(transcripts, hot) -> ThreadMemory:
-    return ThreadMemory(transcripts, hot)
-
-
-class BrokenHot:
-    """Simulate unavailable Redis; the service must degrade gracefully."""
-
-    async def append(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis down")
-
-    async def tail(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis down")
-
-    async def forget(self, *args, **kwargs) -> None:
-        raise ConnectionError("redis down")
-
-    async def ping(self) -> None:
-        raise ConnectionError("redis down")
+def memory(transcripts) -> ThreadMemory:
+    return ThreadMemory(transcripts)
 
 
 async def client_for(memory: ThreadMemory) -> httpx.AsyncClient:
@@ -40,34 +24,19 @@ async def client_for(memory: ThreadMemory) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
 
-async def test_the_tail_comes_from_the_cache_once_it_is_warm(memory, scope):
+async def test_the_tail_is_the_end_of_the_conversation(memory, scope):
+    """No cache in front: the tail is an index and a limit, on the one copy.
+
+    There was a cache, and it was the right call when reading the tail meant
+    opening bucket documents. Now it would be a second copy that can go stale
+    to save a millisecond.
+    """
     for i in range(4):
         await memory.append(scope, "t1", NewMessage(role="user", content=str(i)))
 
     result = await memory.tail(scope, "t1", limit=3)
 
-    assert result.source == "hot"
     assert [m.content for m in result.messages] == ["1", "2", "3"]
-
-
-async def test_without_redis_it_still_answers_from_the_durable_store(transcripts, scope):
-    degraded = ThreadMemory(transcripts, BrokenHot())
-
-    await degraded.append(scope, "t1", NewMessage(role="user", content="written anyway"))
-    result = await degraded.tail(scope, "t1", limit=10)
-
-    assert result.source == "durable"
-    assert [m.content for m in result.messages] == ["written anyway"]
-
-
-async def test_the_cache_never_holds_the_only_copy(memory, transcripts, hot, scope):
-    await memory.append(scope, "t1", NewMessage(role="user", content="unico"))
-    await hot.forget(scope, "t1")
-
-    result = await memory.tail(scope, "t1", limit=10)
-
-    assert result.source == "durable"
-    assert [m.content for m in result.messages] == ["unico"]
 
 
 async def test_the_api_writes_and_reads_a_thread(memory, scope):
@@ -123,15 +92,7 @@ async def test_health_says_ok_when_both_memories_answer(memory):
     async with await client_for(memory) as client:
         response = await client.get("/health")
 
-    assert response.json() == {"status": "ok", "durable": "ok", "hot": "ok"}
-
-
-async def test_health_says_degraded_when_redis_is_down(transcripts):
-    async with await client_for(ThreadMemory(transcripts, BrokenHot())) as client:
-        response = await client.get("/health")
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "degraded"
+    assert response.json() == {"status": "ok", "durable": "ok"}
 
 
 async def test_a_snapshot_becomes_turns(memory, scope):
@@ -306,10 +267,11 @@ def summarizer() -> RecordingSummarizer:
 
 
 @pytest.fixture
-def compacting(transcripts, hot, summarizer) -> ThreadMemory:
+def compacting(transcripts, summarizer) -> ThreadMemory:
     from memory_service.curation import ContextPolicy
 
-    return ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer)
+    return ThreadMemory(
+        transcripts, ContextPolicy(max_messages=6), summarizer)
 
 
 async def test_a_short_thread_is_not_summarized(compacting, summarizer, scope):
@@ -368,12 +330,13 @@ async def test_the_summary_returned_does_not_become_a_turn(compacting, scope):
     assert all(m.get("role") != "system" for m in integrale.messages)
 
 
-async def test_a_broken_summarizer_does_not_break_the_conversation(transcripts, hot, scope, caplog):
+async def test_a_broken_summarizer_does_not_break_the_conversation(transcripts, scope, caplog):
     import logging
 
     from memory_service.curation import ContextPolicy
 
-    memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), BrokenSummarizer())
+    memory = ThreadMemory(
+        transcripts, ContextPolicy(max_messages=6), BrokenSummarizer())
 
     with caplog.at_level(logging.ERROR):
         await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
@@ -384,10 +347,11 @@ async def test_a_broken_summarizer_does_not_break_the_conversation(transcripts, 
     assert "Summary NOT produced" in caplog.text
 
 
-async def test_without_a_summarizer_nothing_is_compacted(transcripts, hot, scope):
+async def test_without_a_summarizer_nothing_is_compacted(transcripts, scope):
     from memory_service.curation import ContextPolicy
 
-    memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6))
+    memory = ThreadMemory(
+        transcripts, ContextPolicy(max_messages=6))
 
     await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await memory.compact_if_needed(scope, "t1")
@@ -421,13 +385,14 @@ class SlowSummarizer:
         return "late summary"
 
 
-async def test_saving_does_not_wait_for_the_summary(transcripts, hot, scope):
+async def test_saving_does_not_wait_for_the_summary(transcripts, scope):
     import asyncio
 
     from memory_service.curation import ContextPolicy
 
     slow = SlowSummarizer()
-    memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), slow)
+    memory = ThreadMemory(
+        transcripts, ContextPolicy(max_messages=6), slow)
 
     async with asyncio.timeout(3):
         await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
@@ -435,10 +400,11 @@ async def test_saving_does_not_wait_for_the_summary(transcripts, hot, scope):
     assert slow.called is False
 
 
-async def test_the_api_compacts_after_answering(transcripts, hot, summarizer, scope):
+async def test_the_api_compacts_after_answering(transcripts, summarizer, scope):
     from memory_service.curation import ContextPolicy
 
-    memory = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer)
+    memory = ThreadMemory(
+        transcripts, ContextPolicy(max_messages=6), summarizer)
 
     async with await client_for(memory) as client:
         headers = {"X-Memory-Scope": scope}
@@ -469,10 +435,11 @@ def extractor() -> RecordingExtractor:
 
 
 @pytest.fixture
-def learning(transcripts, hot, summarizer, extractor) -> ThreadMemory:
+def learning(transcripts, summarizer, extractor) -> ThreadMemory:
     from memory_service.curation import ContextPolicy
 
-    return ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer, extractor)
+    return ThreadMemory(
+        transcripts, ContextPolicy(max_messages=6), summarizer, extractor)
 
 
 async def test_facts_are_learned_from_the_turns_that_leave(learning, extractor, scope):
@@ -497,13 +464,14 @@ async def test_a_fact_learned_in_one_thread_shows_up_in_another(learning, scope)
     assert "contact: Marta" in other.messages[0]["content"]
 
 
-async def test_facts_do_not_cross_scopes(learning, transcripts, hot, summarizer, extractor, scope):
+async def test_facts_do_not_cross_scopes(learning, transcripts, summarizer, extractor, scope):
     from memory_service.curation import ContextPolicy
 
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t1")
 
-    altrui = ThreadMemory(transcripts, hot, ContextPolicy(max_messages=6), summarizer, extractor)
+    altrui = ThreadMemory(
+        transcripts, ContextPolicy(max_messages=6), summarizer, extractor)
     await altrui.save_snapshot(
         f"{scope}-other", "t1", Snapshot(messages=[{"id": "y", "role": "user", "content": "ciao"}])
     )
@@ -543,12 +511,12 @@ async def test_deleting_the_scope_takes_the_facts_too(learning, transcripts, sco
 
 
 async def test_unreadable_facts_do_not_break_the_compaction(
-    transcripts, hot, summarizer, scope, caplog
+    transcripts, summarizer, scope, caplog
 ):
     from memory_service.curation import ContextPolicy
 
     memory = ThreadMemory(
-        transcripts, hot, ContextPolicy(max_messages=6), summarizer, RecordingExtractor("not JSON")
+        transcripts, ContextPolicy(max_messages=6), summarizer, RecordingExtractor("not JSON")
     )
     await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await memory.compact_if_needed(scope, "t1")
@@ -607,14 +575,13 @@ class WordEmbedder:
 
 
 @pytest.fixture
-def searchable(transcripts, hot, summarizer, extractor, redis_client, scope):
+def searchable(transcripts, pool, summarizer, extractor, scope):
     from memory_service.curation import ContextPolicy
-    from memory_service.stores.vectors import RedisMemories
+    from memory_service.stores.vectors import PostgresMemories
 
-    memories = RedisMemories(redis_client)
+    memories = PostgresMemories(pool)
     yield ThreadMemory(
         transcripts,
-        hot,
         ContextPolicy(max_messages=6),
         summarizer,
         extractor,
@@ -656,17 +623,17 @@ async def test_a_memory_says_which_thread_it_came_from(searchable, scope):
     assert found_one.seq > 0
 
 
-async def test_nothing_is_indexed_twice(searchable, transcripts, redis_client, scope):
-    from memory_service.stores.vectors import RedisMemories
+async def test_nothing_is_indexed_twice(searchable, transcripts, pool, scope):
+    from memory_service.stores.vectors import PostgresMemories
 
     messages = thread_about("go", "python", "carbonara", "go", "go", "go")
     await searchable.save_snapshot(scope, "t1", Snapshot(messages=messages))
     await searchable.compact_if_needed(scope, "t1")
-    prima = await RedisMemories(redis_client).count(scope)
+    prima = await PostgresMemories(pool).count(scope)
 
     await searchable.compact_if_needed(scope, "t1")
 
-    assert await RedisMemories(redis_client).count(scope) == prima
+    assert await PostgresMemories(pool).count(scope) == prima
 
 
 async def test_forgetting_a_thread_makes_its_memories_unsearchable(searchable, scope):

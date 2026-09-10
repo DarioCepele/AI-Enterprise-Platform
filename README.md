@@ -1,32 +1,32 @@
 # Servizio di memoria conversazionale
 
 Possiede la memoria delle conversazioni del laboratorio AG-UI: i transcript per
-thread, la coda calda per le letture frequenti e — piu' avanti — riassunti e
-fatti duraturi. Il master agent non parla con i database: parla con questo.
+thread, i riassunti, i fatti duraturi e i ricordi cercabili. Il master agent
+non parla con il database: parla con questo.
 
 ```powershell
 uv sync
 uv run python -m memory_service      # http://127.0.0.1:8100
 ```
 
-## Due memorie, requisiti opposti
+## Un database solo, e cosa ci sta dentro
 
-| | Dove | Cosa tiene | Perche' li' |
-| --- | --- | --- | --- |
-| Durevole | Postgres | trascritti completi, riassunti, fatti | deve sopravvivere a tutto |
-| Breve termine | Redis | ultimi N messaggi del thread | latenza bassa e **scadenza automatica** |
+| Cosa | Dove | Perche' li' |
+| --- | --- | --- |
+| trascritti, riassunti, fatti | tabelle di Postgres | devono sopravvivere a tutto |
+| ricordi cercabili | `pgvector`, stesso database | l'indice sta accanto ai dati da cui si ricostruisce |
+| lock di compattazione | `pg_try_advisory_lock` | muore con la connessione, senza lease da far scadere |
 
-**Regola che tiene in piedi il disegno: in Redis non vive mai l'unica copia di
-un dato.** La coda calda si ricostruisce dal durevole alla prima lettura dopo
-una scadenza, e il container Redis non ha volume apposta. Se perdere Redis
-perdesse dati, sarebbe il posto sbagliato dove tenerli. Le scritture vanno
-prima sul durevole e poi in cache: l'ordine opposto lascerebbe in cache un
-messaggio che non esiste altrove — un difetto che si cancella da solo alla
-scadenza, quindi impossibile da diagnosticare dopo.
+**C'era una coda calda in Redis**, gli ultimi N messaggi del thread con una
+scadenza automatica, e la regola era che in cache non vivesse mai l'unica
+copia di un dato. Reggeva, ma pagava due copie e un ordine di scrittura da
+rispettare per una lettura che una query indicizzata su `(scope, thread_id,
+seq)` fa in poche centinaia di microsecondi. Il datastore in meno vale piu'
+della cache.
 
-`GET /health` distingue i due casi: Postgres giu' e' **guasto** (503), Redis
-giu' e' **degradato** (200, `status: degraded`) perche' si continua a
-rispondere leggendo dal durevole.
+`GET /health` risponde su una cosa sola: Postgres giu' e' **guasto** (503).
+Non c'e' piu' un modo parziale di funzionare, il che e' una semplificazione,
+non una perdita.
 
 ## Una riga per turno, e il bucket che non c'e' piu'
 
@@ -112,7 +112,7 @@ chiamate ai tool, cioè restituirebbe al modello una conversazione che non è ma
 avvenuta. `role` e `content` restano accanto, per i riassunti che verranno.
 
 Lo stato del thread che non sono messaggi — `state`, `interrupt`,
-`session_state` — sta nel documento del thread, non nei bucket: è un valore
+`session_state` — sta nella riga del thread, non nei turni: è un valore
 solo, sempre l'ultimo, e riscriverlo non deve toccare la conversazione.
 
 ## Conservare tutto, restituire il necessario
@@ -349,11 +349,12 @@ valore che arriva dall'utente finale.
 | `GET` | `/health` | stato delle due memorie |
 | `POST` | `/threads/{id}/messages` | appende un turno, restituisce `seq` e `ts` |
 | `POST` | `/search` | cerca nei ricordi dello scope per significato |
-| `GET` | `/threads/{id}/messages?limit=N` | ultimi N turni, in ordine, con `source` (`hot`/`durable`) |
-| `DELETE` | `/threads/{id}` | dimentica il thread, durevole e cache |
+| `GET` | `/threads/{id}/messages?limit=N` | ultimi N turni, in ordine |
+| `DELETE` | `/threads/{id}` | dimentica il thread: turni, riassunti, fatti, ricordi |
 
-`source` non e' decorazione: e' l'unico modo per accorgersi che la cache non
-viene mai usata, o che copre sempre tutto.
+Le cancellazioni sono a cascata: una chiave esterna con `ON DELETE CASCADE`
+porta via turni, riassunti, fatti e ricordi insieme al thread, invece di
+quattro cancellazioni che possono riuscire a meta'.
 
 ## Configurazione
 
@@ -361,23 +362,25 @@ Variabili con prefisso `MEMORY_`, dal `.env` locale non versionato:
 
 | Variabile | Uso |
 | --- | --- |
-| `MEMORY_MONGO_URI` | URI completo, credenziali comprese |
-| `MEMORY_MONGO_DATABASE` | database dei transcript |
-| `MEMORY_REDIS_URI` | URI di Redis |
-| `MEMORY_BUCKET_SIZE` | messaggi per bucket (default 50) |
-| `MEMORY_HOT_TAIL_SECONDS` | scadenza della coda calda (default 1800) |
-| `MEMORY_HOT_TAIL_MESSAGES` | quanti messaggi tiene la coda calda (default 100) |
+| `MEMORY_POSTGRES_DSN` | DSN completo, credenziali comprese: trascritti, riassunti, fatti, ricordi |
+| `MEMORY_PORT` | porta di ascolto in locale (default 8100) |
+| `MEMORY_POOL_MIN_SIZE` | connessioni tenute aperte (default 1) |
+| `MEMORY_POOL_MAX_SIZE` | connessioni al massimo (default 10) |
+| `MEMORY_RETENTION_DAYS` | giorni di inattivita' dopo cui un thread si dimentica; 0 = mai |
 | `MEMORY_DROP_REASONING` | togliere il ragionamento passato dal contesto (default true) |
 | `MEMORY_KEEP_TOOL_RESULTS` | risultati di tool lasciati interi (default 4) |
 | `MEMORY_MAX_CONTEXT_MESSAGES` | tetto di messaggi restituiti (default 60) |
+| `MEMORY_MAX_FACTS` | fatti durevoli iniettati nel contesto (default 30) |
 | `MEMORY_SUMMARY_MODEL` | modello che riassume; vuoto = nessuna compattazione |
 | `MEMORY_SUMMARY_BASE_URL` | endpoint Chat Completions del riassuntore |
 | `MEMORY_SUMMARY_API_KEY` | credenziale del riassuntore |
+| `MEMORY_EMBEDDING_MODEL` | modello degli embedding; vuoto = nessuna ricerca semantica |
+| `MEMORY_JSON_LOGS` | log strutturati invece della riga leggibile |
 
-I due database si alzano dal compose di `demo-infra`:
+Il database si alza dal compose di `demo-infra`:
 
 ```bash
-cd ../demo-infra && docker compose up -d postgres redis
+cd ../demo-infra && docker compose up -d postgres
 ```
 
 ## Test
@@ -386,9 +389,9 @@ cd ../demo-infra && docker compose up -d postgres redis
 uv run pytest
 ```
 
-Girano contro Postgres e Redis **veri**, non simulati: l'atomicita' senza
-transazioni si regge su garanzie del server — atomicita' del singolo documento
-e indice unico — che un finto non riproduce, e che sono esattamente la parte da
+Girano contro un Postgres **vero**, non simulato: l'atomicita' senza
+transazioni si regge su garanzie del server — `INSERT ... RETURNING` in una
+sola istruzione, indice unico, advisory lock — che un finto non riproduce, e che sono esattamente la parte da
 verificare. Ogni test usa uno scope irripetibile, quindi non si disturbano fra
 loro. Senza `.env` configurato i test si saltano invece di fallire.
 

@@ -78,8 +78,28 @@ class Migration:
     statements: tuple[str, ...]
 
 
+MEMORIES = """
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS memories (
+    scope       text    NOT NULL,
+    thread_id   text    NOT NULL,
+    seq         bigint  NOT NULL,
+    text        text    NOT NULL,
+    embedding   vector  NOT NULL,
+    PRIMARY KEY (scope, thread_id, seq)
+);
+"""
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "threads, turns, summaries and facts", (SCHEMA,)),
+    # No index on the embeddings: exact search is right below the tens of
+    # thousands of vectors, and an HNSW index built too early costs memory and
+    # accuracy for a scan that takes a millisecond. The moment a scope grows,
+    # `CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)` is one
+    # migration away.
+    Migration(2, "the index of the memories", (MEMORIES,)),
 )
 
 LATEST_VERSION = max(migration.version for migration in MIGRATIONS)

@@ -1,4 +1,4 @@
-"""Shared fixtures, against the real Postgres and Redis of demo-infra.
+"""Shared fixtures, against the real Postgres of demo-infra.
 
 A conversation is a row that has to outlive the process that wrote it, and a
 fake in memory would prove nothing about that -- least of all that two writers
@@ -14,10 +14,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from dotenv import load_dotenv
-from redis.asyncio import Redis
 
 from memory_service.migrations import run_migrations
-from memory_service.stores.hot import HotTail
 from memory_service.stores.postgres import PostgresTranscripts, build_pool
 
 load_dotenv()
@@ -47,11 +45,9 @@ def _test_database(dsn: str | None) -> str | None:
 
 
 POSTGRES_DSN = _test_database(os.getenv("MEMORY_POSTGRES_DSN"))
-REDIS_URI = os.getenv("MEMORY_REDIS_URI")
 
 needs_backends = pytest.mark.skipif(
-    not (POSTGRES_DSN and REDIS_URI),
-    reason="MEMORY_POSTGRES_DSN and MEMORY_REDIS_URI are required in .env",
+    not POSTGRES_DSN, reason="MEMORY_POSTGRES_DSN is required in .env"
 )
 
 
@@ -97,17 +93,3 @@ async def pool(database):
 @pytest.fixture
 async def transcripts(pool) -> PostgresTranscripts:
     return PostgresTranscripts(pool)
-
-
-@pytest.fixture
-async def redis_client() -> Redis:
-    client = Redis.from_url(REDIS_URI or "redis://127.0.0.1:6379/0", decode_responses=True)
-    try:
-        yield client
-    finally:
-        await client.aclose()
-
-
-@pytest.fixture
-async def hot(redis_client: Redis) -> HotTail:
-    return HotTail(redis_client, ttl_seconds=60, max_messages=10)

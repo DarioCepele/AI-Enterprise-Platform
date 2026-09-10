@@ -1,10 +1,8 @@
-"""Memory index integration tests against real Redis 8 vector sets."""
+"""L'indice delle memorie, contro pgvector vero."""
 from __future__ import annotations
 
 import pytest
-from redis.asyncio import Redis
-
-from memory_service.stores.vectors import RedisMemories
+from memory_service.stores.vectors import PostgresMemories
 
 from conftest import needs_backends
 
@@ -12,8 +10,8 @@ pytestmark = [needs_backends, pytest.mark.integration]
 
 
 @pytest.fixture
-async def memories(redis_client: Redis, scope: str) -> RedisMemories:
-    store = RedisMemories(redis_client)
+async def memories(pool, scope: str) -> PostgresMemories:
+    store = PostgresMemories(pool)
     yield store
     await store.forget_scope(scope)
 
@@ -44,8 +42,8 @@ async def test_an_empty_index_finds_nothing_instead_of_failing(memories, scope):
     assert await memories.search(scope, [1.0, 0.0, 0.0], limit=5) == []
 
 
-async def test_scopes_do_not_see_each_other(memories, redis_client, scope):
-    altrui = RedisMemories(redis_client)
+async def test_scopes_do_not_see_each_other(memories, pool, scope):
+    altrui = PostgresMemories(pool)
     await memories.index(scope, [("t1", 1, "riservato")], [[1.0, 0.0, 0.0]])
     try:
         assert await altrui.search(f"{scope}-other", [1.0, 0.0, 0.0], limit=5) == []

@@ -17,8 +17,8 @@ pytestmark = [needs_backends, pytest.mark.integration]
 
 
 @pytest.fixture
-def memory(transcripts, hot) -> ThreadMemory:
-    return ThreadMemory(transcripts, hot)
+def memory(transcripts) -> ThreadMemory:
+    return ThreadMemory(transcripts)
 
 
 async def age(pool, scope: str, thread_id: str, days: int) -> None:
@@ -94,29 +94,29 @@ def thread_about(*topics: str) -> list[dict]:
 
 
 @pytest.fixture
-def searchable(transcripts, hot, redis_client) -> ThreadMemory:
-    from memory_service.stores.vectors import RedisMemories
+def searchable(transcripts, pool) -> ThreadMemory:
+    from memory_service.stores.vectors import PostgresMemories
 
     return ThreadMemory(
         transcripts,
-        hot,
         ContextPolicy(max_messages=4),
         embedder=Embedder(),
-        memories=RedisMemories(redis_client),
+        memories=PostgresMemories(pool),
     )
 
 
-async def test_the_index_is_rebuilt_from_the_transcripts(searchable, redis_client, scope):
+async def test_the_index_is_rebuilt_from_the_transcripts(searchable, pool, scope):
     await searchable.save_snapshot(
         scope, "t1", Snapshot(messages=thread_about("go", "python", "go", "go"))
     )
     await searchable.compact_if_needed(scope, "t1")
-    await redis_client.delete(f"memories:{scope}")
+    async with pool.connection() as connection:
+        await connection.execute("DELETE FROM memories WHERE scope = %s", (scope,))
 
     rebuilt = await searchable.reindex(scope)
 
-    # Losing Redis costs a rebuild, not the memories: the transcripts are the
-    # source, and this is the command that says so out loud.
+    # Losing the index costs a rebuild, not the memories: the transcripts are
+    # the source, and this is the command that says so out loud.
     assert rebuilt > 0
     assert await searchable.search_memories(scope, "python", limit=3)
 

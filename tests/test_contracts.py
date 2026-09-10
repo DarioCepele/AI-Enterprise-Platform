@@ -17,8 +17,8 @@ HEADERS_OF = staticmethod(lambda scope: {"X-Memory-Scope": scope})
 
 
 @pytest.fixture
-def memory(transcripts, hot) -> ThreadMemory:
-    return ThreadMemory(transcripts, hot)
+def memory(transcripts) -> ThreadMemory:
+    return ThreadMemory(transcripts)
 
 
 async def client_for(memory: ThreadMemory) -> httpx.AsyncClient:

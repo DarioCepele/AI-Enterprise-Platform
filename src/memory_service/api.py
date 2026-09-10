@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
-from redis.asyncio import Redis
 
 from .config import Settings, get_settings
 from .curation import ContextPolicy
@@ -14,11 +13,10 @@ from .migrations import run_migrations
 from .observability import configure_logging, configure_tracing
 from .models import NewMessage, ReindexRequest, RetentionRequest, SearchQuery, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
-from .stores.hot import HotTail
-from .stores.locks import RedisLock
+from .stores.locks import PostgresLock
 from .embedder import OpenAICompatibleEmbedder
 from .stores.postgres import PostgresTranscripts, build_pool
-from .stores.vectors import RedisMemories
+from .stores.vectors import PostgresMemories
 from .summarizer import OpenAICompatibleSummarizer
 
 logger = logging.getLogger(__name__)
@@ -40,8 +38,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
 
         pool = build_pool(config.postgres_dsn, config.pool_min_size, config.pool_max_size)
         await pool.open(wait=True)
-        redis = Redis.from_url(config.redis_uri, decode_responses=True)
-        memories = RedisMemories(redis) if config.embedding_model else None
+        memories = PostgresMemories(pool) if config.embedding_model else None
         embedder = (
             OpenAICompatibleEmbedder(
                 config.summary_base_url, config.summary_api_key, config.embedding_model
@@ -73,7 +70,6 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             )
         state["memory"] = ThreadMemory(
             durable,
-            HotTail(redis, config.hot_tail_seconds, config.hot_tail_messages),
             ContextPolicy(
                 drop_reasoning=config.drop_reasoning,
                 keep_tool_results=config.keep_tool_results,
@@ -84,13 +80,12 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             config.max_facts,
             embedder,
             memories,
-            RedisLock(redis),
+            PostgresLock(pool),
         )
         try:
             yield
         finally:
             await pool.close()
-            await redis.aclose()
 
     app = FastAPI(title="Memoria conversazionale", lifespan=lifespan)
     configure_tracing(SERVICE_NAME, app)
@@ -127,7 +122,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     async def ready(
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, str]:
-        """Whether this process can serve: Postgres is required, Redis is not."""
+        """Whether this process can serve: without the database, it cannot."""
         try:
             return await memory_instance.check()
         except Exception as error:
