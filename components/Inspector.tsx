@@ -3,6 +3,7 @@
 import { memo, useState } from "react";
 import { groupEvents, type EventGroup } from "@/lib/agui/groups";
 import type { AGUIEvent } from "@/lib/agui/types";
+import { InstancePanel } from "./InstancePanel";
 import { LogPanel } from "./LogPanel";
 
 const FILTERS = {
@@ -58,7 +59,7 @@ const EventRow = memo(function EventRow({ group }: { group: EventGroup }) {
 });
 
 export function Inspector({ events, running }: { events: AGUIEvent[]; running: boolean }) {
-  const [tab, setTab] = useState<"events" | "log">("events");
+  const [tab, setTab] = useState<"events" | "log" | "instances">("events");
   const [filter, setFilter] = useState<keyof typeof FILTERS>("all");
   const groups = groupEvents(events.filter(FILTERS[filter].match));
 
@@ -80,6 +81,14 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
           className="font-mono text-[11px] uppercase tracking-wide"
         >
           Log
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("instances")}
+          aria-pressed={tab === "instances"}
+          className="font-mono text-[11px] uppercase tracking-wide"
+        >
+          Istanze
         </button>
       </nav>
 
@@ -110,6 +119,14 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
       </div>
       <div hidden={tab !== "log"} className={tab === "log" ? "flex min-h-0 flex-1 flex-col" : undefined}>
         <LogPanel running={running} />
+      </div>
+      <div
+        hidden={tab !== "instances"}
+        className={tab === "instances" ? "flex min-h-0 flex-1 flex-col" : undefined}
+      >
+        {/* Mounted only when looked at: an instance moves on its own, and a
+            panel nobody is watching has no reason to keep asking. */}
+        {tab === "instances" && <InstancePanel running={running} />}
       </div>
     </section>
   );

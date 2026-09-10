@@ -35,6 +35,25 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
+## Il tab Istanze
+
+Il terzo tab dell'ispettore guarda il **servizio dei processi**, non l'agente:
+un'istanza va avanti da sola -- un agente risponde, qualcuno approva -- anche
+quando in questa pagina non sta girando niente. Per questo il pannello continua
+a chiedere anche a conversazione ferma, piu' piano (5 s invece di 1,5 s), e
+**solo mentre lo si guarda**: un tab chiuso non ha ragione di interrogare
+nessuno.
+
+Cosa mostra, in ordine di quello che serve sapere: quante istanze aspettano
+**una persona**, poi la lista con lo stato in parole, poi -- aprendo una riga --
+i passi con chi li ha in carico. Dove un passo si e' fermato a chiedere, il
+pannello e' anche il posto dove si risponde o si decide: e' una persona che
+deve farlo, e l'agente ha i tool per avviare e leggere un processo ma non per
+rispondere al posto suo.
+
+Se `PROCESS_URL` e' vuoto il tab lo dice, invece di mostrare un errore: un
+laboratorio senza servizio dei processi e' una configurazione, non un guasto.
+
 ## Contratti fra i repo
 
 I campioni di ciò che questo repo mette sul filo — o legge da un altro — stanno
