@@ -9,11 +9,18 @@ dependencies = [
     "pydantic>=2.12",
     "pydantic-settings>=2.12",
     "python-dotenv>=1.1",
+    "faster-whisper>=1.2.1",
+    "silero-vad>=6.2.1",
+    "pipecat-ai>=1.8.1",
+    "httpx>=0.28",
+    "kokoro>=0.9.4",
+    "misaki[en]>=0.9.4",
+    "soundfile>=0.13",
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
     "pytest>=8.4",
     "pytest-asyncio>=1.3",
 ]
