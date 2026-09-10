@@ -35,7 +35,6 @@ RUNNING = "running"
 WAITING = "waiting"
 COMPLETED = "completed"
 FAILED = "failed"
-SKIPPED = "skipped"
 
 
 _ENGINE: "Engine | None" = None
