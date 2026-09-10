@@ -434,7 +434,6 @@ dependencies = [
     { name = "opentelemetry-instrumentation-httpx" },
     { name = "opentelemetry-sdk" },
     { name = "python-dotenv" },
-    { name = "sse-starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -456,7 +455,6 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.65b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.44.0" },
     { name = "python-dotenv", specifier = ">=1.1" },
-    { name = "sse-starlette" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.40" },
 ]
 
