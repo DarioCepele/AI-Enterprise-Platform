@@ -12,11 +12,12 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MEMORY_", extra="ignore")
 
-    mongo_uri: str = "mongodb://127.0.0.1:27017"
-    mongo_database: str = "demo_memory"
+    postgres_dsn: str = "postgresql://127.0.0.1:5432/memoria"
     redis_uri: str = "redis://127.0.0.1:6379/0"
 
-    bucket_size: int = Field(default=50, ge=1, le=500)
+    port: int = Field(default=8100, ge=1, le=65535)
+    pool_min_size: int = Field(default=1, ge=0)
+    pool_max_size: int = Field(default=10, ge=1)
     retention_days: int = Field(default=0, ge=0)
     json_logs: bool = Field(default=False)
 
@@ -42,10 +43,11 @@ def get_settings() -> Settings:
 
 # See the note in the master agent's config: the README table is generated here.
 FIELD_NOTES = {
-    "mongo_uri": "Durable transcripts. Required.",
-    "mongo_database": "Database name inside that Mongo.",
+    "postgres_dsn": "Durable transcripts, summaries and facts. Required.",
     "redis_uri": "Hot tail, semantic index, compaction lock. Required.",
-    "bucket_size": "Messages per bucket document.",
+    "port": "Where the service listens when started locally.",
+    "pool_min_size": "Connections kept open.",
+    "pool_max_size": "Connections at most.",
     "retention_days": "Days of inactivity after which a thread is forgotten. 0 = never.",
     "json_logs": "Structured logs for a collector instead of the readable line.",
     "hot_tail_seconds": "How long the cached tail of a conversation survives.",

@@ -14,7 +14,7 @@ pytestmark = [needs_backends, pytest.mark.integration]
 
 class Unreachable:
     async def ping(self) -> None:
-        raise ConnectionError("mongo unreachable")
+        raise ConnectionError("postgres unreachable")
 
 
 class BrokenHot:
@@ -54,7 +54,7 @@ async def test_readiness_fails_when_the_durable_store_is_gone():
     async with await client_for(memory) as client:
         ready = await client.get("/health/ready")
 
-    # Without Mongo there is nowhere to write: taking traffic would mean
+    # Without Postgres there is nowhere to write: taking traffic would mean
     # losing conversations quietly.
     assert ready.status_code == 503
 

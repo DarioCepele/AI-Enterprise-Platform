@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
-from pymongo import AsyncMongoClient
 from redis.asyncio import Redis
 
 from .config import Settings, get_settings
@@ -18,7 +17,7 @@ from .service import ThreadMemory
 from .stores.hot import HotTail
 from .stores.locks import RedisLock
 from .embedder import OpenAICompatibleEmbedder
-from .stores.mongo import MongoTranscripts, build_client
+from .stores.postgres import PostgresTranscripts, build_pool
 from .stores.vectors import RedisMemories
 from .summarizer import OpenAICompatibleSummarizer
 
@@ -39,7 +38,8 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             yield
             return
 
-        client: AsyncMongoClient = build_client(config.mongo_uri)
+        pool = build_pool(config.postgres_dsn, config.pool_min_size, config.pool_max_size)
+        await pool.open(wait=True)
         redis = Redis.from_url(config.redis_uri, decode_responses=True)
         memories = RedisMemories(redis) if config.embedding_model else None
         embedder = (
@@ -54,9 +54,9 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 "No embedding model (MEMORY_EMBEDDING_MODEL): semantic search over "
                 "memories will not be available."
             )
-        durable = MongoTranscripts(client, config.mongo_database, config.bucket_size)
-        await run_migrations(client[config.mongo_database])
-        await durable.ensure_indexes()
+        durable = PostgresTranscripts(pool)
+        async with pool.connection() as connection:
+            await run_migrations(connection)
         summarizer = None
         if config.summary_model:
             summarizer = OpenAICompatibleSummarizer(
@@ -89,7 +89,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         try:
             yield
         finally:
-            await client.close()
+            await pool.close()
             await redis.aclose()
 
     app = FastAPI(title="Memoria conversazionale", lifespan=lifespan)
@@ -127,7 +127,7 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
     async def ready(
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, str]:
-        """Whether this process can serve: Mongo is required, Redis is not."""
+        """Whether this process can serve: Postgres is required, Redis is not."""
         try:
             return await memory_instance.check()
         except Exception as error:

@@ -1,4 +1,4 @@
-"""Short-term conversation tails in Redis, optimized for low latency and automatic expiry. Redis never holds the only copy: Mongo remains readable when the cache expires, is cleared, or is unavailable. The cache container therefore needs no volume."""
+"""Short-term conversation tails in Redis, optimized for low latency and automatic expiry. Redis never holds the only copy: Postgres remains readable when the cache expires, is cleared, or is unavailable. The cache container therefore needs no volume."""
 from __future__ import annotations
 
 import json
@@ -33,7 +33,7 @@ class HotTail:
         await pipeline.execute()
 
     async def tail(self, scope: str, thread_id: str, limit: int) -> list[StoredMessage] | None:
-        """Return the cached tail or None. An incomplete cache also returns None so callers can fetch the complete result from Mongo."""
+        """Return the cached tail or None. An incomplete cache also returns None so callers can fetch the complete result from Postgres."""
         key = self._key(scope, thread_id)
         cached = await self._redis.lrange(key, -limit, -1)
         if not cached:

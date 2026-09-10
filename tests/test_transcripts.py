@@ -1,4 +1,4 @@
-"""Durable memory tests covering buckets, order, tails, and deletion."""
+"""Durable memory: order, positions, tails, isolation and deletion."""
 from __future__ import annotations
 
 import asyncio
@@ -6,14 +6,14 @@ import asyncio
 import pytest
 
 from memory_service.models import NewMessage
-from memory_service.stores.mongo import TURNS, MongoTranscripts
+from memory_service.stores.postgres import PostgresTranscripts
 
 from conftest import needs_backends
 
 pytestmark = [needs_backends, pytest.mark.integration]
 
 
-async def write(store: MongoTranscripts, scope: str, thread: str, *texts: str) -> None:
+async def write(store: PostgresTranscripts, scope: str, thread: str, *texts: str) -> None:
     for text in texts:
         await store.append(scope, thread, NewMessage(role="user", content=text))
 
@@ -36,16 +36,20 @@ async def test_sequence_numbers_grow_within_the_thread(transcripts, scope):
     assert [m.content for m in messages] == ["uno", "due", "tre"]
 
 
-async def test_messages_overflow_into_a_new_bucket(transcripts, scope, mongo_client):
+async def test_the_whole_conversation_comes_back_in_order(transcripts, scope):
     await write(transcripts, scope, "t1", "uno", "due", "tre", "quattro")
 
-    buckets = await mongo_client["demo_memory_test"][TURNS].count_documents(
-        {"scope": scope, "thread_id": "t1"}
-    )
-    assert buckets == 2
+    # There is no bucket to cross any more: a turn is a row, and the order is
+    # the position it was given when it was written.
+    assert [m.content for m in await transcripts.history(scope, "t1")] == [
+        "uno",
+        "due",
+        "tre",
+        "quattro",
+    ]
 
 
-async def test_the_tail_keeps_the_order_across_buckets(transcripts, scope):
+async def test_the_tail_is_the_end_of_the_conversation(transcripts, scope):
     await write(transcripts, scope, "t1", "uno", "due", "tre", "quattro", "cinque")
 
     messages = await transcripts.tail(scope, "t1", limit=4)
@@ -88,5 +92,7 @@ async def test_forgetting_removes_the_thread(transcripts, scope):
 
     removed = await transcripts.forget(scope, "t1")
 
-    assert removed == 2
+    # What comes back is how many turns went with the thread, not how many
+    # documents happened to hold them.
+    assert removed == 4
     assert await transcripts.tail(scope, "t1", limit=10) == []

@@ -9,11 +9,15 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      mongo:
-        image: mongo:8.0.16
-        ports: ["27017:27017"]
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: memoria
+          POSTGRES_PASSWORD: memoria
+          POSTGRES_DB: memoria
+        ports: ["5432:5432"]
         options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
+          --health-cmd "pg_isready -U memoria"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -45,8 +49,9 @@ jobs:
       - run: uv run pytest -q
         env:
           AGUI_LAB_CONTRACTS: ${{ github.workspace }}/.contracts/contracts
-          MEMORY_MONGO_URI: mongodb://127.0.0.1:27017
-          MEMORY_MONGO_DATABASE: demo_memory_ci
+          # La suite si deriva il proprio database e se lo crea: quello che
+          # lascia dietro non tocca il database di un servizio.
+          MEMORY_POSTGRES_DSN: postgresql://memoria:memoria@127.0.0.1:5432/memoria
           MEMORY_REDIS_URI: redis://127.0.0.1:6379/0
 
   image:

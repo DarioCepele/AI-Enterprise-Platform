@@ -1,98 +1,118 @@
 """Schema changes that travel with the code.
 
-Renaming the fields of the durable facts once took a one-off script, and until
-someone ran it the service would not start: the unique index could not be built
-on a field the stored documents did not have. A fork should never inherit that.
+Numbered, idempotent, recorded, and applied at startup: a fork should never
+have to find a script and run it by hand before the service will start. That
+lesson was paid for once, when renaming a field left an index that could not be
+built and a service that would not boot.
 
-Every migration is idempotent, is recorded by version, and runs before the
-indexes are created -- an index over a field the old documents lack is exactly
-what fails when the order is wrong.
+The same shape as the process service's migrations, on purpose: two services,
+one habit.
 """
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any
+
+from psycopg import AsyncConnection
 
 logger = logging.getLogger(__name__)
 
-MIGRATIONS_COLLECTION = "schema_migrations"
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS threads (
+    scope           text        NOT NULL,
+    thread_id       text        NOT NULL,
+    next_seq        bigint      NOT NULL DEFAULT 0,
+    state           jsonb,
+    interrupt       jsonb,
+    session_state   jsonb,
+    indexed_upto    bigint      NOT NULL DEFAULT 0,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (scope, thread_id)
+);
 
-FACTS = "scope_facts"
-TURNS = "thread_turns"
-THREADS = "threads"
-SUMMARIES = "thread_summaries"
+-- Retention reads it: which threads nobody has touched since a date.
+CREATE INDEX IF NOT EXISTS threads_by_age ON threads (updated_at);
 
-LEGACY_INDEX_NAMES = {
-    TURNS: ("thread_bucket_unico", "coda_del_thread"),
-    THREADS: ("thread_unico",),
-    FACTS: ("fatto_unico",),
-    SUMMARIES: ("riassunto_unico",),
-}
+CREATE TABLE IF NOT EXISTS thread_turns (
+    scope       text        NOT NULL,
+    thread_id   text        NOT NULL,
+    seq         bigint      NOT NULL,
+    message     jsonb       NOT NULL,
+    ts          timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (scope, thread_id, seq),
+    FOREIGN KEY (scope, thread_id) REFERENCES threads (scope, thread_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS thread_summaries (
+    scope           text        NOT NULL,
+    thread_id       text        NOT NULL,
+    covers_to_seq   bigint      NOT NULL,
+    text            text        NOT NULL,
+    message_count   integer     NOT NULL,
+    model           text        NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (scope, thread_id, covers_to_seq),
+    FOREIGN KEY (scope, thread_id) REFERENCES threads (scope, thread_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS scope_facts (
+    scope       text        NOT NULL,
+    key         text        NOT NULL,
+    value       text        NOT NULL,
+    thread_id   text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (scope, key)
+);
+
+-- What a context is filled with: the most recent facts of a scope.
+CREATE INDEX IF NOT EXISTS facts_by_age ON scope_facts (scope, updated_at DESC);
+"""
 
 
 @dataclass(frozen=True)
 class Migration:
     version: int
     name: str
-    apply: Callable[[Any], Awaitable[None]]
-
-
-async def _english_fact_fields(db: Any) -> None:
-    """`chiave`/`valore` become `key`/`value`.
-
-    Renaming instead of deleting: those facts were learned from real
-    conversations, and a rename keeps them readable under the new names.
-    """
-    result = await db[FACTS].update_many(
-        {"chiave": {"$exists": True}}, {"$rename": {"chiave": "key", "valore": "value"}}
-    )
-    if result.modified_count:
-        logger.info("Migration 1: %d facts renamed to key/value.", result.modified_count)
-
-
-async def _english_index_names(db: Any) -> None:
-    """Drops the indexes built under the old names.
-
-    They are not merely untidy: a unique index over `chiave`, a field no
-    document has any more, would admit a single document per scope.
-    """
-    for collection, names in LEGACY_INDEX_NAMES.items():
-        existing = {index["name"] for index in await (await db[collection].list_indexes()).to_list()}
-        for name in names:
-            if name in existing:
-                await db[collection].drop_index(name)
-                logger.info("Migration 2: index %s.%s removed.", collection, name)
+    statements: tuple[str, ...]
 
 
 MIGRATIONS: tuple[Migration, ...] = (
-    Migration(1, "english fact fields", _english_fact_fields),
-    Migration(2, "english index names", _english_index_names),
+    Migration(1, "threads, turns, summaries and facts", (SCHEMA,)),
 )
 
 LATEST_VERSION = max(migration.version for migration in MIGRATIONS)
 
+REGISTER = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version     integer     PRIMARY KEY,
+    name        text        NOT NULL,
+    applied_at  timestamptz NOT NULL DEFAULT now()
+)
+"""
 
-async def applied_versions(db: Any) -> set[int]:
-    documents = await db[MIGRATIONS_COLLECTION].find({}, projection={"_id": 1}).to_list(None)
-    return {int(document["_id"]) for document in documents}
+
+async def applied_versions(connection: AsyncConnection) -> set[int]:
+    await connection.execute(REGISTER)
+    rows = await (await connection.execute("SELECT version FROM schema_migrations")).fetchall()
+    return {int(row[0]) for row in rows}
 
 
-async def run_migrations(db: Any) -> list[Migration]:
-    """Applies the missing migrations, in order, and returns what it applied."""
-    already = await applied_versions(db)
+async def run_migrations(connection: AsyncConnection) -> list[Migration]:
+    """Applies what is missing, in order, and says what it applied."""
+    already = await applied_versions(connection)
     applied: list[Migration] = []
     for migration in sorted(MIGRATIONS, key=lambda m: m.version):
         if migration.version in already:
             continue
         logger.info("Applying migration %d: %s.", migration.version, migration.name)
-        await migration.apply(db)
-        await db[MIGRATIONS_COLLECTION].update_one(
-            {"_id": migration.version},
-            {"$set": {"name": migration.name, "applied_at": datetime.now(UTC)}},
-            upsert=True,
+        for statement in migration.statements:
+            await connection.execute(statement)
+        await connection.execute(
+            "INSERT INTO schema_migrations (version, name) VALUES (%s, %s) "
+            "ON CONFLICT (version) DO NOTHING",
+            (migration.version, migration.name),
         )
         applied.append(migration)
     if not applied:
@@ -100,5 +120,5 @@ async def run_migrations(db: Any) -> list[Migration]:
     return applied
 
 
-async def missing_migrations(db: Any) -> list[int]:
-    return sorted({migration.version for migration in MIGRATIONS} - await applied_versions(db))
+async def missing_migrations(connection: AsyncConnection) -> list[int]:
+    return sorted({migration.version for migration in MIGRATIONS} - await applied_versions(connection))

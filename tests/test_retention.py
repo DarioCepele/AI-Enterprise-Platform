@@ -10,7 +10,6 @@ from memory_service.api import create_app
 from memory_service.curation import ContextPolicy
 from memory_service.models import NewMessage, Snapshot
 from memory_service.service import ThreadMemory
-from memory_service.stores.mongo import THREADS
 
 from conftest import needs_backends
 
@@ -22,16 +21,18 @@ def memory(transcripts, hot) -> ThreadMemory:
     return ThreadMemory(transcripts, hot)
 
 
-async def age(mongo_client, scope: str, thread_id: str, days: int) -> None:
-    await mongo_client["demo_memory_test"][THREADS].update_one(
-        {"scope": scope, "thread_id": thread_id},
-        {"$set": {"updated_at": datetime.now(UTC) - timedelta(days=days)}},
-    )
+async def age(pool, scope: str, thread_id: str, days: int) -> None:
+    """Moves a thread back in time, so retention has something to find."""
+    async with pool.connection() as connection:
+        await connection.execute(
+            "UPDATE threads SET updated_at = %s WHERE scope = %s AND thread_id = %s",
+            (datetime.now(UTC) - timedelta(days=days), scope, thread_id),
+        )
 
 
-async def test_retention_off_forgets_nothing(memory, mongo_client, scope):
+async def test_retention_off_forgets_nothing(memory, pool, scope):
     await memory.append(scope, "old", NewMessage(role="user", content="one"))
-    await age(mongo_client, scope, "old", days=400)
+    await age(pool, scope, "old", days=400)
 
     forgotten = await memory.apply_retention(days=0, scope=scope)
 
@@ -39,9 +40,9 @@ async def test_retention_off_forgets_nothing(memory, mongo_client, scope):
     assert (await memory.tail(scope, "old", limit=10)).messages
 
 
-async def test_retention_does_not_reach_into_another_scope(memory, mongo_client, scope):
+async def test_retention_does_not_reach_into_another_scope(memory, pool, scope):
     await memory.append("another-tenant", "old", NewMessage(role="user", content="theirs"))
-    await age(mongo_client, "another-tenant", "old", days=40)
+    await age(pool, "another-tenant", "old", days=40)
 
     # A maintenance call inside one tenant must not delete another's data: the
     # scope is an authorization boundary here too.
@@ -49,10 +50,10 @@ async def test_retention_does_not_reach_into_another_scope(memory, mongo_client,
     assert (await memory.tail("another-tenant", "old", limit=10)).messages
 
 
-async def test_a_thread_older_than_the_retention_is_gone(memory, mongo_client, scope):
+async def test_a_thread_older_than_the_retention_is_gone(memory, pool, scope):
     await memory.append(scope, "old", NewMessage(role="user", content="one"))
     await memory.append(scope, "fresh", NewMessage(role="user", content="two"))
-    await age(mongo_client, scope, "old", days=40)
+    await age(pool, scope, "old", days=40)
 
     forgotten = await memory.apply_retention(days=30, scope=scope)
 
@@ -61,11 +62,11 @@ async def test_a_thread_older_than_the_retention_is_gone(memory, mongo_client, s
     assert (await memory.tail(scope, "fresh", limit=10)).messages
 
 
-async def test_retention_says_what_it_removed(memory, mongo_client, scope, caplog):
+async def test_retention_says_what_it_removed(memory, pool, scope, caplog):
     import logging
 
     await memory.append(scope, "old", NewMessage(role="user", content="one"))
-    await age(mongo_client, scope, "old", days=40)
+    await age(pool, scope, "old", days=40)
 
     with caplog.at_level(logging.INFO, logger="memory_service.service"):
         await memory.apply_retention(days=30, scope=scope)
@@ -155,9 +156,9 @@ async def client_for(memory: ThreadMemory) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
 
-async def test_the_admin_endpoints_report_what_they_did(memory, mongo_client, scope):
+async def test_the_admin_endpoints_report_what_they_did(memory, pool, scope):
     await memory.append(scope, "old", NewMessage(role="user", content="one"))
-    await age(mongo_client, scope, "old", days=40)
+    await age(pool, scope, "old", days=40)
 
     async with await client_for(memory) as client:
         headers = {"X-Memory-Scope": scope}

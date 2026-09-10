@@ -2,97 +2,82 @@
 from __future__ import annotations
 
 import pytest
-from pymongo import ASCENDING
 
-from memory_service.migrations import MIGRATIONS, applied_versions, run_migrations
-from memory_service.stores.mongo import FACTS, TURNS, MongoTranscripts
+from memory_service.migrations import (
+    LATEST_VERSION,
+    MIGRATIONS,
+    applied_versions,
+    missing_migrations,
+    run_migrations,
+)
+from memory_service.models import NewMessage
+from memory_service.stores.postgres import PostgresTranscripts
 
 from conftest import needs_backends
 
 pytestmark = [needs_backends, pytest.mark.integration]
 
 
-@pytest.fixture
-async def database(mongo_client, scope):
-    name = f"migrations_{scope.replace('-', '_')}"
-    try:
-        yield mongo_client[name]
-    finally:
-        await mongo_client.drop_database(name)
+async def test_the_versions_applied_are_recorded(pool):
+    async with pool.connection() as connection:
+        assert await applied_versions(connection) == {m.version for m in MIGRATIONS}
+        assert await missing_migrations(connection) == []
 
 
-async def test_the_versions_applied_are_recorded(database):
-    await run_migrations(database)
+async def test_applying_twice_changes_nothing_the_second_time(pool):
+    async with pool.connection() as connection:
+        before = await applied_versions(connection)
 
-    assert await applied_versions(database) == {m.version for m in MIGRATIONS}
+        applied = await run_migrations(connection)
 
-
-async def test_applying_twice_changes_nothing_the_second_time(database, caplog):
-    await run_migrations(database)
-    before = await applied_versions(database)
-
-    applied = await run_migrations(database)
-
-    assert applied == []
-    assert await applied_versions(database) == before
+        assert applied == []
+        assert await applied_versions(connection) == before
 
 
-async def test_the_italian_fields_of_the_facts_become_english(database):
-    await database[FACTS].insert_one({"scope": "s", "chiave": "contact", "valore": "Marta"})
+async def test_the_schema_is_what_the_store_writes_into(pool, scope):
+    """The migration and the store are one thing: if they drift, this fails.
 
-    await run_migrations(database)
+    The alternative is finding out on the first append, in front of whoever is
+    using the service.
+    """
+    store = PostgresTranscripts(pool)
 
-    fact = await database[FACTS].find_one({"scope": "s"})
-    assert fact["key"] == "contact"
-    assert fact["value"] == "Marta"
-    assert "chiave" not in fact
+    stored = await store.append(scope, "t1", NewMessage(role="user", content="ciao"))
+    await store.save_summary(
+        scope, "t1", text="a summary", covers_to_seq=1, message_count=1, model="m"
+    )
+    await store.upsert_facts(scope, [("contact", "Marta")], thread_id="t1")
+
+    assert stored.seq == 1
+    assert (await store.latest_summary(scope, "t1"))["covers_to_seq"] == 1
+    assert await store.facts_of(scope, limit=10) == [{"key": "contact", "value": "Marta"}]
 
 
-async def test_documents_already_migrated_are_left_alone(database):
-    await database[FACTS].insert_one({"scope": "s", "key": "contact", "value": "Giulio"})
-
-    await run_migrations(database)
-
-    assert (await database[FACTS].find_one({"scope": "s"}))["value"] == "Giulio"
-
-
-async def test_the_indexes_of_the_old_names_are_removed(database):
-    await database[TURNS].create_index(
-        [("scope", ASCENDING), ("thread_id", ASCENDING), ("bucket", ASCENDING)],
-        unique=True,
-        name="thread_bucket_unico",
+async def test_a_thread_takes_its_turns_and_summaries_with_it(pool, scope):
+    """The foreign key says it once, instead of three deletes kept in step by hand."""
+    store = PostgresTranscripts(pool)
+    await store.append(scope, "t1", NewMessage(role="user", content="ciao"))
+    await store.save_summary(
+        scope, "t1", text="a summary", covers_to_seq=1, message_count=1, model="m"
     )
 
-    await run_migrations(database)
+    await store.forget(scope, "t1")
 
-    names = {index["name"] for index in await (await database[TURNS].list_indexes()).to_list()}
-    assert "thread_bucket_unico" not in names
+    async with pool.connection() as connection:
+        turns = await (
+            await connection.execute(
+                "SELECT count(*) FROM thread_turns WHERE scope = %s", (scope,)
+            )
+        ).fetchone()
+        summaries = await (
+            await connection.execute(
+                "SELECT count(*) FROM thread_summaries WHERE scope = %s", (scope,)
+            )
+        ).fetchone()
 
-
-async def test_the_indexes_are_created_after_the_migrations(database):
-    # An index unique on a field the old documents do not have would admit one
-    # document per scope: the order between the two is the whole point.
-    await database[FACTS].insert_many(
-        [
-            {"scope": "s", "chiave": "one", "valore": "1"},
-            {"scope": "s", "chiave": "two", "valore": "2"},
-        ]
-    )
-
-    await run_migrations(database)
-    await MongoTranscripts(database.client, database.name, bucket_size=3).ensure_indexes()
-
-    assert await database[FACTS].count_documents({"scope": "s"}) == 2
+    assert turns[0] == 0
+    assert summaries[0] == 0
 
 
-async def test_indexes_without_the_migrations_say_which_migration_is_missing(database):
-    await database[FACTS].insert_many(
-        [
-            {"scope": "s", "chiave": "one", "valore": "1"},
-            {"scope": "s", "chiave": "two", "valore": "2"},
-        ]
-    )
-    store = MongoTranscripts(database.client, database.name, bucket_size=3)
-
-    with pytest.raises(RuntimeError, match="run_migrations"):
-        await store.ensure_indexes()
+def test_the_latest_version_is_the_highest_one():
+    assert LATEST_VERSION == max(m.version for m in MIGRATIONS)

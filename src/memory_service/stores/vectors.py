@@ -1,4 +1,4 @@
-"""Semantic memory search using Redis 8 vector sets. Redis already serves the hot cache, avoiding another datastore. The index is reconstructible from Mongo transcripts; losing it requires reindexing rather than losing conversations."""
+"""Semantic memory search using Redis 8 vector sets. Redis already serves the hot cache, avoiding another datastore. The index is reconstructible from the transcripts in Postgres; losing it requires reindexing rather than losing conversations."""
 from __future__ import annotations
 
 import json

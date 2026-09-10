@@ -13,47 +13,74 @@ uv run python -m memory_service      # http://127.0.0.1:8100
 
 | | Dove | Cosa tiene | Perche' li' |
 | --- | --- | --- | --- |
-| Durevole | MongoDB | transcript completi, per thread | deve sopravvivere a tutto; si legge a fette |
+| Durevole | Postgres | trascritti completi, riassunti, fatti | deve sopravvivere a tutto |
 | Breve termine | Redis | ultimi N messaggi del thread | latenza bassa e **scadenza automatica** |
 
 **Regola che tiene in piedi il disegno: in Redis non vive mai l'unica copia di
-un dato.** La coda calda si ricostruisce da Mongo alla prima lettura dopo una
-scadenza, e il container Redis non ha volume apposta. Se perdere Redis
+un dato.** La coda calda si ricostruisce dal durevole alla prima lettura dopo
+una scadenza, e il container Redis non ha volume apposta. Se perdere Redis
 perdesse dati, sarebbe il posto sbagliato dove tenerli. Le scritture vanno
 prima sul durevole e poi in cache: l'ordine opposto lascerebbe in cache un
 messaggio che non esiste altrove — un difetto che si cancella da solo alla
 scadenza, quindi impossibile da diagnosticare dopo.
 
-`GET /health` distingue i due casi: Mongo giu' e' **guasto** (503), Redis giu'
-e' **degradato** (200, `status: degraded`) perche' si continua a rispondere
-leggendo dal durevole.
+`GET /health` distingue i due casi: Postgres giu' e' **guasto** (503), Redis
+giu' e' **degradato** (200, `status: degraded`) perche' si continua a
+rispondere leggendo dal durevole.
 
-## Schema: bucket, non un array che cresce
+## Una riga per turno, e il bucket che non c'e' piu'
 
-L'istanza MongoDB del laboratorio e' un **nodo singolo senza replica set**:
-niente transazioni multi-documento. Da qui due scelte non negoziabili.
+Il durevole era MongoDB, e i messaggi stavano in **documenti bucket** da 50:
+un array che cresce senza limite finisce contro il tetto di 16 MB, quindi si
+impacchettava. Creare un bucket senza transazioni voleva l'indice unico
+`(scope, thread_id, bucket)`, una `find_one_and_update` che cercava il bucket
+non pieno, e un ritentativo per lo scrittore perdente.
 
-1. **Ogni scrittura atomica sta dentro un solo documento.** Un turno e' un
-   `$push` in un bucket; non esiste una sequenza di scritture che, interrotta a
-   meta', lasci uno stato illegale.
-2. **La numerazione arriva da un `$inc` su un solo documento** (`threads`).
-   Se la scrittura del messaggio fallisce dopo, resta un numero saltato: una
-   lacuna nella numerazione, mai un messaggio perso o duplicato.
+Tutto questo esisteva per **far somigliare un database a documenti a una
+tabella**. In Postgres una riga per messaggio e' gia' la forma economica, e
+l'append e' una sola istruzione:
 
-I messaggi stanno in documenti bucket da 50 (`thread_turns`), non in un unico
-documento per thread: un array che cresce senza limite finisce contro il tetto
-di 16 MB e rende costosa ogni lettura. Leggere la coda tocca uno o due
-documenti invece di tutta la conversazione.
+```sql
+WITH position AS (
+    INSERT INTO threads (scope, thread_id, next_seq) VALUES (%s, %s, 1)
+    ON CONFLICT (scope, thread_id) DO UPDATE SET next_seq = threads.next_seq + 1
+    RETURNING next_seq
+)
+INSERT INTO thread_turns (scope, thread_id, seq, message)
+SELECT %s, %s, next_seq, %s FROM position
+RETURNING seq, ts
+```
 
-Il bucket nuovo si crea senza lock: l'indice unico `(scope, thread_id, bucket)`
-fa passare una sola delle scritture in corsa, e la perdente rientra dalla via
-normale, dove il posto ormai c'e'. Verificato con dodici append simultanei.
+Numero e riga nascono insieme: due scrittori sullo stesso thread non possono
+prendere la stessa posizione, e un fallimento non lascia ne' l'uno ne' l'altra.
+Verificato con dodici append simultanei, come prima -- la proprieta' e' la
+stessa, il meccanismo e' una riga di SQL invece di trecento di Python.
 
-| Collezione | Indice | A cosa serve |
+**Cosa resta JSON:** il contenuto del turno. Ruoli, payload e campi specifici
+del provider variano davvero, e quella varieta' e' reale. Cosa diventa colonna:
+scope, thread e posizione — cioe' quello su cui si cerca.
+
+| Tabella | Chiave | A cosa serve |
 | --- | --- | --- |
-| `thread_turns` | `(scope, thread_id, bucket)` unico | crea bucket senza transazioni |
-| `thread_turns` | `(scope, thread_id, last_seq desc)` | leggere la coda |
-| `threads` | `(scope, thread_id)` unico | contatore delle posizioni |
+| `threads` | `(scope, thread_id)` | contatore, stato non-messaggio, checkpoint dell'indice |
+| `thread_turns` | `(scope, thread_id, seq)` | i turni, in ordine |
+| `thread_summaries` | `(scope, thread_id, covers_to_seq)` | i riassunti, tutti |
+| `scope_facts` | `(scope, key)` | i fatti duraturi di uno scope |
+
+I turni e i riassunti se ne vanno con il thread per **chiave esterna**: una
+dichiarazione al posto di tre cancellazioni da tenere allineate a mano.
+
+### Perche' non Mongo
+
+Il modello a documenti vince quando i dati sono entita' autocontenute lette
+tutte insieme, o quando serve sharding nativo per scritture oltre un nodo. Un
+turno di conversazione non e' nessuna delle due cose: e' **append-only,
+uniforme, letto a coda** — una serie temporale, cioe' casa di SQL. La prova era
+nel nostro stesso codice: il bucket pattern.
+
+Tornerebbe la risposta giusta con scritture che superano quello che regge un
+nodo, o con turni la cui forma cambia davvero da provider a provider e su cui
+non si cerca mai. Nessuna delle due e' il caso, oggi.
 
 ## Snapshot dei thread: chi manda tutto, chi calcola il delta
 
@@ -256,10 +283,13 @@ Riassunto e fatti sono compressione: tengono il poco che vale sempre. La
 ricerca serve al caso opposto — un dettaglio preciso di sei conversazioni fa,
 che non merita di stare nel contesto di ogni run ma serve *adesso*.
 
-**Su Redis, non su Mongo.** `$vectorSearch` esiste solo su Atlas; da Redis 8 il
-Query Engine con i vector set sta nella distribuzione open source. Redis c'era
-già per la coda calda, quindi la ricerca per significato non aggiunge un terzo
-datastore — il *tech sprawl* è uno dei tranelli elencati da MongoDB stessa.
+**Su Redis, per ora.** Da Redis 8 il Query Engine con i vector set sta nella
+distribuzione open source, e Redis c'era gia' per la coda calda: la ricerca per
+significato non ha aggiunto un datastore.
+
+Il posto naturale, ora che il durevole e' Postgres, e' **pgvector**: l'indice
+starebbe accanto ai trascritti da cui si ricostruisce, e i datastore
+scenderebbero a uno. E' la seconda tappa di questo lavoro, non ancora fatta.
 
 **Si indicizza solo ciò che esce dalla finestra.** Quello che è ancora nel
 contesto il modello ce l'ha già davanti, e ritrovarglielo sarebbe ripetizione.
@@ -303,7 +333,7 @@ ricordo rimasto sarebbe cercabile per sempre.
 ## Lo scope, e di chi ci si fida
 
 Ogni chiamata dichiara `X-Memory-Scope`: e' il confine di autorizzazione, e
-finisce nella chiave di Mongo **e** in quella di Redis, cosi' due scope non si
+finisce nella chiave del durevole **e** in quella di Redis, cosi' due scope non si
 leggono a vicenda nemmeno per un errore di query.
 
 **Questo e' un servizio interno.** Non va esposto al browser ne' a internet:
@@ -347,7 +377,7 @@ Variabili con prefisso `MEMORY_`, dal `.env` locale non versionato:
 I due database si alzano dal compose di `demo-infra`:
 
 ```bash
-cd ../demo-infra && docker compose up -d mongo redis
+cd ../demo-infra && docker compose up -d postgres redis
 ```
 
 ## Test
@@ -356,7 +386,7 @@ cd ../demo-infra && docker compose up -d mongo redis
 uv run pytest
 ```
 
-Girano contro Mongo e Redis **veri**, non simulati: il modello a bucket senza
+Girano contro Postgres e Redis **veri**, non simulati: l'atomicita' senza
 transazioni si regge su garanzie del server — atomicita' del singolo documento
 e indice unico — che un finto non riproduce, e che sono esattamente la parte da
 verificare. Ogni test usa uno scope irripetibile, quindi non si disturbano fra

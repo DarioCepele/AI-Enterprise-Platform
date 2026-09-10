@@ -13,7 +13,7 @@ from .models import NewMessage, Snapshot, StoredMessage, Transcript
 from .snapshots import new_messages
 from .stores.hot import HotTail
 from .stores.locks import InProcessLock
-from .stores.mongo import MongoTranscripts
+from .stores.postgres import PostgresTranscripts
 from .stores.vectors import Memory, RedisMemories
 from .summarizer import FactExtractor, Summarizer
 
@@ -36,11 +36,11 @@ def _payload_of(message: StoredMessage) -> dict:
 
 
 class ThreadMemory:
-    """Always write to Mongo first, then update Redis. Reading from Redis is optional; no cache entry may be the only copy of a message."""
+    """Always write to Postgres first, then update Redis. Reading from Redis is optional; no cache entry may be the only copy of a message."""
 
     def __init__(
         self,
-        durable: MongoTranscripts,
+        durable: PostgresTranscripts,
         hot: HotTail,
         policy: ContextPolicy | None = None,
         summarizer: Summarizer | None = None,
@@ -72,7 +72,7 @@ class ThreadMemory:
         try:
             cached = await self._hot.tail(scope, thread_id, limit)
         except Exception:
-            logger.warning("Hot tail unreadable, falling back to Mongo.", exc_info=True)
+            logger.warning("Hot tail unreadable, falling back to Postgres.", exc_info=True)
             cached = None
 
         if cached is not None:
@@ -371,7 +371,7 @@ class ThreadMemory:
         return len(threads)
 
     async def check(self) -> dict[str, str]:
-        """Report storage health. Mongo failure prevents durable writes; Redis failure degrades to durable reads."""
+        """Report storage health. A Postgres failure prevents durable writes; a Redis failure degrades to durable reads."""
         await self._durable.ping()
         try:
             await self._hot.ping()

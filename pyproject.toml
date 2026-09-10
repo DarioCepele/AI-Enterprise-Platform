@@ -6,7 +6,6 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.120",
     "uvicorn[standard]>=0.40",
-    "pymongo>=4.16",
     "redis>=6.5",
     "pydantic>=2.12",
     "pydantic-settings>=2.12",
@@ -16,6 +15,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.44.0",
     "opentelemetry-instrumentation-fastapi>=0.65b0",
     "opentelemetry-instrumentation-httpx>=0.65b0",
+    "psycopg[binary,pool]>=3.3.5",
 ]
 
 [dependency-groups]
