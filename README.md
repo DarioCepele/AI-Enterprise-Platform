@@ -150,7 +150,7 @@ la telemetria risulterebbe verde in laboratorio e assente in produzione.
 Con `DEMO_MEMORY_SERVICE_URL` impostata, gli snapshot dei thread stanno nel
 [servizio di memoria](../demo-memory-service/README.md): la conversazione
 sopravvive al riavvio dell'agente. Senza quella variabile si torna allo store
-in memoria di processo, e il laboratorio resta avviabile senza Mongo e Redis.
+in memoria di processo, e il laboratorio resta avviabile senza database.
 Quale dei due sia attivo si legge nel tab LOG all'avvio — la differenza si
 noterebbe altrimenti solo quando è troppo tardi.
 
@@ -160,7 +160,7 @@ conto di cio' che manca arriva insieme allo snapshot e finisce nel tab LOG
 (`Contesto dalla memoria: 28 messaggi (12 ragionamenti tolti, ...)`), perche'
 una potatura silenziosa e' indistinguibile da una perdita di memoria.
 
-L'agente non conosce Mongo né Redis: implementa il protocollo
+L'agente non conosce Postgres: implementa il protocollo
 `AGUIThreadSnapshotStore` chiamando il servizio in HTTP, e lo scope del
 resolver diventa l'header `X-Memory-Scope` della chiamata.
 

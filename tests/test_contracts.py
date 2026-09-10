@@ -9,7 +9,7 @@ from a2a.types import AgentCapabilities, AgentCard
 
 from contracts import assert_shape, load, sample
 from demo.a2a.client import Artifact, Progress
-from demo.logging_bridge import LogCollector, RedisLogStream
+from demo.logging_bridge import LogCollector, SharedLogStream
 from demo.memory.remote_store import MemoryServiceSnapshotStore
 from demo.config import SubagentConfig
 from demo.plan import PlanStore
@@ -187,25 +187,46 @@ def test_the_logs_page_of_this_replica_matches_the_contract():
 
 @pytest.mark.asyncio
 async def test_the_logs_page_of_the_shared_stream_matches_the_contract():
-    class Stream:
-        async def incrby(self, *args, **kwargs):
-            return 41
+    """The shared page has the same shape as the local one, or the tab breaks."""
 
-        def pipeline(self):
+    class Rows:
+        """A database that answers the two queries the stream makes."""
+
+        def __init__(self) -> None:
+            self.entry = sample("agui/logs-page")["entries"][0]
+
+        async def execute(self, query, parameters=None):
+            self._last = query
             return self
 
-        def xadd(self, *args, **kwargs):
+        async def fetchall(self):
+            return [
+                (
+                    self.entry["seq"],
+                    self.entry["ts"],
+                    self.entry["level"],
+                    self.entry["source"],
+                    self.entry["message"],
+                )
+            ]
+
+        async def fetchone(self):
+            return (self.entry["seq"],)
+
+        def cursor(self):
             return self
 
-        async def execute(self):
-            return []
+        def connection(self):
+            return self
 
-        async def xrange(self, key, min="-", max="+", count=None):
-            entry = sample("agui/logs-page")["entries"][0]
-            return [("1757404324517-0", {k: str(v) for k, v in entry.items()})]
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
 
     collector = LogCollector()
-    stream = RedisLogStream(Stream())
+    stream = SharedLogStream(Rows())
     stream.attach(collector)
     collector.append({"ts": "t", "level": "INFO", "source": "tools", "message": "one"})
     await stream.flush()

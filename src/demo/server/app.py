@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from redis.asyncio import Redis
+from psycopg_pool import AsyncConnectionPool
 from agent_framework import Agent
 from agent_framework.ag_ui import (
     AGUIThreadSnapshotStore,
@@ -19,7 +19,8 @@ from fastapi.responses import JSONResponse
 
 from ..agents.master import build_master_agent
 from ..config import get_settings
-from ..logging_bridge import LogCollector, RedisLogStream
+from ..logging_bridge import LogCollector, SharedLogStream
+from ..migrations import run_migrations
 from ..observability import configure_logging, configure_tracing
 from ..a2a.client import A2AClient, fetch_agent_card
 from ..a2a.push import HEADER, SeenNotifications, is_terminal, summary_of, token_is_valid
@@ -39,7 +40,7 @@ def _default_snapshot_store() -> AGUIThreadSnapshotStore:
     """The thread store: the memory service when configured, otherwise RAM.
 
     The in-memory fallback is not laziness: it keeps the laboratory startable
-    with the master agent alone, without bringing up Mongo and Redis to ask two
+    with the master agent alone, without bringing up a database to ask two
     questions. Which of the two is active is written in the logs at startup,
     because the difference -- the conversation survives a restart, or it does
     not -- only becomes visible when it is too late to notice.
@@ -51,25 +52,23 @@ def _default_snapshot_store() -> AGUIThreadSnapshotStore:
     logger.info("Thread memory in the memory service: %s", url)
     return MemoryServiceSnapshotStore(url)
 
-def _shared_redis() -> Redis | None:
-    uri = get_settings().redis_uri
-    return Redis.from_url(uri, decode_responses=True) if uri else None
+def _where(dsn: str) -> str:
+    """L'indirizzo senza le credenziali: un log non e' il posto per una password."""
+    return dsn.split("@")[-1] or "the configured database"
 
 
-def _shared_log_stream(collector: LogCollector) -> RedisLogStream | None:
-    """The operational logs of every replica in one stream, when Redis is there.
+def _shared_pool() -> AsyncConnectionPool | None:
+    """The little state this agent shares between its replicas, or nothing.
 
-    Without it each replica answers with its own buffer, and the LOG tab shows
-    the half of the story that belongs to whoever picked up the request.
+    Two tables, and neither of them is a conversation: the operational logs the
+    LOG tab reads, and which notifications already landed. Without a DSN both
+    stay per process, which with one replica is the same thing.
     """
-    uri = get_settings().redis_uri
-    if not uri:
-        logger.info("Operational logs kept in this process: no DEMO_REDIS_URI configured.")
+    dsn = get_settings().postgres_dsn
+    if not dsn:
+        logger.info("Shared state kept in this process: no DEMO_POSTGRES_DSN configured.")
         return None
-    stream = RedisLogStream(Redis.from_url(uri, decode_responses=True))
-    stream.attach(collector)
-    logger.info("Operational logs published to the shared stream on %s.", uri.split("@")[-1])
-    return stream
+    return AsyncConnectionPool(dsn, min_size=1, max_size=4, open=False)
 
 def create_app(
     agent: Agent | None = None,
@@ -86,22 +85,31 @@ def create_app(
 
     log_collector = collector if collector is not None else LogCollector()
     log_collector.attach()
-    log_stream = _shared_log_stream(log_collector)
-    seen = SeenNotifications(_shared_redis())
+    pool = _shared_pool()
+    log_stream = SharedLogStream(pool) if pool is not None else None
+    if log_stream is not None:
+        log_stream.attach(log_collector)
+    seen = SeenNotifications(pool)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if log_stream is None:
+        if pool is None or log_stream is None:
             try:
                 yield
             finally:
                 log_collector.detach()
             return
-        async with log_stream.running():
-            try:
+
+        await pool.open(wait=True)
+        async with pool.connection() as connection:
+            await run_migrations(connection)
+        logger.info("Shared logs and notification memory on %s.", _where(get_settings().postgres_dsn))
+        try:
+            async with log_stream.running():
                 yield
-            finally:
-                log_collector.detach()
+        finally:
+            log_collector.detach()
+            await pool.close()
 
     app = FastAPI(title=get_settings().product_name, lifespan=lifespan)
 
@@ -164,18 +172,16 @@ def create_app(
                 raise HTTPException(
                     status_code=503, detail=f"memory service unreachable: {error}"
                 ) from error
-        if settings.redis_uri:
-            checked.append("redis")
+        if settings.postgres_dsn:
+            checked.append("shared state")
             try:
-                client = Redis.from_url(settings.redis_uri, decode_responses=True)
-                try:
-                    await client.ping()
-                finally:
-                    await client.aclose()
+                async with pool.connection() as connection:
+                    await connection.execute("SELECT 1")
             except Exception as error:
-                # Redis carries the shared logs, not the conversation: it is
-                # reported, and it does not take the agent out of service.
-                logger.warning("Redis unreachable: shared logs degraded.", exc_info=True)
+                # Quel database porta i log condivisi e la memoria delle
+                # notifiche, non le conversazioni: si segnala, e non toglie
+                # l'agente dal servizio.
+                logger.warning("Shared state unreachable: logs degraded.", exc_info=True)
                 return {"status": "degraded", "checked": checked, "detail": str(error)}
         return {"status": "ok", "checked": checked}
 

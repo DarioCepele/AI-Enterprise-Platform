@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     memory_service_url: str = Field(
         default="", validation_alias=AliasChoices("DEMO_MEMORY_SERVICE_URL")
     )
-    redis_uri: str = Field(default="", validation_alias=AliasChoices("DEMO_REDIS_URI"))
+    postgres_dsn: str = Field(default="", validation_alias=AliasChoices("DEMO_POSTGRES_DSN"))
     knowledge_agent_url: str = Field(
         default="", validation_alias=AliasChoices("DEMO_KNOWLEDGE_AGENT_URL")
     )
@@ -107,7 +107,7 @@ class Settings(BaseSettings):
         "default_scope",
         "scope_header",
         "memory_service_url",
-        "redis_uri",
+        "postgres_dsn",
         "knowledge_agent_url",
         "knowledge_service_token",
         "public_url",
@@ -199,8 +199,8 @@ FIELD_NOTES = {
     "memory_service_url": (
         "Memory service. Without it the conversation lives in RAM and dies with the process."
     ),
-    "redis_uri": (
-        "Shared logs, deduplicated notifications. Without it both are per replica."
+    "postgres_dsn": (
+        "Shared logs and deduplicated notifications. Without it both are per replica."
     ),
     "knowledge_agent_url": "One subagent, the short way. Ignored when DEMO_SUBAGENTS is set.",
     "process_service_url": "Where durable processes live. Empty: the agent cannot start one.",

@@ -21,7 +21,7 @@ def make_app(monkeypatch):
 
     # This endpoint has two sources -- the local buffer and the shared stream --
     # and these tests are about the first. The shared one has its own tests.
-    monkeypatch.setenv("DEMO_REDIS_URI", "")
+    monkeypatch.setenv("DEMO_POSTGRES_DSN", "")
 
     def _make(collector: LogCollector | None = None):
         agent = build_master_agent(chat_client=FakeStreamingChatClient())
@@ -104,7 +104,7 @@ def test_liveness_answers_without_touching_anything(make_app):
 
 def test_readiness_is_green_without_configured_dependencies(make_app, monkeypatch):
     monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "")
-    monkeypatch.setenv("DEMO_REDIS_URI", "")
+    monkeypatch.setenv("DEMO_POSTGRES_DSN", "")
 
     with TestClient(make_app()) as client:
         ready = client.get("/health/ready")
@@ -117,7 +117,7 @@ def test_readiness_is_green_without_configured_dependencies(make_app, monkeypatc
 
 def test_readiness_fails_when_the_memory_service_is_unreachable(make_app, monkeypatch):
     monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "http://memory.invalid")
-    monkeypatch.setenv("DEMO_REDIS_URI", "")
+    monkeypatch.setenv("DEMO_POSTGRES_DSN", "")
 
     with TestClient(make_app()) as client:
         ready = client.get("/health/ready")

@@ -51,8 +51,8 @@ def test_a_notification_is_read_without_trusting_its_shape():
 def thread() -> str:
     """A thread of its own for each test.
 
-    The notifications already seen are remembered in Redis, and remembering is
-    the point: two tests sharing a thread would read each other's leftovers.
+    The notifications already seen are remembered, and remembering is the
+    point: two tests sharing a thread would read each other's leftovers.
     """
     return f"t-{uuid.uuid4().hex[:12]}"
 

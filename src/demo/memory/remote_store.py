@@ -1,8 +1,8 @@
 """A snapshot store that lives in the memory service, not in this process.
 
 It implements the AG-UI adapter's `AGUIThreadSnapshotStore` protocol by
-speaking HTTP with `demo-memory-service`. The agent knows neither Mongo nor
-Redis: it knows a service, and that service decides how and where to remember.
+speaking HTTP with `demo-memory-service`. The agent knows neither Postgres nor
+a database: it knows a service, and that service decides how and where to remember.
 
 **Failure policy, stated because it is not obvious.** An unreachable memory
 service must not fail the conversation: on reads it degrades to "unknown

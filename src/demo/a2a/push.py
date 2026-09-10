@@ -122,13 +122,18 @@ class SeenNotifications:
     """Remembers which notifications already landed, so one is written once.
 
     A2A delivery is at-least-once: the same outcome can arrive twice, and twice
-    in the conversation is a duplicate the user reads. Shared through Redis when
-    it is configured, because two replicas that each remember their own would
-    still write it twice.
+    in the conversation is a duplicate the user reads. Shared through the
+    database when it is configured, because two replicas that each remember
+    their own would still write it twice.
+
+    The memory is a unique key -- the same shape a durable process uses for an
+    effect that must not happen twice -- and old rows are swept as they are
+    written: a notification older than a day cannot be a duplicate of anything
+    still in flight.
     """
 
-    def __init__(self, redis: Any | None = None, ttl_seconds: int = 86_400) -> None:
-        self._redis = redis
+    def __init__(self, pool: Any | None = None, ttl_seconds: int = 86_400) -> None:
+        self._pool = pool
         self._ttl = ttl_seconds
         self._local: set[str] = set()
 
@@ -138,13 +143,24 @@ class SeenNotifications:
 
     async def first_time(self, thread_id: str, task_id: str, state: str) -> bool:
         key = self._key(thread_id, task_id, state)
-        if self._redis is None:
+        if self._pool is None:
             if key in self._local:
                 return False
             self._local.add(key)
             return True
         try:
-            return bool(await self._redis.set(key, "1", nx=True, ex=self._ttl))
+            await self._pool.open()
+            async with self._pool.connection() as connection:
+                await connection.execute(
+                    "DELETE FROM seen_notifications WHERE seen_at < now() - %s * interval '1 second'",
+                    (self._ttl,),
+                )
+                written = await connection.execute(
+                    "INSERT INTO seen_notifications (key) VALUES (%s) "
+                    "ON CONFLICT (key) DO NOTHING",
+                    (key,),
+                )
+            return (written.rowcount or 0) == 1
         except Exception:
             logger.warning(
                 "Notification memory unreachable: accepting %s without deduplication.",

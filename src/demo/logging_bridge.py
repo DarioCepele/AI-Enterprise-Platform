@@ -7,10 +7,15 @@ logs therefore travel over an HTTP endpoint of their own, which reads this
 cursor-based collector.
 
 The collector is per process. With more than one replica that is half a story,
-and which half depends on who answered the request: `RedisLogStream` publishes
-the same lines to a shared stream, and the endpoint reads from there when it is
+and which half depends on who answered the request: `SharedLogStream` writes the
+same lines to a table every replica reads, and the endpoint uses it when it is
 configured. The local buffer stays as the fallback -- a replica that cannot
-reach Redis still shows its own lines.
+reach the database still shows its own lines.
+
+A word on where these lines belong. In a deployment with a collector they go to
+the collector, and this endpoint is a convenience of the laboratory: it exists
+so that the LOG tab has something to show without asking anybody to run Loki
+first. The table is bounded on purpose.
 """
 from __future__ import annotations
 
@@ -28,8 +33,6 @@ APP_LOGGER = "demo"
 
 MAX_LOG_EVENTS = 500
 
-LOG_STREAM_KEY = "logs:stream"
-LOG_SEQUENCE_KEY = "logs:seq"
 
 def _timestamp(record: logging.LogRecord) -> str:
     return datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(
@@ -125,12 +128,12 @@ class LogCollector:
     def __exit__(self, *exc: object) -> None:
         self.detach()
 
-class RedisLogStream:
-    """The same lines, in a stream every replica writes to and reads from.
+class SharedLogStream:
+    """The same lines, in a table every replica writes to and reads from.
 
     Writing happens off the logging call: `emit` runs wherever the log line was
     produced -- including threads without an event loop -- so it only buffers,
-    and a drain task publishes in batches. A log line is not worth blocking the
+    and a drain task writes in batches. A log line is not worth blocking the
     code that emitted it.
 
     Reading flushes first, so a replica always sees what it has just logged:
@@ -140,15 +143,11 @@ class RedisLogStream:
 
     def __init__(
         self,
-        redis: Any,
-        key: str = LOG_STREAM_KEY,
-        sequence_key: str = LOG_SEQUENCE_KEY,
+        pool: Any,
         maxlen: int = MAX_LOG_EVENTS,
         flush_seconds: float = 0.2,
     ) -> None:
-        self._redis = redis
-        self._key = key
-        self._sequence_key = sequence_key
+        self._pool = pool
         self._maxlen = maxlen
         self._flush_seconds = flush_seconds
         self._pending: deque[dict[str, Any]] = deque()
@@ -161,22 +160,28 @@ class RedisLogStream:
         if not batch:
             return
         try:
-            last = int(await self._redis.incrby(self._sequence_key, len(batch)))
-            pipe = self._redis.pipeline()
-            for offset, entry in enumerate(batch):
-                pipe.xadd(
-                    self._key,
-                    {
-                        "seq": last - len(batch) + 1 + offset,
-                        "ts": str(entry.get("ts", "")),
-                        "level": str(entry.get("level", "")),
-                        "source": str(entry.get("source", "")),
-                        "message": str(entry.get("message", "")),
-                    },
-                    maxlen=self._maxlen,
-                    approximate=False,
+            await _ready(self._pool)
+            async with self._pool.connection() as connection:
+                async with connection.cursor() as cursor:
+                    for entry in batch:
+                        await cursor.execute(
+                            "INSERT INTO operational_logs (ts, level, source, message) "
+                            "VALUES (%s, %s, %s, %s)",
+                            (
+                                str(entry.get("ts", "")),
+                                str(entry.get("level", "")),
+                                str(entry.get("source", "")),
+                                str(entry.get("message", "")),
+                            ),
+                        )
+                # Bounded like the ring buffer it replaces: these are the recent
+                # lines of a laboratory, not an audit log. Whoever needs those
+                # sends them to a collector.
+                await connection.execute(
+                    "DELETE FROM operational_logs WHERE seq <= "
+                    "(SELECT max(seq) - %s FROM operational_logs)",
+                    (self._maxlen,),
                 )
-            await pipe.execute()
         except Exception:
             logger.warning(
                 "%d logs not published to the shared stream: they stay in this replica.",
@@ -200,43 +205,38 @@ class RedisLogStream:
             await self.flush()
 
     async def since(self, cursor: str) -> dict[str, Any]:
+        """The lines after `cursor`, the new cursor, and how many were lost."""
         await self.flush()
-        last_id, seen = _split_cursor(cursor)
-        start = f"({last_id}" if last_id else "-"
-        try:
-            rows = await self._redis.xrange(self._key, min=start, max="+", count=self._maxlen)
-            oldest = await self._redis.xrange(self._key, count=1)
-        except Exception:
-            logger.warning("Shared logs unreadable: falling back to this replica.", exc_info=True)
-            raise
+        await _ready(self._pool)
+        seen = int(cursor) if cursor.isdigit() else 0
+        async with self._pool.connection() as connection, connection.cursor() as reader:
+            await reader.execute(
+                "SELECT seq, ts, level, source, message FROM operational_logs "
+                "WHERE seq > %s ORDER BY seq LIMIT %s",
+                (seen, self._maxlen),
+            )
+            rows = await reader.fetchall()
+            await reader.execute("SELECT min(seq) FROM operational_logs")
+            oldest = (await reader.fetchone())[0]
 
-        entries = [_entry_of(row) for row in rows]
-        dropped = 0
-        if seen >= 0 and oldest:
-            oldest_seq = int(oldest[0][1]["seq"])
-            dropped = max(0, oldest_seq - seen - 1)
-
-        newest = rows[-1] if rows else None
-        return {
-            "entries": entries,
-            "cursor": f"{newest[0]}|{entries[-1]['seq']}" if newest else cursor,
-            "dropped": dropped,
-        }
-
-
-def _split_cursor(cursor: str) -> tuple[str, int]:
-    if not cursor:
-        return "", -1
-    stream_id, _, seq = cursor.partition("|")
-    return stream_id, int(seq) if seq.isdigit() else -1
+        entries = [
+            {"seq": int(row[0]), "ts": row[1], "level": row[2], "source": row[3], "message": row[4]}
+            for row in rows
+        ]
+        # What the reader asked for and will never see: the lines trimmed away
+        # between one read and the next.
+        dropped = max(0, int(oldest) - seen - 1) if oldest is not None and seen else 0
+        newest = entries[-1]["seq"] if entries else seen
+        return {"entries": entries, "cursor": str(newest), "dropped": dropped}
 
 
-def _entry_of(row: tuple[str, dict[str, str]]) -> dict[str, Any]:
-    _, fields = row
-    return {
-        "seq": int(fields.get("seq", 0)),
-        "ts": fields.get("ts", ""),
-        "level": fields.get("level", ""),
-        "source": fields.get("source", ""),
-        "message": fields.get("message", ""),
-    }
+async def _ready(pool: Any) -> None:
+    """Opens the pool if whoever built it has not.
+
+    The lifespan opens it; a test that talks to the app without one would
+    otherwise find a closed pool and read a fallback instead of the thing it
+    means to test. `open()` on an open pool does nothing.
+    """
+    opener = getattr(pool, "open", None)
+    if opener is not None:
+        await opener()

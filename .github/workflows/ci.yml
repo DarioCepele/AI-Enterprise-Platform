@@ -9,13 +9,17 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      redis:
-        image: redis:8.2.3
-        ports: ["6379:6379"]
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: agente
+          POSTGRES_PASSWORD: agente
+          POSTGRES_DB: agente
+        ports: ["5432:5432"]
         options: >-
-          --health-cmd "redis-cli ping"
+          --health-cmd "pg_isready -U agente"
           --health-interval 10s
-          --health-timeout 3s
+          --health-timeout 5s
           --health-retries 5
 
     steps:
@@ -37,7 +41,9 @@ jobs:
       - run: uv run pytest -q
         env:
           AGUI_LAB_CONTRACTS: ${{ github.workspace }}/.contracts/contracts
-          DEMO_REDIS_URI: redis://127.0.0.1:6379/1
+          # La suite si deriva il proprio database e se lo crea: quello che
+          # lascia dietro non tocca il database di un servizio.
+          DEMO_POSTGRES_DSN: postgresql://agente:agente@127.0.0.1:5432/agente
           DEMO_FAKE_CLIENT: "true"
 
   image:
