@@ -88,16 +88,3 @@ class Breaker:
             raise
         self._failures = 0
         return result
-
-
-def resilient(
-    breaker: Breaker,
-    attempts: int = DEFAULT_ATTEMPTS,
-    backoff: float = DEFAULT_BACKOFF,
-) -> Callable[[Callable[[], Awaitable[Any]]], Awaitable[Any]]:
-    """Retries inside the breaker: transient failures first, then giving up."""
-
-    async def run(call: Callable[[], Awaitable[Any]]) -> Any:
-        return await breaker.call(lambda: with_retries(call, attempts, backoff))
-
-    return run  # type: ignore[return-value]
