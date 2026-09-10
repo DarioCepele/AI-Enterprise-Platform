@@ -53,17 +53,6 @@ class FactExtractor(Protocol):
     async def extract_facts(self, messages: list[dict[str, Any]]) -> str: ...
 
 
-class NoSummarizer:
-    """Report missing model configuration and produce no summary."""
-
-    async def summarize(self, messages: list[dict[str, Any]]) -> str:
-        logger.warning(
-            "Summary not produced: no model configured (MEMORY_SUMMARY_MODEL). "
-            "The turns outside the window stay outside the context."
-        )
-        return ""
-
-
 class OpenAICompatibleSummarizer:
     """Summarize through a Chat Completions endpoint with a dedicated model and credentials. Compatible providers include OpenRouter and LM Studio."""
 
