@@ -13,6 +13,16 @@ load_dotenv()
 
 SINGLE_TENANT_SCOPE = "local-laboratory"
 
+# Where the interface runs while somebody develops. Any other origin has to be
+# named: an API that answered everybody would let any page a browser happens to
+# have open read the instances of this service.
+DEFAULT_ORIGINS = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+)
+
 
 class Settings(BaseSettings):
     """Everything the process service reads from the environment."""
@@ -27,9 +37,19 @@ class Settings(BaseSettings):
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)
     port: int = Field(default=8300, ge=1, le=65535)
+    allowed_origins: Annotated[tuple[str, ...], NoDecode] = Field(default=DEFAULT_ORIGINS)
     public_url: str = Field(default="http://localhost:8300")
     push_secret: str = Field(default="laboratory-without-a-secret")
     agents: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def _origins(cls, value: object) -> object:
+        """A comma-separated list, because that is what an environment holds."""
+        if not isinstance(value, str):
+            return value
+        origins = tuple(part.strip() for part in value.split(",") if part.strip())
+        return origins or DEFAULT_ORIGINS
 
     @field_validator("agents", mode="before")
     @classmethod
@@ -52,6 +72,7 @@ FIELD_NOTES = {
     "pool_min_size": "Connections kept open.",
     "pool_max_size": "Connections at most.",
     "port": "Where the service listens when started locally.",
+    "allowed_origins": "Which pages may read this API from a browser. Comma-separated.",
     "public_url": "How a remote agent reaches this service back, for notifications.",
     "push_secret": "Signs notification tokens. Change it: the default is public.",
     "agents": 'Agents a step may delegate to, as JSON: {"knowledge": "http://..."}.',

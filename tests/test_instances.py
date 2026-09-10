@@ -8,6 +8,7 @@ from uuid import uuid4
 from process_service.api import create_app
 from process_service.catalog import load_catalog
 from process_service.definitions import parse_definition
+from process_service.engine import Engine, use_engine
 from process_service.migrations import LATEST_VERSION, applied_versions, run_migrations
 
 from conftest import needs_postgres
@@ -91,8 +92,17 @@ async def client_for(app) -> httpx.AsyncClient:
 
 
 @pytest.fixture
-def app(store):
-    return create_app(catalog=load_catalog("processes"), store=store)
+def app(store, dbos):
+    """The app, with the engine wired the way the lifespan would.
+
+    `ASGITransport` does not run lifespans: without this the engine -- and the
+    DBOS behind it -- would be whatever another test file happened to leave
+    behind, and these tests would pass or fail depending on the order they ran
+    in. They did, until this fixture said it out loud.
+    """
+    catalog = load_catalog("processes")
+    use_engine(Engine(catalog, store))
+    return create_app(catalog=catalog, store=store)
 
 
 async def test_the_api_lists_what_can_be_started(app):
@@ -153,3 +163,21 @@ async def test_readiness_counts_the_definitions(app):
 
     assert ready.json()["processes"] >= 1
     assert alive.json() == {"status": "alive"}
+
+
+async def test_a_browser_from_the_interface_may_read_the_instances(app, scope):
+    """The interface reads this API directly, so CORS is part of the contract."""
+    async with await client_for(app) as client:
+        allowed = await client.get(
+            "/instances",
+            headers={"Origin": "http://localhost:3000", "X-Process-Scope": scope},
+        )
+        stranger = await client.get(
+            "/instances",
+            headers={"Origin": "http://somewhere.else", "X-Process-Scope": scope},
+        )
+
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:3000"
+    # A service that answered everybody would let any page a browser happens to
+    # have open read what is running here.
+    assert "access-control-allow-origin" not in stranger.headers

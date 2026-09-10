@@ -9,6 +9,7 @@ from uuid import UUID
 
 from dbos import DBOS
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from .agents import AgentGateway, TOKEN_HEADER, NEEDS_INPUT, TERMINAL, summary_of, token_is_valid
 from .catalog import Catalog, load_catalog
@@ -83,6 +84,17 @@ def create_app(
             await pool.close()
 
     app = FastAPI(title="Process service", lifespan=lifespan)
+
+    # The interface reads the instances straight from here: it is a browser
+    # talking to this service, so the origins that may do it are named. A
+    # service that answered everybody would let any page somebody has open read
+    # what is running.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(config.allowed_origins),
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "X-Process-Scope"],
+    )
     configure_tracing(SERVICE_NAME, app)
 
     def current_store() -> InstanceStore:

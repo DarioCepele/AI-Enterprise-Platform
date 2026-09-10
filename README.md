@@ -175,6 +175,16 @@ Lo scope arriva dall'intestazione `X-Process-Scope` e vale come confine: le
 istanze di uno scope non si leggono da un altro. E' la stessa giuntura degli
 altri servizi, ed e' li' che si attacchera' l'autenticazione.
 
+**Chi legge questa API.** Il tab *Istanze* dell'interfaccia la chiama
+**direttamente dal browser**: e' l'unico modo perche' una vista che segue
+un'istanza non passi per l'agente, che nel frattempo puo' non esserci. Per
+questo `PROCESS_ALLOWED_ORIGINS` esiste e non e' `*`: un servizio che
+rispondesse a chiunque lascerebbe leggere le istanze a qualunque pagina il
+browser abbia aperta. L'agente principale invece la chiama da server a server,
+e ha due soli tool -- avviare e leggere. **Rispondere e approvare restano di una
+persona**, nel pannello: sono i momenti in cui il processo si e' fermato proprio
+per chiedere a qualcuno.
+
 ## Un passo delegato a un agente
 
 Un passo `agent` puo' durare ore, e per tutto quel tempo l'istanza deve essere
