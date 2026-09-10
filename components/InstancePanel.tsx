@@ -157,7 +157,9 @@ function WaitingOn({
 
 function Detail({ instance, onChanged }: { instance: Instance; onChanged: () => void }) {
   return (
-    <div className="pt-2">
+    // Rientrata e con un filo a sinistra: aperta senza, la lista dei passi si
+    // legge come altre istanze invece che come i passi di questa.
+    <div className="mt-2 border-l-2 border-[var(--border)] pl-3">
       {instance.note && <p className="pb-2 text-xs text-[var(--muted)]">{instance.note}</p>}
       <ol className="space-y-2">
         {instance.steps.map((step) => (
