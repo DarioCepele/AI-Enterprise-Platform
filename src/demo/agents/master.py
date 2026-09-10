@@ -9,6 +9,7 @@ from ..config import get_settings
 from ..telemetry import log_context_size
 from ..tools.memory_tools import build_memory_tools
 from ..tools.plan_tools import PlanStore, build_plan_tools
+from ..tools.process_tools import build_process_tools
 from ..tools.subagent_tools import build_subagent_tools
 from ..tools.skill_tools import build_skill_tools
 from ..tools.ui_tools import get_tools
@@ -72,6 +73,7 @@ def build_master_agent(
     settings = get_settings()
 
     subagent_tools = build_subagent_tools(settings.subagents)
+    process_tools = build_process_tools(settings.process_service_url, settings.default_scope)
     memory_tools = (
         build_memory_tools(settings.memory_service_url, settings.default_scope)
         if settings.memory_service_url
@@ -87,6 +89,7 @@ def build_master_agent(
             *build_skill_tools(),
             *memory_tools,
             *subagent_tools,
+            *process_tools,
         ],
 
         middleware=[log_context_size],

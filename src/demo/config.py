@@ -91,6 +91,9 @@ class Settings(BaseSettings):
         default=(), validation_alias=AliasChoices("DEMO_SUBAGENTS")
     )
     public_url: str = Field(default="", validation_alias=AliasChoices("DEMO_PUBLIC_URL"))
+    process_service_url: str = Field(
+        default="", validation_alias=AliasChoices("DEMO_PROCESS_SERVICE_URL")
+    )
     subagent_wait_seconds: float = Field(
         default=60.0, validation_alias=AliasChoices("DEMO_SUBAGENT_WAIT_SECONDS")
     )
@@ -108,6 +111,7 @@ class Settings(BaseSettings):
         "knowledge_agent_url",
         "knowledge_service_token",
         "public_url",
+        "process_service_url",
         mode="after",
     )
     @classmethod
@@ -199,6 +203,7 @@ FIELD_NOTES = {
         "Shared logs, deduplicated notifications. Without it both are per replica."
     ),
     "knowledge_agent_url": "One subagent, the short way. Ignored when DEMO_SUBAGENTS is set.",
+    "process_service_url": "Where durable processes live. Empty: the agent cannot start one.",
     "knowledge_service_token": "Service token of that subagent, for its extended card.",
     "subagents": 'Subagents as JSON: [{"name":"x","url":"http://...","token":""}].',
     "public_url": "How a subagent reaches this agent back, for push notifications.",
