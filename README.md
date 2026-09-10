@@ -124,10 +124,11 @@ e' una tabella che mente al secondo cambiamento.
 
 | Variable | Default | What it decides |
 |---|---|---|
-| `MEMORY_MONGO_URI` | `mongodb://127.0.0.1:27017` | Durable transcripts. Required. |
-| `MEMORY_MONGO_DATABASE` | `demo_memory` | Database name inside that Mongo. |
+| `MEMORY_POSTGRES_DSN` | `postgresql://127.0.0.1:5432/memoria` | Durable transcripts, summaries and facts. Required. |
 | `MEMORY_REDIS_URI` | `redis://127.0.0.1:6379/0` | Hot tail, semantic index, compaction lock. Required. |
-| `MEMORY_BUCKET_SIZE` | `50` | Messages per bucket document. |
+| `MEMORY_PORT` | `8100` | Where the service listens when started locally. |
+| `MEMORY_POOL_MIN_SIZE` | `1` | Connections kept open. |
+| `MEMORY_POOL_MAX_SIZE` | `10` | Connections at most. |
 | `MEMORY_RETENTION_DAYS` | `0` | Days of inactivity after which a thread is forgotten. 0 = never. |
 | `MEMORY_JSON_LOGS` | `False` | Structured logs for a collector instead of the readable line. |
 | `MEMORY_HOT_TAIL_SECONDS` | `1800` | How long the cached tail of a conversation survives. |
@@ -219,9 +220,8 @@ percorsi fratelli.
 | `knowledge-agent` | loopback 8200 | sottoagente A2A: legge un corpus |
 | `analysis-agent` | loopback 8400 | sottoagente A2A: misura e confronta |
 | `memory-service` | — | memoria conversazionale, interna |
-| `mongo` | loopback | transcript e fatti duraturi |
 | `redis` | loopback | coda calda e ricordi cercabili |
-| `postgres` | loopback | il libro mastro delle istanze |
+| `postgres` | loopback | istanze dei processi **e** trascritti della memoria |
 
 La memoria **non pubblica porte**: la raggiunge solo il master agent dalla rete
 di compose. Gli altri sono sul **loopback**, che non e' la stessa cosa di
@@ -320,66 +320,55 @@ sbagliata nella card lo rompe con un `MethodNotFoundError` che non spiega
 niente. Tutti e tre sono documentati in §5.5-5.7 della spec e nel README del
 knowledge agent.
 
-## MongoDB
+## Postgres
 
-Istanza di persistenza per la memoria conversazionale dell'agente. Vive nello
-stesso compose degli altri servizi ma è indipendente: si alza da sola e non è
-un `depends_on` di nessuno.
-
-```bash
-docker compose up -d mongo
-docker compose ps mongo          # atteso: Up (healthy)
-```
-
-Le credenziali arrivano dal `.env` (`MONGO_INITDB_ROOT_USERNAME`,
-`MONGO_INITDB_ROOT_PASSWORD`, `MONGO_INITDB_DATABASE`); in `.env.example` ci
-sono solo segnaposto. Vengono lette **solo al primo avvio**, quando il volume è
-vuoto: per cambiarle davvero serve ricreare il volume.
-
-I dati stanno nel volume nominato `demo-infra_mongo-data`, non in una cartella
-del repo. Sopravvivono a `docker compose down`; per azzerarli serve
-`docker compose down -v` (oppure `docker volume rm demo-infra_mongo-data`).
-
-Dall'host la porta è pubblicata **solo su loopback**, quindi il DB non è
-raggiungibile dalla rete locale:
+Un solo server, **due database**: `processi` per le istanze durevoli, `memoria`
+per i trascritti. Stessa tecnologia, dati separati; e chi vuole due server
+cambia una variabile, perche' ogni servizio ha il proprio DSN e non sa niente
+dell'altro.
 
 ```bash
-mongosh "mongodb://<user>:<password>@127.0.0.1:${MONGO_HOST_PORT}/<db>?authSource=admin"
+docker compose up -d postgres
+docker compose exec postgres psql -U "$POSTGRES_USER" -l   # atteso: processi, memoria
 ```
 
-`MONGO_HOST_PORT` esiste perché su una macchina con un mongod nativo la 27017 è
-già occupata e il container non partirebbe; in quel caso basta metterla a 27018.
-Dagli altri container di compose l'indirizzo è invece `mongo:27017`, sempre con
-`authSource=admin`.
-
-Verifica rapida della connettività, senza scrivere la password a riga di comando:
+Il secondo database lo crea `postgres/init/01-databases.sh`, che gira **solo
+alla prima inizializzazione del volume** come tutti gli script di quella
+cartella. Su un volume che esiste gia':
 
 ```bash
-docker compose exec mongo sh -c 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" \
-  -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin \
-  --eval "db.adminCommand({ping:1})"'
+docker compose exec postgres createdb -U "$POSTGRES_USER" memoria
 ```
 
-### Limiti da conoscere prima di costruirci sopra
+I dati stanno nel volume `demo-infra_postgres-data`. Sopravvivono a
+`docker compose down`; per azzerarli serve `down -v`.
 
-È un **nodo singolo, senza replica set**. Due conseguenze che pesano sul design
-di un layer di memoria:
+Dall'host la porta e' pubblicata **solo su loopback**
+(`POSTGRES_HOST_PORT`, di default 5432: si cambia se la macchina ha gia' un
+Postgres nativo). Dagli altri container l'indirizzo e' `postgres:5432`.
 
-- **niente transazioni multi-documento**: `session.startTransaction()` fallisce.
-  Scrivere un turno di conversazione deve stare in un solo documento, o
-  tollerare scritture parziali.
-- **niente change streams**: `db.collection.watch()` non è disponibile, quindi
-  nessuna notifica push sui cambi. Chi vuole reagire alle scritture deve fare
-  polling.
+Ogni servizio applica le proprie **migrazioni all'avvio**: numerate,
+idempotenti, registrate in `schema_migrations`. Un fork non deve trovare uno
+script ed eseguirlo a mano prima che il servizio parta.
 
-Entrambi richiedono un replica set, anche a singolo nodo (`--replSet` più
-`rs.initiate()`), che comporta oplog e una configurazione in più: non è stato
-introdotto perché per una demo locale il costo supera il beneficio.
+### C'era MongoDB, e non c'e' piu'
+
+La memoria teneva i trascritti in Mongo, con i messaggi impacchettati in
+**documenti bucket** — un pattern che esiste per far somigliare un database a
+documenti a una tabella. In Postgres una riga per messaggio e' gia' la forma
+economica, e l'append e' una sola istruzione invece di una ricerca del bucket
+non pieno con ritentativo per lo scrittore perdente.
+
+Il modello a documenti resta la risposta giusta per entita' autocontenute lette
+tutte insieme, o per scritture che superano quello che regge un nodo. Un turno
+di conversazione non e' nessuna delle due: e' append-only, uniforme, letto a
+coda. E tre sistemi al 99,9% fanno 99,7% combinato — 26 ore di disservizio
+l'anno invece di 8,7.
 
 ## Redis
 
 Memoria a breve termine del servizio di memoria: la coda calda delle
-conversazioni. Requisiti opposti a quelli di Mongo — latenza bassa e scadenza
+conversazioni. Requisiti opposti a quelli del durevole — latenza bassa e scadenza
 automatica invece di durata e storia completa — per questo è un servizio a sé e
 non un'altra collezione.
 
@@ -390,7 +379,7 @@ docker compose ps redis          # atteso: Up (healthy)
 
 Password obbligatoria dal `.env` (`REDIS_PASSWORD`), porta su loopback
 (`REDIS_HOST_PORT`, default 6379). **Nessun volume, ed è voluto**: quello che
-vive qui deve essere sempre ricostruibile da Mongo. Se perdere Redis perdesse
+vive qui deve essere sempre ricostruibile da Postgres. Se perdere Redis perdesse
 dati, sarebbe il posto sbagliato dove tenerli.
 
 L'immagine è `redis:8.2.3`, non `redis-stack`: da Redis 8 il Query Engine sta
@@ -423,7 +412,7 @@ quella che il compose usa per `service_healthy`.
 Cosa conta come dipendenza cambia per servizio: per il master il servizio di
 memoria si' e i sottoagenti no -- uno giu' degrada un turno e il tool lo
 dichiara, mentre senza memoria ogni thread ripartirebbe da zero in silenzio.
-Per la memoria, Mongo e' obbligatorio e Redis no: e' una cache, e senza si e'
+Per la memoria, Postgres e' obbligatorio e Redis no: e' una cache, e senza si e'
 piu' lenti, non incapaci.
 
 Con `JSON_LOGS=true` le righe diventano oggetti con servizio, logger e thread
@@ -444,7 +433,7 @@ ricostruire niente. Prima quelle variabili finivano nel bundle a build time.
 
 I manifest Kubernetes stanno in `deploy/`, con due repliche di default sul
 master agent e sul servizio di memoria: non e' dimensionamento, e' la sonda che
-fa emergere subito una regressione dello stato di processo. Mongo e Redis
+fa emergere subito una regressione dello stato di processo. Postgres e Redis
 restano fuori, e il perche' e' scritto in `deploy/README.md`.
 
 ## Contratti fra i repo
@@ -466,13 +455,16 @@ Dettagli e regole di modifica in `contracts/README.md`.
 ```bash
 cd ../demo-master-agent && uv run pytest        # 140
 cd ../demo-knowledge-agent && uv run pytest     # 39
-cd ../demo-memory-service && uv run pytest      # 97, contro Mongo e Redis veri
-cd ../demo-frontend && npm test                 # 121
+cd ../demo-memory-service && uv run pytest     # 122, contro Postgres e Redis veri
+cd ../demo-frontend && npm test                # 139
 ```
 
-I test del servizio di memoria girano contro i database veri (`docker compose
-up -d mongo redis`): il modello a bucket senza transazioni si regge su garanzie
-del server che un finto non riproduce. Gli altri sono offline.
+I test della memoria e dei processi girano contro i database veri
+(`docker compose up -d postgres redis`): una conversazione e un'istanza sono
+righe che devono sopravvivere al processo che le ha scritte, e un finto in
+memoria non proverebbe niente al riguardo. Ognuno si crea il proprio database
+`_test`, cosi' non tocca quello di un servizio in esecuzione. Gli altri repo
+sono offline.
 
 `node_modules` contiene binari specifici della piattaforma: se alterni Windows e
 WSL sulla stessa cartella, rilancia `npm install` dopo ogni cambio.

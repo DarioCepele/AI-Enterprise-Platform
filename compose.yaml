@@ -53,8 +53,7 @@ services:
           cpus: "1.0"
     build: ../demo-memory-service
     environment:
-      MEMORY_MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/?authSource=admin
-      MEMORY_MONGO_DATABASE: ${MONGO_INITDB_DATABASE}
+      MEMORY_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/memoria
       MEMORY_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/0
       MEMORY_SUMMARY_BASE_URL: ${OPENAI_BASE_URL}
       MEMORY_SUMMARY_API_KEY: ${OPENAI_API_KEY}
@@ -64,7 +63,7 @@ services:
       MEMORY_JSON_LOGS: ${JSON_LOGS:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -145,29 +144,6 @@ services:
       master-agent:
         condition: service_healthy
 
-  mongo:
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: "1.0"
-    image: mongo:8.0.16@sha256:4b58ebcb1dc7a7b4e84cd8ce9098d48764ae4478876898ff9551acf2ac4a6a6d
-    restart: unless-stopped
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?required in .env}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?required in .env}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:?required in .env}
-    ports:
-      - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
-    volumes:
-      - mongo-data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-
   redis:
     deploy:
       resources:
@@ -237,6 +213,9 @@ services:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Crea il database della memoria alla prima inizializzazione: due
+      # database sullo stesso server, uno per servizio.
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -245,5 +224,4 @@ services:
       start_period: 20s
 
 volumes:
-  mongo-data:
   postgres-data:
