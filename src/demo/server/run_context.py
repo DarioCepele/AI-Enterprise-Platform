@@ -18,6 +18,7 @@ from ag_ui.core.events import (
 from agent_framework_ag_ui import AgentFrameworkAgent
 
 from ..plan import PlanStore
+from .attachments import annotate_video_audio_attachments
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,17 @@ class LabRunner(AgentFrameworkAgent):
             return None
 
     async def run(self, input_data: dict[str, Any]) -> AsyncGenerator[BaseEvent, None]:
+        raw_messages = input_data.get("messages")
+        if isinstance(raw_messages, list):
+            # A video/audio attachment survives as raw multimodal Content once the
+            # framework's AG-UI adapter converts it - but only if the underlying
+            # chat client knows what to do with a video/*-or-audio/* media type,
+            # which most chat-completions APIs do not. Exposing the URL as plain
+            # text too means the model deciding which tools to call can always
+            # read and reuse it, regardless of what the client does with the raw
+            # media content.
+            input_data = {**input_data, "messages": annotate_video_audio_attachments(raw_messages)}
+
         queue: asyncio.Queue = asyncio.Queue()
         stored_state = await self._stored_state(input_data)
         plan = plan_from_state(input_data, (stored_state or {}).get("plan"))

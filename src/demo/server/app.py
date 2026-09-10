@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from psycopg_pool import AsyncConnectionPool
@@ -27,6 +28,7 @@ from ..a2a.push import HEADER, SeenNotifications, is_terminal, summary_of, token
 from ..memory.remote_store import MemoryServiceSnapshotStore
 from .run_context import LabRunner
 from .scope import ScopeResolver, scope_of_request
+from .uploads import UploadStore, build_upload_router
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,7 @@ def create_app(
     collector: LogCollector | None = None,
     snapshot_store: AGUIThreadSnapshotStore | None = None,
     scope_resolver: ScopeResolver | None = None,
+    upload_store: UploadStore | None = None,
 ) -> FastAPI:
     """Builds the app. `agent`, `collector`, the store and the resolver are passed in tests."""
     resolve_scope: ScopeResolver = scope_resolver or scope_of_request
@@ -119,13 +122,18 @@ def create_app(
 
         Without one, the process holds whatever arrives: the limit is generous
         enough for a long conversation and small enough that nobody can pin the
-        agent with a single request.
+        agent with a single request. A video upload is legitimately bigger than
+        a chat turn, so `/uploads` is checked against its own, larger ceiling --
+        enforced again, incrementally, inside the upload store itself.
         """
+        limit = MAX_REQUEST_BYTES
+        if request.url.path.startswith("/uploads"):
+            limit = get_settings().upload_max_bytes
         declared = request.headers.get("content-length")
-        if declared and int(declared) > MAX_REQUEST_BYTES:
+        if declared and int(declared) > limit:
             logger.warning("Request refused: %s bytes declared.", declared)
             return JSONResponse(
-                {"detail": f"request too large: over {MAX_REQUEST_BYTES} bytes"},
+                {"detail": f"request too large: over {limit} bytes"},
                 status_code=413,
             )
         return await call_next(request)
@@ -286,6 +294,13 @@ def create_app(
             except Exception:
                 logger.warning("Shared logs unreadable: answering with this replica's own.")
         return log_collector.since(cursor)
+
+    uploads = upload_store or UploadStore(
+        directory=Path(get_settings().upload_dir) if get_settings().upload_dir else None,
+        max_bytes=get_settings().upload_max_bytes,
+        ttl_seconds=get_settings().upload_ttl_seconds,
+    )
+    app.include_router(build_upload_router(uploads, base_url=lambda request: str(request.base_url).rstrip("/")))
 
     store = snapshot_store or _default_snapshot_store()
 

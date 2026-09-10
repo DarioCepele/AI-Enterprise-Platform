@@ -94,8 +94,18 @@ class Settings(BaseSettings):
     process_service_url: str = Field(
         default="", validation_alias=AliasChoices("DEMO_PROCESS_SERVICE_URL")
     )
+    voice_service_url: str = Field(
+        default="", validation_alias=AliasChoices("DEMO_VOICE_SERVICE_URL")
+    )
     subagent_wait_seconds: float = Field(
         default=60.0, validation_alias=AliasChoices("DEMO_SUBAGENT_WAIT_SECONDS")
+    )
+    upload_dir: str = Field(default="", validation_alias=AliasChoices("DEMO_UPLOAD_DIR"))
+    upload_max_bytes: int = Field(
+        default=200 * 1024 * 1024, validation_alias=AliasChoices("DEMO_UPLOAD_MAX_BYTES")
+    )
+    upload_ttl_seconds: float = Field(
+        default=3600.0, validation_alias=AliasChoices("DEMO_UPLOAD_TTL_SECONDS")
     )
 
     @field_validator(
@@ -112,6 +122,8 @@ class Settings(BaseSettings):
         "knowledge_service_token",
         "public_url",
         "process_service_url",
+        "voice_service_url",
+        "upload_dir",
         mode="after",
     )
     @classmethod
@@ -204,11 +216,21 @@ FIELD_NOTES = {
     ),
     "knowledge_agent_url": "One subagent, the short way. Ignored when DEMO_SUBAGENTS is set.",
     "process_service_url": "Where durable processes live. Empty: the agent cannot start one.",
+    "voice_service_url": (
+        "demo-voice-service, for its POST /transcribe. Empty: the video-analysis tool is not shown."
+    ),
     "knowledge_service_token": "Service token of that subagent, for its extended card.",
     "subagents": 'Subagents as JSON: [{"name":"x","url":"http://...","token":""}].',
     "public_url": "How a subagent reaches this agent back, for push notifications.",
     "subagent_wait_seconds": (
         "How long a turn waits before letting the outcome arrive by notification."
+    ),
+    "upload_dir": (
+        "Folder for ephemeral video uploads. Empty: the OS temp folder."
+    ),
+    "upload_max_bytes": "Largest accepted upload for /uploads. Bigger is refused.",
+    "upload_ttl_seconds": (
+        "How long an uploaded file stays fetchable before it is swept away."
     ),
 }
 

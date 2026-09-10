@@ -13,6 +13,7 @@ from ..tools.process_tools import build_process_tools
 from ..tools.subagent_tools import build_subagent_tools
 from ..tools.skill_tools import build_skill_tools
 from ..tools.ui_tools import get_tools
+from ..tools.video_tools import build_video_tools
 
 INSTRUCTIONS = """You are the agent of {product}.
 Answer in {language}, concisely.
@@ -30,6 +31,10 @@ When it needs several steps:
 
 When you have to compare several items along common dimensions, use the
 `ui_table` tool instead of describing the comparison in words.
+
+When the user attaches or refers to a video (you will see its URL as a
+"[allegato video: ...]" note), call `analyze_video` with that URL: nothing
+about what it says or shows is visible any other way.
 
 When a question falls in the domain of one of your `ask_*` tools, call that
 tool: the answer comes from that agent, not from your memory. Their
@@ -74,6 +79,7 @@ def build_master_agent(
 
     subagent_tools = build_subagent_tools(settings.subagents)
     process_tools = build_process_tools(settings.process_service_url, settings.default_scope)
+    video_tools = build_video_tools(settings.voice_service_url)
     memory_tools = (
         build_memory_tools(settings.memory_service_url, settings.default_scope)
         if settings.memory_service_url
@@ -90,6 +96,7 @@ def build_master_agent(
             *memory_tools,
             *subagent_tools,
             *process_tools,
+            *video_tools,
         ],
 
         middleware=[log_context_size],
