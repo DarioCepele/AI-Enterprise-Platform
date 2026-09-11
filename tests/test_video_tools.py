@@ -16,13 +16,16 @@ own test suite's job).
 from __future__ import annotations
 
 import io
+import json
 
 import av
 import httpx
 import pytest
 from PIL import Image
 
+from contracts import assert_shape
 from demo.tools.video_tools import build_video_tools
+from demo.tools.ui_tools import DISPLAY_KEY
 from demo.vision import FakeVisionClient
 
 KNOWN_PHRASE = "the quick brown fox"
@@ -112,6 +115,11 @@ def voice_service(monkeypatch):
             if state["transcribe_status"] != 200:
                 return httpx.Response(state["transcribe_status"], json={"detail": "stt down"})
             return httpx.Response(200, json={"text": state["transcript"]})
+        if request.method == "POST" and url.endswith("/chat/completions"):
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": KNOWN_DESCRIPTION}}]},
+            )
         return httpx.Response(404, json={"detail": f"no route for {url}"})
 
     transport = httpx.MockTransport(handler)
@@ -132,9 +140,38 @@ def tools(vision=None, **kwargs):
     return {t.name: t for t in built}, vision
 
 
+def _payload(answer) -> dict:
+    """The structured `video-analysis` artifact carried in `answer`'s display payload."""
+    return json.loads(answer.additional_properties[DISPLAY_KEY])
+
+
 def test_without_a_voice_service_there_is_no_tool():
     # The model must not be shown a tool that cannot work: it would call it.
     assert build_video_tools("", vision_client=FakeVisionClient()) == []
+
+
+@pytest.mark.asyncio
+async def test_the_default_vision_client_uses_the_dedicated_vision_model(
+    voice_service, monkeypatch
+):
+    # No `vision_client` passed: `build_video_tools` must build its own
+    # `HttpVisionClient`, pointed at `Settings.vision_model` -- not
+    # `Settings.model`, which is the conversation's own model.
+    monkeypatch.setenv("DEMO_VISION_MODEL", "some/dedicated-vision-model")
+    monkeypatch.setenv("OPENAI_CHAT_COMPLETION_MODEL", "some/conversation-model")
+
+    built = {t.name: t for t in build_video_tools("http://voice.test")}
+    answer = await built["analyze_video"].func(video_url="http://files.test/video.mp4")
+
+    payload = _payload(answer)
+    assert payload["description"] == KNOWN_DESCRIPTION
+
+    vision_request = next(
+        r for r in voice_service["seen"] if r.url.path.endswith("/chat/completions")
+    )
+    body = json.loads(vision_request.content)
+    assert body["model"] == "some/dedicated-vision-model"
+    assert body["model"] != "some/conversation-model"
 
 
 @pytest.mark.asyncio
@@ -143,8 +180,22 @@ async def test_the_answer_cites_both_what_was_said_and_what_was_seen(voice_servi
 
     answer = await built["analyze_video"].func(video_url="http://files.test/video.mp4")
 
-    assert KNOWN_PHRASE in answer.text
-    assert KNOWN_DESCRIPTION in answer.text
+    payload = _payload(answer)
+    assert payload["transcript"] == KNOWN_PHRASE
+    assert payload["description"] == KNOWN_DESCRIPTION
+
+
+@pytest.mark.asyncio
+async def test_the_answer_is_a_structured_artifact_matching_the_shared_contract(voice_service):
+    built, vision = tools()
+
+    answer = await built["analyze_video"].func(video_url="http://files.test/video.mp4")
+
+    payload = _payload(answer)
+    assert payload["component"] == "video-analysis"
+    assert payload["video_url"] == "http://files.test/video.mp4"
+    assert payload["id"]
+    assert_shape("agui/tool-result-video-analysis", payload)
 
 
 @pytest.mark.asyncio
@@ -191,8 +242,9 @@ async def test_a_video_with_no_audio_track_still_describes_the_frames(voice_serv
 
     answer = await built["analyze_video"].func(video_url="http://files.test/video.mp4")
 
-    assert "No speech could be made out" in answer.text
-    assert KNOWN_DESCRIPTION in answer.text
+    payload = _payload(answer)
+    assert payload["transcript"] == ""
+    assert payload["description"] == KNOWN_DESCRIPTION
     assert len(vision.calls) == 1
     assert not any(r.url.path == "/transcribe" for r in voice_service["seen"])
 
@@ -204,8 +256,9 @@ async def test_an_unreachable_transcription_service_still_reports_what_was_seen(
 
     answer = await built["analyze_video"].func(video_url="http://files.test/video.mp4")
 
-    assert "No speech could be made out" in answer.text
-    assert KNOWN_DESCRIPTION in answer.text
+    payload = _payload(answer)
+    assert payload["transcript"] == ""
+    assert payload["description"] == KNOWN_DESCRIPTION
 
 
 @pytest.mark.asyncio

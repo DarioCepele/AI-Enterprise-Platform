@@ -38,7 +38,9 @@ from typing import Annotated
 
 import httpx
 from agent_framework import Content, FunctionTool, tool
+from agent_framework.ag_ui import state_update
 
+from ..config import get_settings
 from ..vision import HttpVisionClient, VisionClient
 
 logger = logging.getLogger(__name__)
@@ -72,7 +74,9 @@ def build_video_tools(
         return []
 
     transcribe_url = voice_service_url.rstrip("/") + "/transcribe"
-    vision = vision_client or HttpVisionClient()
+    # Its own model, distinct from `Settings.model`: the conversation's model
+    # may only see separate frames, not the video itself.
+    vision = vision_client or HttpVisionClient(model=get_settings().vision_model)
 
     @tool
     async def analyze_video(
@@ -91,9 +95,11 @@ def build_video_tools(
 
         Use this whenever the user attaches or refers to a video and asks
         what it says or what it shows: nothing about a video's content is
-        visible any other way. The answer names **both** what was said
-        (from the audio) and what appears in the frames (from vision) --
-        report both, even when one of the two turned out empty.
+        visible any other way. Both halves -- what was said (from the audio)
+        and what appears in the frames (from vision) -- are always produced,
+        even when one of the two turned out empty, and are returned as a
+        structured `video-analysis` artifact for the frontend to render, the
+        same way `ui_table` returns a `ui-table` artifact.
         """
         try:
             video_path = await _download(video_url)
@@ -116,9 +122,19 @@ def build_video_tools(
             len(description),
         )
 
-        said = f'It says: "{transcript}"' if transcript else "No speech could be made out."
-        seen = f"It shows: {description}" if description else "The frames could not be described."
-        return Content.from_text(f"{said} {seen}")
+        artifact_id = f"art_{uuid.uuid4().hex[:8]}"
+        heard = "speech" if transcript else "no speech"
+        seen = "a description" if description else "no description"
+        return state_update(
+            text=f"I analyzed the video: {heard} understood, {seen} produced from the frames.",
+            tool_result={
+                "component": "video-analysis",
+                "id": artifact_id,
+                "video_url": video_url,
+                "transcript": transcript,
+                "description": description,
+            },
+        )
 
     return [analyze_video]
 

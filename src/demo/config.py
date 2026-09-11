@@ -56,6 +56,10 @@ class Settings(BaseSettings):
         default="anthropic/claude-sonnet-5",
         validation_alias=AliasChoices("OPENAI_CHAT_COMPLETION_MODEL"),
     )
+    vision_model: str = Field(
+        default="qwen/qwen3.8-27b",
+        validation_alias=AliasChoices("DEMO_VISION_MODEL"),
+    )
     use_fake_client: bool = Field(
         default=False, validation_alias=AliasChoices("DEMO_FAKE_CLIENT")
     )
@@ -112,6 +116,7 @@ class Settings(BaseSettings):
         "base_url",
         "api_key",
         "model",
+        "vision_model",
         "product_name",
         "product_language",
         "default_scope",
@@ -198,6 +203,10 @@ FIELD_NOTES = {
     "base_url": "Where the model lives. Any OpenAI-compatible endpoint.",
     "api_key": "Credential for that endpoint. Required unless the fake client is on.",
     "model": "Model the master agent talks to.",
+    "vision_model": (
+        "Model the analyze_video tool talks to for frame description, kept separate "
+        "from the conversation's own model since it must accept images natively."
+    ),
     "use_fake_client": "Deterministic answers without a model. For tests and offline work.",
     "allowed_origins": "Comma-separated origins allowed by CORS.",
     "product_name": "What the agent calls itself in its own instructions.",
