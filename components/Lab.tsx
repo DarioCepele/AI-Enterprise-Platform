@@ -8,6 +8,7 @@ import { Chat } from "./Chat";
 import { Inspector } from "./Inspector";
 import { PlanPanel } from "./PlanPanel";
 import { LabHeader } from "./LabHeader";
+import { VoiceChat } from "./VoiceChat";
 import { product } from "@/lib/config";
 
 export function Lab() {
@@ -71,12 +72,13 @@ export function Lab() {
         />
       </main>
       <aside className="lab-aside flex min-h-0 min-w-0 flex-col" aria-label="Plan and agent activity">
+        <VoiceChat />
         <PlanPanel shared={state.shared} />
         <Inspector events={state.events} running={state.running} />
       </aside>
       </div>
-      <footer className="border-t border-[var(--border)] px-6 py-2 font-mono text-[10px] text-[var(--muted)]">
-        {product.name} · {product.disclaimer}
+      <footer className="border-t border-[var(--border)] px-6 py-2 text-xs text-[var(--muted)]">
+        {product.disclaimer}
       </footer>
     </div>
   );

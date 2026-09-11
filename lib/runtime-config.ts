@@ -13,6 +13,8 @@ export interface RuntimeConfig {
   aguiUrl: string;
   /** Empty when this deployment has no process service: the panel says so. */
   processUrl: string;
+  /** Empty when this deployment has no voice service: the microphone button says so. */
+  voiceUrl: string;
   product: {
     name: string;
     tagline: string;
@@ -35,6 +37,7 @@ export const CONFIG_ELEMENT_ID = "lab-runtime-config";
 const DEFAULTS: RuntimeConfig = {
   aguiUrl: "http://127.0.0.1:8000/agui",
   processUrl: "",
+  voiceUrl: "",
   product: {
     name: "AG-UI Lab",
     tagline: "an agent at work",
@@ -65,6 +68,9 @@ export function configFromEnvironment(
     aguiUrl: pick(env.AGUI_URL, env.NEXT_PUBLIC_AGUI_URL) ?? DEFAULTS.aguiUrl,
     processUrl: (
       pick(env.PROCESS_URL, env.NEXT_PUBLIC_PROCESS_URL) ?? DEFAULTS.processUrl
+    ).replace(/\/$/, ""),
+    voiceUrl: (
+      pick(env.VOICE_URL, env.NEXT_PUBLIC_VOICE_URL) ?? DEFAULTS.voiceUrl
     ).replace(/\/$/, ""),
     product: {
       name: pick(env.PRODUCT_NAME, env.NEXT_PUBLIC_PRODUCT_NAME) ?? DEFAULTS.product.name,
