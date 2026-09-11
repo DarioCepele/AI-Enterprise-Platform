@@ -33,10 +33,25 @@ export type AGUIEvent =
   | { type: "SUBAGENT_ERROR"; subagentRunId: string; message: string; code?: string }
   | { type: "CUSTOM"; name: string; value: unknown };
 
+/** A single piece of user-authored text, per the AG-UI multimodal input standard. */
+export interface TextInputPart {
+  type: "text";
+  text: string;
+}
+
+/** A video attachment referenced by URL, per the AG-UI multimodal input standard. */
+export interface VideoInputPart {
+  type: "video";
+  source: { type: "url"; value: string };
+}
+
+export type MessagePart = TextInputPart | VideoInputPart;
+
 export interface RunInput {
   threadId: string;
   runId: string;
-  messages: { id: string; role: string; content: string }[];
+  /** Plain text for an ordinary message, or a list of parts once an attachment is involved. */
+  messages: { id: string; role: string; content: string | MessagePart[] }[];
   state: Record<string, unknown>;
   tools: unknown[];
   context: unknown[];

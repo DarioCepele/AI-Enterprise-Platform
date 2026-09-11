@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Entry } from "@/lib/agui/entries";
+import type { MessagePart } from "@/lib/agui/types";
+import { uploadVideo } from "@/lib/agui/client";
 import { emptyState } from "@/lib/config";
 import { EntryView } from "./entries";
 
@@ -9,7 +11,12 @@ interface Props {
   entries: Entry[];
   running: boolean;
   error: string | null;
-  onSend: (text: string) => void;
+  /**
+   * Plain text for an ordinary message. Once a video is attached, `content`
+   * carries the parts (text + video) and `displayText` is what the timeline
+   * shows for the user's own bubble.
+   */
+  onSend: (content: string | MessagePart[], displayText?: string) => void;
   onStop?: () => void;
 }
 
@@ -18,6 +25,11 @@ const STICKY_PX = 80;
 export function Chat({ entries, running, error, onSend, onStop }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [video, setVideo] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const busy = running || uploading;
 
   useEffect(() => {
     const el = scroller.current;
@@ -73,28 +85,92 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
         onSubmit={(e) => {
           e.preventDefault();
           const input = e.currentTarget.elements.namedItem("q") as HTMLInputElement;
-          if (running || !input.value.trim()) return;
+          const text = input.value.trim();
+          if (busy) return;
+          if (!text && !video) return;
           stick.current = true;
-          onSend(input.value);
-          input.value = "";
+
+          if (!video) {
+            onSend(text);
+            input.value = "";
+            return;
+          }
+
+          const file = video;
+          setUploading(true);
+          setUploadError(null);
+          uploadVideo(file)
+            .then((url) => {
+              const parts: MessagePart[] = [];
+              if (text) parts.push({ type: "text", text });
+              parts.push({ type: "video", source: { type: "url", value: url } });
+              onSend(parts, text || `video: ${file.name}`);
+              input.value = "";
+              setVideo(null);
+              if (fileInput.current) fileInput.current.value = "";
+            })
+            .catch((err) => {
+              setUploadError(err instanceof Error ? err.message : String(err));
+            })
+            .finally(() => setUploading(false));
         }}
       >
         <div className="flex items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2">
           <input
+            ref={fileInput}
+            type="file"
+            accept="video/*"
+            aria-label="Attach a video"
+            className="hidden"
+            onChange={(e) => {
+              setUploadError(null);
+              setVideo(e.currentTarget.files?.[0] ?? null);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            disabled={busy}
+            title={video ? video.name : "Attach a video"}
+            className="shrink-0 rounded-full border border-[var(--border)] px-2 py-1 font-mono text-[11px] disabled:opacity-40"
+          >
+            {video ? "🎬" : "+ video"}
+          </button>
+          <input
             name="q"
             aria-label="Message"
-            disabled={running}
+            disabled={busy}
             placeholder="Write a message…"
             className="min-w-0 flex-1 bg-transparent text-sm focus-visible:outline-2 focus-visible:outline-offset-2"
           />
           <button
             type="submit"
-            disabled={running}
+            disabled={busy}
             className="rounded-full bg-[var(--foreground)] px-4 py-1.5 text-xs text-[var(--background)] disabled:opacity-40"
           >
-            send
+            {uploading ? "uploading…" : "send"}
           </button>
         </div>
+        {video && (
+          <p className="mt-1 px-1 font-mono text-[10px] text-[var(--muted)]">
+            video: {video.name}{" "}
+            <button
+              type="button"
+              onClick={() => {
+                setVideo(null);
+                if (fileInput.current) fileInput.current.value = "";
+              }}
+              className="underline"
+            >
+              remove
+            </button>
+          </p>
+        )}
+        {uploadError && (
+          <p role="alert" className="mt-1 px-1 text-xs text-red-600">
+            upload error: {uploadError}
+          </p>
+        )}
       </form>
     </div>
   );

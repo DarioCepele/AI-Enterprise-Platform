@@ -6,6 +6,34 @@ export function aguiUrl(): string {
   return runtimeConfig().aguiUrl;
 }
 
+/** Derived from the AG-UI endpoint, which is read at runtime (same pattern as logsUrl). */
+export function uploadsUrl(): string {
+  return aguiUrl().replace(/\/agui$/, "/uploads");
+}
+
+/**
+ * Uploads a file as a raw request body (not multipart/form-data — a known
+ * deviation of this endpoint) and returns the URL the server stored it at.
+ */
+export async function uploadVideo(file: Blob, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(uploadsUrl(), {
+    method: "POST",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`/uploads ha risposto ${response.status}`);
+  }
+
+  const data = (await response.json().catch(() => null)) as { url?: unknown } | null;
+  if (!data || typeof data.url !== "string" || data.url === "") {
+    throw new Error("/uploads non ha restituito un url valido");
+  }
+  return data.url;
+}
+
 export async function runAgent(
   input: RunInput,
   onEvent: (event: AGUIEvent) => void,

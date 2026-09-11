@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { runAgent } from "@/lib/agui/client";
+import type { MessagePart } from "@/lib/agui/types";
 import { initialState, reduce, withUserMessage, type LabState } from "@/lib/agui/reducer";
 import { Chat } from "./Chat";
 import { Inspector } from "./Inspector";
@@ -18,12 +19,13 @@ export function Lab() {
   const stop = useCallback(() => abort.current?.abort(), []);
 
   const send = useCallback(
-    async (text: string) => {
+    async (content: string | MessagePart[], displayText?: string) => {
       if (inFlight.current) return;
       inFlight.current = true;
       const controller = new AbortController();
       abort.current = controller;
-      const userMessage = { id: crypto.randomUUID(), role: "user", content: text };
+      const text = displayText ?? (typeof content === "string" ? content : "");
+      const userMessage = { id: crypto.randomUUID(), role: "user", content };
       setState((s) => ({ ...withUserMessage(s, userMessage.id, text), running: true }));
 
       try {
