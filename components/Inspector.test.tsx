@@ -132,7 +132,7 @@ describe("Inspector", () => {
 
   it("keeps filter and logs while switching between the two views", () => {
     render(<Inspector events={[{ type: "REASONING_START", messageId: "r" }]} running={false} />);
-    const eventButton = screen.getByRole("button", { name: "Event inspector 1" });
+    const eventButton = screen.getByRole("button", { name: "Eventi 1" });
     const logButton = screen.getByRole("button", { name: "Log" });
     expect(eventButton).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("button", { name: "reasoning" }));
@@ -160,7 +160,7 @@ describe("Inspector", () => {
     expect(screen.getByText("riga 1")).not.toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Log" }));
     expect(screen.getByText("riga 1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Event inspector 0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Eventi 0" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(fetchMock.mock.calls[1][0]).toBe("1");
     rerender(<Inspector events={[]} running={false} />);

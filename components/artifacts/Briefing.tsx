@@ -6,7 +6,7 @@ export function Briefing({ artifact }: { artifact: Artifact }) {
   return (
     <figure className="briefing my-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
       <figcaption className="mb-2 flex flex-wrap items-baseline gap-2">
-        <span className="font-mono text-[11px] uppercase tracking-wide text-[var(--accent)]">
+        <span className="font-mono text-[11px] text-[var(--wire)]">
           {artifact.agent}
         </span>
         {artifact.question && (

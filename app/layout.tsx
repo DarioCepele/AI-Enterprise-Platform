@@ -1,16 +1,22 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
-import { Geist, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { CONFIG_ELEMENT_ID, configFromEnvironment } from "@/lib/runtime-config";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// A console for watching an agent's own instrumentation, not a chat-bot skin:
+// Plex's engineering lineage fits that better than a default UI grotesk, and
+// pairing its own sans with its own mono keeps the two families related
+// instead of arbitrary.
+const plexSans = IBM_Plex_Sans({
+  variable: "--font-plex-sans",
+  weight: ["400", "500", "600"],
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
+  weight: ["400", "500"],
   subsets: ["latin"],
 });
 
@@ -30,7 +36,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang={config.product.locale}
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <script

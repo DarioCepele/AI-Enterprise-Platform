@@ -70,15 +70,15 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
           type="button"
           onClick={() => setTab("events")}
           aria-pressed={tab === "events"}
-          className="font-mono text-[11px] uppercase tracking-wide"
+          className="text-sm font-medium"
         >
-          Event inspector <span className="tabular-nums">{events.length}</span>
+          Eventi <span className="font-mono text-xs tabular-nums text-[var(--muted)]">{events.length}</span>
         </button>
         <button
           type="button"
           onClick={() => setTab("log")}
           aria-pressed={tab === "log"}
-          className="font-mono text-[11px] uppercase tracking-wide"
+          className="text-sm font-medium"
         >
           Log
         </button>
@@ -86,7 +86,7 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
           type="button"
           onClick={() => setTab("instances")}
           aria-pressed={tab === "instances"}
-          className="font-mono text-[11px] uppercase tracking-wide"
+          className="text-sm font-medium"
         >
           Istanze
         </button>

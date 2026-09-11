@@ -4,10 +4,10 @@ export function LabHeader() {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border)] px-6 py-4">
       <div className="flex items-center gap-3">
-        <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--foreground)] font-mono text-sm text-[var(--background)]">{product.monogram}</span>
+        <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--signal)] font-mono text-sm text-[var(--background)]">{product.monogram}</span>
         <div>
           <h1 className="text-base font-semibold tracking-tight">{product.name}</h1>
-          <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--muted)]">{product.tagline}</p>
+          <p className="text-xs text-[var(--muted)]">{product.tagline}</p>
         </div>
       </div>
       <div aria-label="Technologies" className="flex flex-wrap gap-1.5">

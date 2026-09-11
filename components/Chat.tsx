@@ -48,8 +48,8 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
         className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-6"
       >
         {entries.length === 0 && (
-          <div className="mx-auto max-w-lg py-12">
-            <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[var(--accent)]">{emptyState.eyebrow}</p>
+          <div className="mx-auto flex min-h-[60vh] max-w-lg flex-col justify-center">
+            <p className="mb-3 text-sm text-[var(--muted)]">{emptyState.eyebrow}</p>
             <h2 className="text-3xl font-medium leading-tight tracking-tight">{emptyState.headline}<br />{emptyState.subhead}</h2>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-[var(--muted)]">{emptyState.body}</p>
           </div>
@@ -62,15 +62,16 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
           ))}
         </div>
         {running && (
-          <div className="flex items-center gap-3">
-            <p role="status" className="font-mono text-[11px] uppercase tracking-wide text-[var(--muted)]">
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--signal)]" />
+            <p role="status" className="text-sm text-[var(--signal)]">
               Working…
             </p>
             {onStop && (
               <button
                 type="button"
                 onClick={onStop}
-                className="rounded-full border border-[var(--border)] px-2 py-0.5 font-mono text-[11px] uppercase tracking-wide text-[var(--muted)]"
+                className="rounded-full border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]"
               >
                 stop
               </button>
@@ -132,7 +133,7 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
             onClick={() => fileInput.current?.click()}
             disabled={busy}
             title={video ? video.name : "Attach a video"}
-            className="shrink-0 rounded-full border border-[var(--border)] px-2 py-1 font-mono text-[11px] disabled:opacity-40"
+            className="shrink-0 rounded-full border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-40"
           >
             {video ? "🎬" : "+ video"}
           </button>

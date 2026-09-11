@@ -30,7 +30,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const TONE: Record<string, string> = {
   pending: "text-[var(--muted)]",
-  in_progress: "text-amber-600",
+  in_progress: "text-[var(--signal)]",
   completed: "text-emerald-600",
   failed: "text-red-600",
 };
@@ -65,7 +65,7 @@ export function PlanPanel({ shared }: { shared: Record<string, unknown> }) {
   if (plan === null) {
     return (
       <section className="border-b border-[var(--border)] px-4 py-3">
-        <h2 className="font-mono text-[11px] uppercase tracking-wide text-[var(--muted)]">
+        <h2 className="text-sm font-medium text-[var(--foreground)]">
           Piano di lavoro
         </h2>
         <p className="pt-1 text-xs text-[var(--muted)]">no plan in progress</p>
@@ -78,7 +78,7 @@ export function PlanPanel({ shared }: { shared: Record<string, unknown> }) {
   return (
     <section className="border-b border-[var(--border)] px-4 py-3">
       <header className="flex items-baseline justify-between">
-        <h2 className="font-mono text-[11px] uppercase tracking-wide text-[var(--muted)]">
+        <h2 className="text-sm font-medium text-[var(--foreground)]">
           Piano di lavoro
         </h2>
         <span className="font-mono text-xs">
