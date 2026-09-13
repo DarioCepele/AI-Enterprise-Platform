@@ -53,8 +53,12 @@ body {
   font-family: var(--font-sans), sans-serif;
 }
 
-button { cursor: pointer; }
+button {
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease, transform 100ms ease;
+}
 button:disabled { cursor: wait; }
+button:not(:disabled):active { transform: scale(0.97); }
 :focus-visible { outline: 2px solid var(--wire); outline-offset: 3px; }
 ::selection { background: var(--surface-accent); }
 .lab-shell { height: 100dvh; }
@@ -62,6 +66,7 @@ button:disabled { cursor: wait; }
 .lab-aside > section:first-child { max-height: 42%; overflow-y: auto; flex-shrink: 0; }
 .inspector-tabs { border-bottom: 1px solid var(--border); }
 .inspector-tabs button { padding-bottom: 10px; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 500; }
+.inspector-tabs button:hover { color: var(--foreground); }
 .inspector-tabs button[aria-pressed="true"] { color: var(--foreground); border-bottom-color: var(--wire); }
 .inspector summary { padding: 4px 0; overflow-wrap: anywhere; }
 .inspector summary:hover { color: var(--wire); }

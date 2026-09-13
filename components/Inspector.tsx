@@ -103,7 +103,7 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
               className={`rounded-full px-2 py-0.5 text-xs ${
                 filter === name
                   ? "bg-[var(--foreground)] text-[var(--background)]"
-                  : "bg-[var(--surface)] text-[var(--muted)]"
+                  : "bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)]"
               }`}
             >
               {FILTERS[name].label}

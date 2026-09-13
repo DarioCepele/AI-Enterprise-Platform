@@ -64,7 +64,7 @@ export function VoiceChat() {
         className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
           active
             ? "border-[var(--signal)] text-[var(--signal)]"
-            : "border-[var(--border)] text-[var(--foreground)]"
+            : "border-[var(--border)] text-[var(--foreground)] hover:border-[var(--wire)] hover:text-[var(--wire)]"
         }`}
       >
         {active && <span aria-hidden="true" className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--signal)]" />}

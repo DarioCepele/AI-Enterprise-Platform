@@ -22,6 +22,19 @@ interface Props {
 
 const STICKY_PX = 80;
 
+/** A frame with a status dot — filled once a file is attached, matching the
+ * "signal" dot used elsewhere for something armed/live rather than a stock
+ * camcorder glyph. */
+function VideoIcon({ attached }: { attached: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <rect x="1" y="2.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M10 6L13 4V10L10 8" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <circle cx="5.5" cy="7" r="1.4" fill={attached ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.1" />
+    </svg>
+  );
+}
+
 export function Chat({ entries, running, error, onSend, onStop }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -50,11 +63,11 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
         {entries.length === 0 && (
           <div className="mx-auto flex min-h-[60vh] max-w-lg flex-col justify-center">
             <p className="mb-3 text-sm text-[var(--muted)]">{emptyState.eyebrow}</p>
-            <h2 className="text-3xl font-medium leading-tight tracking-tight">{emptyState.headline}<br />{emptyState.subhead}</h2>
+            <h2 className="text-3xl font-medium leading-tight tracking-tight text-balance">{emptyState.headline}<br />{emptyState.subhead}</h2>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-[var(--muted)]">{emptyState.body}</p>
           </div>
         )}
-        <div>
+        <div className="mx-auto max-w-[70ch]">
           {entries.map((entry) => (
             <div key={entry.id} className="timeline-entry" data-kind={entry.kind}>
               <EntryView entry={entry} />
@@ -71,7 +84,7 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
               <button
                 type="button"
                 onClick={onStop}
-                className="rounded-full border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]"
+                className="rounded-full border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)] hover:border-[var(--wire)] hover:text-[var(--wire)]"
               >
                 stop
               </button>
@@ -133,9 +146,10 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
             onClick={() => fileInput.current?.click()}
             disabled={busy}
             title={video ? video.name : "Attach a video"}
-            className="shrink-0 rounded-full border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-40"
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] px-2 py-1 text-xs hover:border-[var(--wire)] hover:text-[var(--wire)] disabled:opacity-40 disabled:hover:border-[var(--border)] disabled:hover:text-inherit"
           >
-            {video ? "🎬" : "+ video"}
+            <VideoIcon attached={video !== null} />
+            {video ? video.name.length > 16 ? `${video.name.slice(0, 13)}…` : video.name : "video"}
           </button>
           <input
             name="q"
@@ -147,25 +161,22 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
           <button
             type="submit"
             disabled={busy}
-            className="rounded-full bg-[var(--foreground)] px-4 py-1.5 text-xs text-[var(--background)] disabled:opacity-40"
+            className="rounded-full bg-[var(--foreground)] px-4 py-1.5 text-xs text-[var(--background)] hover:opacity-85 disabled:opacity-40"
           >
             {uploading ? "uploading…" : "send"}
           </button>
         </div>
         {video && (
-          <p className="mt-1 px-1 font-mono text-[10px] text-[var(--muted)]">
-            video: {video.name}{" "}
-            <button
-              type="button"
-              onClick={() => {
-                setVideo(null);
-                if (fileInput.current) fileInput.current.value = "";
-              }}
-              className="underline"
-            >
-              remove
-            </button>
-          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setVideo(null);
+              if (fileInput.current) fileInput.current.value = "";
+            }}
+            className="mt-1 px-1 text-xs text-[var(--muted)] hover:text-[var(--wire)] hover:underline"
+          >
+            remove attachment
+          </button>
         )}
         {uploadError && (
           <p role="alert" className="mt-1 px-1 text-xs text-red-600">
