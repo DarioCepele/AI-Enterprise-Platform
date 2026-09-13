@@ -1,14 +1,14 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { runAgent } from "@/lib/agui/client";
 import type { MessagePart } from "@/lib/agui/types";
-import { initialState, reduce, withUserMessage, type LabState } from "@/lib/agui/reducer";
+import { initialState, reduce, withUserMessage, withAssistantText, type LabState } from "@/lib/agui/reducer";
+import { VoiceSession, voiceConfigured } from "@/lib/voice/client";
 import { Chat } from "./Chat";
 import { Inspector } from "./Inspector";
 import { PlanPanel } from "./PlanPanel";
 import { LabHeader } from "./LabHeader";
-import { VoiceChat } from "./VoiceChat";
 import { product } from "@/lib/config";
 
 export function Lab() {
@@ -18,6 +18,50 @@ export function Lab() {
   const abort = useRef<AbortController | null>(null);
 
   const stop = useCallback(() => abort.current?.abort(), []);
+
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const voiceSession = useRef<VoiceSession | null>(null);
+  const voiceTurnAssistantId = useRef<string | null>(null);
+
+  useEffect(() => () => voiceSession.current?.stop(), []);
+
+  const stopVoice = useCallback(() => {
+    voiceSession.current?.stop();
+    voiceSession.current = null;
+    setVoiceActive(false);
+  }, []);
+
+  const toggleVoice = useCallback(async () => {
+    if (voiceActive) {
+      stopVoice();
+      return;
+    }
+    setVoiceError(null);
+    const session = new VoiceSession({
+      onUserTranscript: (text) => {
+        voiceTurnAssistantId.current = null;
+        setState((s) => withUserMessage(s, crypto.randomUUID(), text));
+      },
+      onAssistantTextChunk: (text) => {
+        voiceTurnAssistantId.current ??= crypto.randomUUID();
+        setState((s) => withAssistantText(s, voiceTurnAssistantId.current!, text));
+      },
+      onTurnCancelled: () => {
+        voiceTurnAssistantId.current = null;
+      },
+      onError: setVoiceError,
+      onClose: () => setVoiceActive(false),
+    });
+    voiceSession.current = session;
+    try {
+      await session.start();
+      setVoiceActive(true);
+    } catch (err) {
+      voiceSession.current = null;
+      setVoiceError(err instanceof Error ? err.message : String(err));
+    }
+  }, [voiceActive, stopVoice]);
 
   const send = useCallback(
     async (content: string | MessagePart[], displayText?: string) => {
@@ -69,10 +113,13 @@ export function Lab() {
           error={state.error}
           onSend={send}
           onStop={stop}
+          voiceAvailable={voiceConfigured()}
+          voiceActive={voiceActive}
+          voiceError={voiceError}
+          onToggleVoice={toggleVoice}
         />
       </main>
       <aside className="lab-aside flex min-h-0 min-w-0 flex-col" aria-label="Plan and agent activity">
-        <VoiceChat />
         <PlanPanel shared={state.shared} />
         <Inspector events={state.events} running={state.running} />
       </aside>

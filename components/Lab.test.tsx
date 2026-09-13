@@ -2,12 +2,45 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runAgent } from "@/lib/agui/client";
+import { VoiceSession, voiceConfigured } from "@/lib/voice/client";
 import { Lab } from "./Lab";
 
 vi.mock("@/lib/agui/client", () => ({ runAgent: vi.fn() }));
 vi.mock("@/lib/agui/logs", () => ({ fetchLogs: vi.fn().mockResolvedValue({ entries: [], cursor: 0, dropped: 0 }) }));
+
+type VoiceHandlers = {
+  onUserTranscript?: (text: string) => void;
+  onAssistantTextChunk?: (text: string) => void;
+  onTurnCancelled?: () => void;
+  onError?: (message: string) => void;
+  onClose?: () => void;
+};
+
+vi.mock("@/lib/voice/client", () => {
+  class FakeVoiceSession {
+    static instances: FakeVoiceSession[] = [];
+    handlers: VoiceHandlers;
+    start = vi.fn(async () => {});
+    stop = vi.fn();
+    constructor(handlers: VoiceHandlers) {
+      this.handlers = handlers;
+      FakeVoiceSession.instances.push(this);
+    }
+  }
+  return { VoiceSession: FakeVoiceSession, voiceConfigured: vi.fn(() => false) };
+});
+
 const runMock = vi.mocked(runAgent);
-beforeEach(() => { runMock.mockReset(); });
+const voiceConfiguredMock = vi.mocked(voiceConfigured);
+const FakeVoiceSession = VoiceSession as unknown as {
+  instances: { handlers: VoiceHandlers; start: () => Promise<void>; stop: () => void }[];
+};
+
+beforeEach(() => {
+  runMock.mockReset();
+  voiceConfiguredMock.mockReturnValue(false);
+  FakeVoiceSession.instances.length = 0;
+});
 
 describe("Lab", () => {
   it("wires sending, timeline, plan and the end of the run", async () => {
@@ -50,5 +83,38 @@ describe("Lab", () => {
     await act(async () => { reject(new Error("server unavailable")); });
     expect(screen.getByRole("alert")).toHaveTextContent("server unavailable");
     expect(screen.getByRole("textbox")).toBeEnabled();
+  });
+
+  it("a voice turn lands in the same timeline as a typed one, and stopping re-enables typing", async () => {
+    voiceConfiguredMock.mockReturnValue(true);
+    render(<Lab />);
+
+    const micButton = screen.getByRole("button", { name: /talk to the agent/i });
+    await act(async () => {
+      fireEvent.click(micButton);
+    });
+    expect(FakeVoiceSession.instances).toHaveLength(1);
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeDisabled();
+
+    const { handlers } = FakeVoiceSession.instances[0];
+    act(() => handlers.onUserTranscript?.("che tempo fa"));
+    act(() => handlers.onAssistantTextChunk?.("Non ho accesso al meteo. "));
+    act(() => handlers.onAssistantTextChunk?.("Posso aiutarti con altro."));
+
+    expect(screen.getByText("che tempo fa")).toBeInTheDocument();
+    expect(
+      screen.getByText("Non ho accesso al meteo. Posso aiutarti con altro."),
+    ).toBeInTheDocument();
+
+    const stopButton = screen.getByRole("button", { name: /stop talking/i });
+    fireEvent.click(stopButton);
+    expect(FakeVoiceSession.instances[0].stop).toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  });
+
+  it("hides the mic entirely when no voice service is configured", () => {
+    voiceConfiguredMock.mockReturnValue(false);
+    render(<Lab />);
+    expect(screen.queryByRole("button", { name: /talk to the agent/i })).not.toBeInTheDocument();
   });
 });

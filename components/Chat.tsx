@@ -18,6 +18,11 @@ interface Props {
    */
   onSend: (content: string | MessagePart[], displayText?: string) => void;
   onStop?: () => void;
+  /** Hidden entirely when this deployment has no voice service, same as before. */
+  voiceAvailable: boolean;
+  voiceActive: boolean;
+  voiceError: string | null;
+  onToggleVoice: () => void;
 }
 
 const STICKY_PX = 80;
@@ -35,14 +40,38 @@ function VideoIcon({ attached }: { attached: boolean }) {
   );
 }
 
-export function Chat({ entries, running, error, onSend, onStop }: Props) {
+/** A capsule mic — filled while armed, matching VideoIcon's "attached" fill. */
+function MicIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <rect x="5" y="1" width="4" height="7" rx="2" stroke="currentColor" strokeWidth="1.3" fill={active ? "currentColor" : "none"} />
+      <path d="M3 6.5C3 9 4.8 10.5 7 10.5C9.2 10.5 11 9 11 6.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M7 10.5V13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function Chat({
+  entries,
+  running,
+  error,
+  onSend,
+  onStop,
+  voiceAvailable,
+  voiceActive,
+  voiceError,
+  onToggleVoice,
+}: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const fileInput = useRef<HTMLInputElement>(null);
   const [video, setVideo] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const busy = running || uploading;
+  const busy = running || uploading || voiceActive;
+  // The mic itself must stay clickable while voice is active — that's how it
+  // stops. Only a text-side run in flight blocks starting a voice turn.
+  const micDisabled = running || uploading;
 
   useEffect(() => {
     const el = scroller.current;
@@ -151,11 +180,28 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
             <VideoIcon attached={video !== null} />
             {video ? video.name.length > 16 ? `${video.name.slice(0, 13)}…` : video.name : "video"}
           </button>
+          {voiceAvailable && (
+            <button
+              type="button"
+              onClick={onToggleVoice}
+              disabled={micDisabled}
+              aria-pressed={voiceActive}
+              title={voiceActive ? "Stop talking" : "Talk to the agent"}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-xs disabled:opacity-40 ${
+                voiceActive
+                  ? "border-[var(--signal)] text-[var(--signal)]"
+                  : "border-[var(--border)] hover:border-[var(--wire)] hover:text-[var(--wire)]"
+              }`}
+            >
+              {voiceActive && <span aria-hidden="true" className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--signal)]" />}
+              <MicIcon active={voiceActive} />
+            </button>
+          )}
           <input
             name="q"
             aria-label="Message"
             disabled={busy}
-            placeholder="Write a message…"
+            placeholder={voiceActive ? "Listening…" : "Write a message…"}
             className="min-w-0 flex-1 bg-transparent text-sm focus-visible:outline-2 focus-visible:outline-offset-2"
           />
           <button
@@ -181,6 +227,11 @@ export function Chat({ entries, running, error, onSend, onStop }: Props) {
         {uploadError && (
           <p role="alert" className="mt-1 px-1 text-xs text-red-600">
             upload error: {uploadError}
+          </p>
+        )}
+        {voiceError && (
+          <p role="alert" className="mt-1 px-1 text-xs text-red-600">
+            voice error: {voiceError}
           </p>
         )}
       </form>

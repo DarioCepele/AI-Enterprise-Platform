@@ -5,6 +5,9 @@ import { Chat } from "../Chat";
 import type { Entry } from "@/lib/agui/entries";
 import { EntryView } from "./index";
 
+/** `Chat` also takes voice props, irrelevant to these text-timeline tests. */
+const noVoice = { voiceAvailable: false, voiceActive: false, voiceError: null, onToggleVoice: vi.fn() };
+
 describe("EntryView", () => {
   it("blocks scripts and dangerous URLs in the model's answer", () => {
     const text = '<script>alert(1)</script><a href="javascript:alert(1)">click</a>';
@@ -125,7 +128,7 @@ describe("Chat", () => {
       { kind: "user", id: "u", text: "question" },
       { kind: "assistant", id: "a", text: "answer" },
     ];
-    const { container } = render(<Chat entries={entries} running={false} error={null} onSend={onSend} />);
+    const { container } = render(<Chat entries={entries} running={false} error={null} onSend={onSend} {...noVoice} />);
     expect(container.textContent?.indexOf("question")).toBeLessThan(container.textContent!.indexOf("answer"));
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "next question" } });
@@ -136,13 +139,13 @@ describe("Chat", () => {
 
   it("ignores empty text and blocks sending during a run", () => {
     const onSend = vi.fn();
-    const { container, rerender } = render(<Chat entries={[]} running={false} error={null} onSend={onSend} />);
+    const { container, rerender } = render(<Chat entries={[]} running={false} error={null} onSend={onSend} {...noVoice} />);
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.submit(container.querySelector("form")!);
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: "do not send" } });
-    rerender(<Chat entries={[]} running={true} error={null} onSend={onSend} />);
+    rerender(<Chat entries={[]} running={true} error={null} onSend={onSend} {...noVoice} />);
     expect(input).toBeDisabled();
     expect(screen.getByRole("button", { name: "send" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("Working");
@@ -153,10 +156,10 @@ describe("Chat", () => {
   it("allows stopping the run while it is going", () => {
     const onStop = vi.fn();
     const { rerender } = render(
-      <Chat entries={[]} running={false} error={null} onSend={vi.fn()} onStop={onStop} />,
+      <Chat entries={[]} running={false} error={null} onSend={vi.fn()} onStop={onStop} {...noVoice} />,
     );
     expect(screen.queryByRole("button", { name: "stop" })).toBeNull();
-    rerender(<Chat entries={[]} running error={null} onSend={vi.fn()} onStop={onStop} />);
+    rerender(<Chat entries={[]} running error={null} onSend={vi.fn()} onStop={onStop} {...noVoice} />);
     fireEvent.click(screen.getByRole("button", { name: "stop" }));
 
     expect(onStop).toHaveBeenCalledOnce();
@@ -165,23 +168,23 @@ describe("Chat", () => {
   it("follows the stream at the bottom, but not while reading further up", () => {
     const entry = (i: number): Entry => ({ kind: "assistant", id: `a${i}`, text: `riga ${i}` });
     const { container, rerender } = render(
-      <Chat entries={[entry(1)]} running error={null} onSend={vi.fn()} />,
+      <Chat entries={[entry(1)]} running error={null} onSend={vi.fn()} {...noVoice} />,
     );
     const scroller = container.querySelector(".overflow-y-auto") as HTMLDivElement;
     Object.defineProperty(scroller, "scrollHeight", { value: 1000, configurable: true });
     Object.defineProperty(scroller, "clientHeight", { value: 200, configurable: true });
 
-    rerender(<Chat entries={[entry(1), entry(2)]} running error={null} onSend={vi.fn()} />);
+    rerender(<Chat entries={[entry(1), entry(2)]} running error={null} onSend={vi.fn()} {...noVoice} />);
     expect(scroller.scrollTop).toBe(1000);
 
     scroller.scrollTop = 100;
     fireEvent.scroll(scroller);
-    rerender(<Chat entries={[entry(1), entry(2), entry(3)]} running error={null} onSend={vi.fn()} />);
+    rerender(<Chat entries={[entry(1), entry(2), entry(3)]} running error={null} onSend={vi.fn()} {...noVoice} />);
     expect(scroller.scrollTop).toBe(100);
   });
 
   it("surfaces the run's error", () => {
-    render(<Chat entries={[]} running={false} error="connessione interrotta" onSend={vi.fn()} />);
+    render(<Chat entries={[]} running={false} error="connessione interrotta" onSend={vi.fn()} {...noVoice} />);
     expect(screen.getByRole("alert")).toHaveTextContent("connessione interrotta");
   });
 });

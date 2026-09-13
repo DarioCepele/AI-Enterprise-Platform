@@ -176,3 +176,17 @@ export function withUserMessage(state: LabState, id: string, text: string): LabS
     entries: [...state.entries, { kind: "user", id, text }],
   };
 }
+
+/**
+ * Appends `textDelta` to the timeline as an assistant entry — creating one
+ * under `id` on its first call for that id, growing it on the next ones.
+ * Voice turns arrive as whole-sentence chunks rather than the token-by-token
+ * deltas `TEXT_MESSAGE_CONTENT` patches, but the shape in the timeline is the
+ * same either way: one growing assistant entry, not one bubble per chunk.
+ */
+export function withAssistantText(state: LabState, id: string, textDelta: string): LabState {
+  if (!state.entries.some((e) => e.id === id)) {
+    return { ...state, entries: [...state.entries, { kind: "assistant", id, text: textDelta }] };
+  }
+  return { ...state, entries: patch(state.entries, id, (e) => (e.kind === "assistant" ? { ...e, text: e.text + textDelta } : e)) };
+}
