@@ -40,6 +40,7 @@ export class VoiceSession {
   private stream: MediaStream | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
+  private micSilencer: GainNode | null = null;
   private turn = 0;
   private pendingSampleRate = 24000;
   private stopped = false;
@@ -66,6 +67,16 @@ export class VoiceSession {
     this.workletNode.port.onmessage = (event) =>
       this.handleMicSamples(event.data as Float32Array);
     this.sourceNode.connect(this.workletNode);
+    // `process()` only ever runs while a node is part of a graph that reaches
+    // `destination` -- a worklet with nowhere to output is never pulled, so it
+    // never runs at all (verified live: mic permission granted, connection
+    // open, and still not one byte of audio left the browser). Route it
+    // through a silent gain node instead of straight to `destination`, so the
+    // graph stays "live" without echoing the user's own voice back at them.
+    this.micSilencer = this.micContext.createGain();
+    this.micSilencer.gain.value = 0;
+    this.workletNode.connect(this.micSilencer);
+    this.micSilencer.connect(this.micContext.destination);
 
     this.playbackContext = new AudioContext({ sampleRate: 24000 });
     this.scheduler ??= new PlaybackScheduler(this.playbackContext as unknown as PlaybackContext);
@@ -117,6 +128,7 @@ export class VoiceSession {
     this.stopped = true;
     this.ws?.close();
     this.workletNode?.disconnect();
+    this.micSilencer?.disconnect();
     this.sourceNode?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
     void this.micContext?.close().catch(() => {});
