@@ -39,10 +39,18 @@ export interface TextInputPart {
   text: string;
 }
 
-/** A video attachment referenced by URL, per the AG-UI multimodal input standard. */
+/**
+ * A video attachment referenced by URL, per the AG-UI multimodal input
+ * standard. `mimeType` is required in practice, not just in the type: the
+ * server tolerates a missing one when handing content to the model (it
+ * falls back to `video/*`), but the separate path that builds the AG-UI
+ * messages snapshot does not - a part with no `mimeType` fails Pydantic
+ * validation there and takes the whole run down. Always send the file's own
+ * `File.type`.
+ */
 export interface VideoInputPart {
   type: "video";
-  source: { type: "url"; value: string };
+  source: { type: "url"; value: string; mimeType: string };
 }
 
 export type MessagePart = TextInputPart | VideoInputPart;

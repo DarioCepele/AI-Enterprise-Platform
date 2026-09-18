@@ -40,6 +40,26 @@ function VideoIcon({ attached }: { attached: boolean }) {
   );
 }
 
+/** A spinning arc — shown in place of VideoIcon while the file is actually
+ * uploading, so "attached, waiting to send" and "uploading right now" don't
+ * look the same. */
+function SpinnerIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+      className="animate-spin"
+      data-testid="video-upload-spinner"
+    >
+      <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.3" strokeOpacity="0.25" />
+      <path d="M12.5 7a5.5 5.5 0 0 0-5.5-5.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** A capsule mic — filled while armed, matching VideoIcon's "attached" fill. */
 function MicIcon({ active }: { active: boolean }) {
   return (
@@ -146,7 +166,10 @@ export function Chat({
             .then((url) => {
               const parts: MessagePart[] = [];
               if (text) parts.push({ type: "text", text });
-              parts.push({ type: "video", source: { type: "url", value: url } });
+              parts.push({
+                type: "video",
+                source: { type: "url", value: url, mimeType: file.type || "video/mp4" },
+              });
               onSend(parts, text || `video: ${file.name}`);
               input.value = "";
               setVideo(null);
@@ -177,8 +200,12 @@ export function Chat({
             title={video ? video.name : "Attach a video"}
             className="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] px-2 py-1 text-xs hover:border-[var(--wire)] hover:text-[var(--wire)] disabled:opacity-40 disabled:hover:border-[var(--border)] disabled:hover:text-inherit"
           >
-            <VideoIcon attached={video !== null} />
-            {video ? video.name.length > 16 ? `${video.name.slice(0, 13)}…` : video.name : "video"}
+            {uploading ? <SpinnerIcon /> : <VideoIcon attached={video !== null} />}
+            {uploading
+              ? "uploading…"
+              : video
+                ? video.name.length > 16 ? `${video.name.slice(0, 13)}…` : video.name
+                : "video"}
           </button>
           {voiceAvailable && (
             <button

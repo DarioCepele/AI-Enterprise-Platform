@@ -48,8 +48,42 @@ describe("Chat — attaching a video", () => {
     const [content] = onSend.mock.calls[0];
     expect(content).toEqual([
       { type: "text", text: "guarda questo" },
-      { type: "video", source: { type: "url", value: "https://cdn.example/v/abc.mp4" } },
+      {
+        type: "video",
+        source: { type: "url", value: "https://cdn.example/v/abc.mp4", mimeType: "video/mp4" },
+      },
     ]);
+  });
+
+  it("shows the attach button uploading while the request is in flight", async () => {
+    let resolveUpload!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>((resolve) => (resolveUpload = resolve))),
+    );
+    render(
+      <Chat
+        entries={[]}
+        running={false}
+        error={null}
+        onSend={vi.fn()}
+        voiceAvailable={false}
+        voiceActive={false}
+        voiceError={null}
+        onToggleVoice={vi.fn()}
+      />,
+    );
+
+    attach(new File(["fake-bytes"], "clip.mp4", { type: "video/mp4" }));
+    fireEvent.submit(screen.getByLabelText("Message").closest("form")!);
+
+    expect(await screen.findByTestId("video-upload-spinner")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveUpload(new Response(JSON.stringify({ url: "https://cdn.example/v/abc.mp4" }), { status: 200 }));
+    });
+
+    expect(screen.queryByTestId("video-upload-spinner")).not.toBeInTheDocument();
   });
 
   it("shows a visible error and does not send anything when the upload fails", async () => {
