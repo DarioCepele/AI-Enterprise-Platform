@@ -67,7 +67,8 @@ def test_a_series_that_is_not_numbers_is_refused_with_the_reason():
 
 def test_options_are_weighed_and_ranked():
     result = scores_of(
-        {"a": {"cost": 3, "speed": 8}, "b": {"cost": 6, "speed": 5}}, {"cost": 2, "speed": 1}
+        {"a": {"cost": 3, "speed": 8}, "b": {"cost": 6, "speed": 5}},
+        {"cost": 2, "speed": 1},
     )
 
     assert result["ranking"] == ["b", "a"]

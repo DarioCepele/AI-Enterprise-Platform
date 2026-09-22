@@ -37,7 +37,9 @@ def a_result(call_id: str, text: str):
 
 
 class FakeAgent:
-    def __init__(self, updates: list[Update] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, updates: list[Update] | None = None, error: Exception | None = None
+    ) -> None:
         self._updates = updates or []
         self._error = error
         self.questions: list[str] = []
@@ -81,7 +83,9 @@ class FakeQueue:
         self.events.append(event)
 
 
-async def run_executor(agent: FakeAgent, question: str = "how big is this spread?") -> list:
+async def run_executor(
+    agent: FakeAgent, question: str = "how big is this spread?"
+) -> list:
     queue = FakeQueue()
     await AnalysisExecutor(agent).execute(FakeContext(question), queue)
     return queue.events
@@ -154,7 +158,9 @@ async def test_arguments_that_arrive_in_pieces_are_still_understood():
 @pytest.mark.asyncio
 async def test_a_tool_that_is_not_a_measurement_is_not_reported_as_one():
     events = await run_executor(
-        FakeAgent([Update("", [a_call("c1", tool="something_else")]), Update("Answer.")])
+        FakeAgent(
+            [Update("", [a_call("c1", tool="something_else")]), Update("Answer.")]
+        )
     )
 
     assert data_of(artifacts(events)[0])["measurements"] == []
@@ -179,7 +185,9 @@ async def test_a_question_the_numbers_cannot_settle_asks_back():
 
 @pytest.mark.asyncio
 async def test_a_failing_agent_fails_the_task_instead_of_hanging():
-    events = await run_executor(FakeAgent([Update("half way")], error=RuntimeError("model down")))
+    events = await run_executor(
+        FakeAgent([Update("half way")], error=RuntimeError("model down"))
+    )
 
     assert states(events)[-1] == TaskState.TASK_STATE_FAILED
 
@@ -193,7 +201,9 @@ async def test_an_empty_answer_fails_the_task_instead_of_completing_it():
 
 
 def test_the_artifact_shape_is_documented_by_the_helper():
-    parts = assessment("question", "answer", [{"tool": "measure", "arguments": {}, "result": None}])
+    parts = assessment(
+        "question", "answer", [{"tool": "measure", "arguments": {}, "result": None}]
+    )
 
     data = MessageToDict(next(p.data for p in parts if p.HasField("data")))
     assert data["component"] == "assessment"

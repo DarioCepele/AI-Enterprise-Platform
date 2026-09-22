@@ -9,9 +9,9 @@ from hmac import compare_digest
 from a2a.server.context import ServerCallContext
 from a2a.types import AgentCard, AgentSkill
 from a2a.utils.errors import ExtendedAgentCardNotConfiguredError
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +53,15 @@ class ServiceTokenOnly(BaseHTTPMiddleware):
     public.
     """
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         if request.url.path in PROTECTED_PATHS and not headers_are_valid(
             dict(request.headers)
         ):
             logger.warning(
-                "Extended card refused on %s: token missing or invalid.", request.url.path
+                "Extended card refused on %s: token missing or invalid.",
+                request.url.path,
             )
             return JSONResponse(
                 {"error": "a service token is required"},

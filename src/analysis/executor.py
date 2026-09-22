@@ -5,11 +5,11 @@ import json
 import logging
 from typing import Any
 
+from a2a.helpers import new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.helpers import new_task_from_user_message
 from a2a.server.tasks import TaskUpdater
-from a2a.types import Part, TaskState
+from a2a.types import InvalidParamsError, Part, TaskState
 from agent_framework import Agent
 from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Value
@@ -54,7 +54,9 @@ class Measurements:
                 if isinstance(arguments, dict):
                     self._record(call_id, arguments)
                 elif isinstance(arguments, str):
-                    self._partials[call_id] = self._partials.get(call_id, "") + arguments
+                    self._partials[call_id] = (
+                        self._partials.get(call_id, "") + arguments
+                    )
                     self._try(call_id)
             elif kind == "function_result" and call_id in self._names:
                 self._result(call_id, content)
@@ -73,7 +75,12 @@ class Measurements:
                 call["arguments"] = arguments
                 return
         self.calls.append(
-            {"id": call_id, "tool": self._names[call_id], "arguments": arguments, "result": None}
+            {
+                "id": call_id,
+                "tool": self._names[call_id],
+                "arguments": arguments,
+                "result": None,
+            }
         )
 
     def _result(self, call_id: str, content: Any) -> None:
@@ -92,7 +99,11 @@ class Measurements:
 
     def as_data(self) -> list[dict[str, Any]]:
         return [
-            {"tool": call["tool"], "arguments": call["arguments"], "result": call["result"]}
+            {
+                "tool": call["tool"],
+                "arguments": call["arguments"],
+                "result": call["result"],
+            }
             for call in self.calls
         ]
 
@@ -162,10 +173,15 @@ class AnalysisExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task = context.current_task
         if task is None:
-            task = new_task_from_user_message(context.message)
+            user_message = context.message
+            if user_message is None:
+                raise InvalidParamsError(message="no message to start a task from")
+            task = new_task_from_user_message(user_message)
             await event_queue.enqueue_event(task)
 
-        updater = TaskUpdater(event_queue, task.id, context.context_id)
+        updater = TaskUpdater(
+            event_queue, task.id, context.context_id or task.context_id
+        )
         question = context.get_user_input()
 
         await updater.submit()
@@ -188,14 +204,18 @@ class AnalysisExecutor(AgentExecutor):
         except Exception as error:
             logger.error("Run failed for '%s'.", question, exc_info=True)
             await updater.failed(
-                message=updater.new_agent_message([Part(text=f"analysis agent: {error}")])
+                message=updater.new_agent_message(
+                    [Part(text=f"analysis agent: {error}")]
+                )
             )
             return
 
         answer = "".join(pieces).strip()
 
         if answer.startswith(ASKS):
-            question_back = answer[len(ASKS) :].strip() or "Puoi precisare la richiesta?"
+            question_back = (
+                answer[len(ASKS) :].strip() or "Puoi precisare la richiesta?"
+            )
             await updater.requires_input(
                 message=updater.new_agent_message([Part(text=question_back)])
             )
@@ -217,7 +237,8 @@ class AnalysisExecutor(AgentExecutor):
         )
         await updater.complete()
         logger.info(
-            "Task %s completed: %d characters, %d measurements, %d rounds, %d/%d tokens.",
+            "Task %s completed: %d characters, %d measurements, "
+            "%d rounds, %d/%d tokens.",
             task.id,
             len(answer),
             len(measured.calls),
@@ -227,6 +248,9 @@ class AnalysisExecutor(AgentExecutor):
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        task_id, context_id = context.task_id, context.context_id
+        if task_id is None or context_id is None:
+            raise InvalidParamsError(message="cancel needs a task and a context")
+        updater = TaskUpdater(event_queue, task_id, context_id)
         await updater.cancel()
         logger.info("Task %s canceled on request.", context.task_id)

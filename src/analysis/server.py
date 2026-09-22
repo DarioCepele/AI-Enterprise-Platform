@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 
+import httpx
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import (
     add_a2a_routes_to_fastapi,
@@ -11,7 +12,6 @@ from a2a.server.routes import (
     create_jsonrpc_routes,
     create_rest_routes,
 )
-import httpx
 from a2a.server.tasks import (
     InMemoryPushNotificationConfigStore,
     InMemoryTaskStore,
@@ -25,13 +25,13 @@ from a2a.types import (
     SecurityScheme,
 )
 from agent_framework import Agent
+from fastapi import FastAPI
+
+from .agent import build_analysis_agent
 from .executor import AnalysisExecutor
 from .extended import SCHEME, ServiceTokenOnly, build_extended_card, card_for_the_caller
 from .observability import configure_logging, configure_tracing
 from .push import EssentialNotifications
-from fastapi import FastAPI
-
-from .agent import build_analysis_agent
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,9 @@ def build_agent_card(base_url: str) -> AgentCard:
         description="Analysis subagent of the AG-UI laboratory.",
         version="0.1.0",
         supported_interfaces=[
-            AgentInterface(url=base_url, protocol_binding="JSONRPC", protocol_version="1.0")
+            AgentInterface(
+                url=base_url, protocol_binding="JSONRPC", protocol_version="1.0"
+            )
         ],
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
@@ -87,9 +89,11 @@ def build_agent_card(base_url: str) -> AgentCard:
 
 
 def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastAPI:
-    configure_logging(SERVICE_NAME, as_json=os.getenv("ANALYSIS_JSON_LOGS", "").lower() == "true")
+    as_json = os.getenv("ANALYSIS_JSON_LOGS", "").lower() == "true"
+    configure_logging(SERVICE_NAME, as_json=as_json)
 
-    url = base_url or os.getenv("ANALYSIS_BASE_URL", "http://localhost:8400/")
+    configured_url = os.getenv("ANALYSIS_BASE_URL", "http://localhost:8400/")
+    url = base_url or configured_url
     card = build_agent_card(url)
     executor = AnalysisExecutor(agent or build_analysis_agent())
     push_store = InMemoryPushNotificationConfigStore()

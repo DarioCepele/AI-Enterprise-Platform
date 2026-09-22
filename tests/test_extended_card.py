@@ -10,7 +10,7 @@ from a2a.utils.errors import ExtendedAgentCardNotConfiguredError
 from analysis.extended import build_extended_card, card_for_the_caller
 from analysis.server import build_agent_card, create_app
 
-TOKEN = "service-token"
+TOKEN = "service-token"  # noqa: S105 - fake token for tests, not a real secret
 VERSION = {"A2A-Version": "1.0"}
 
 
@@ -36,7 +36,9 @@ def test_the_public_card_does_not_say_how_it_measures():
 
 
 def test_the_extended_card_adds_the_measures():
-    extended = build_extended_card(build_agent_card("http://a:8400/"), ["mean", "spread"])
+    extended = build_extended_card(
+        build_agent_card("http://a:8400/"), ["mean", "spread"]
+    )
 
     methods = next(s for s in extended.skills if s.id == "methods")
     assert "mean" in methods.description and "spread" in methods.description
@@ -58,14 +60,18 @@ async def test_without_a_token_the_extended_card_does_not_exist():
 @pytest.mark.asyncio
 async def test_a_wrong_token_is_refused():
     with pytest.raises(ExtendedAgentCardNotConfiguredError):
-        await card_for_the_caller(AgentCard(), a_context({"Authorization": "Bearer another"}))
+        await card_for_the_caller(
+            AgentCard(), a_context({"Authorization": "Bearer another"})
+        )
 
 
 @pytest.mark.asyncio
 async def test_the_right_token_gets_the_card():
     card = AgentCard(name="analysis")
 
-    served = await card_for_the_caller(card, a_context({"Authorization": f"Bearer {TOKEN}"}))
+    served = await card_for_the_caller(
+        card, a_context({"Authorization": f"Bearer {TOKEN}"})
+    )
 
     assert served is card
 
@@ -96,13 +102,16 @@ async def test_the_rest_path_answers_401_and_says_how(app):
     response = await ask_for_the_card(app, {})
 
     assert response.status_code == 401
-    # The 401 is for the legitimate client: from WWW-Authenticate it learns what to send.
+    # The 401 is for the legitimate client: from WWW-Authenticate it learns
+    # what to send.
     assert response.headers["WWW-Authenticate"].startswith("Bearer")
 
 
 @pytest.mark.asyncio
 async def test_the_rest_path_lets_the_right_token_through(app):
-    response = await ask_for_the_card(app, {"Authorization": f"Bearer {TOKEN}", **VERSION})
+    response = await ask_for_the_card(
+        app, {"Authorization": f"Bearer {TOKEN}", **VERSION}
+    )
 
     assert response.status_code == 200
     assert "methods" in [s["id"] for s in response.json()["skills"]]

@@ -113,12 +113,17 @@ def summary_of(values: list[float]) -> dict[str, Any]:
     }
 
 
-def scores_of(options: dict[str, dict[str, float]], weights: dict[str, float]) -> dict[str, Any]:
+def scores_of(
+    options: dict[str, dict[str, float]], weights: dict[str, float]
+) -> dict[str, Any]:
     """Weighs options on the criteria given, and says how close the top two are."""
     total_weight = sum(weights.values()) or 1.0
     scored = {
         name: round(
-            sum(values.get(criterion, 0.0) * weight for criterion, weight in weights.items())
+            sum(
+                values.get(criterion, 0.0) * weight
+                for criterion, weight in weights.items()
+            )
             / total_weight,
             4,
         )
@@ -140,9 +145,13 @@ def scores_of(options: dict[str, dict[str, float]], weights: dict[str, float]) -
 def build_analysis_tools() -> list[FunctionTool]:
     @tool
     def measure(
-        values: Annotated[str, "The series, as a JSON list or numbers separated by commas"],
+        values: Annotated[
+            str, "The series, as a JSON list or numbers separated by commas"
+        ],
     ) -> Content:
-        """Measures a series of numbers: count, extremes, mean, median, spread, outliers."""
+        """Measures a series of numbers: count, extremes, mean, median, spread,
+        outliers.
+        """
         try:
             summary = summary_of(_numbers(values))
         except ValueError as error:
@@ -155,9 +164,12 @@ def build_analysis_tools() -> list[FunctionTool]:
     def compare(
         options: Annotated[
             str,
-            'The options as JSON: {"a": {"cost": 3, "speed": 8}, "b": {"cost": 6, "speed": 5}}',
+            'The options as JSON: {"a": {"cost": 3, "speed": 8}, '
+            '"b": {"cost": 6, "speed": 5}}',
         ],
-        weights: Annotated[str, 'The weight of each criterion as JSON: {"cost": 2, "speed": 1}'],
+        weights: Annotated[
+            str, 'The weight of each criterion as JSON: {"cost": 2, "speed": 1}'
+        ],
     ) -> Content:
         """Weighs options against each other on the given criteria, and ranks them."""
         try:
@@ -194,7 +206,10 @@ def _default_chat_client() -> BaseChatClient:
 def build_analysis_agent(chat_client: BaseChatClient | None = None) -> Agent:
     return Agent(
         name="analysis",
-        description="Measures and compares the numbers it is given, and says what they do not say.",
+        description=(
+            "Measures and compares the numbers it is given, and says "
+            "what they do not say."
+        ),
         instructions=INSTRUCTIONS,
         client=chat_client or _default_chat_client(),
         tools=build_analysis_tools(),

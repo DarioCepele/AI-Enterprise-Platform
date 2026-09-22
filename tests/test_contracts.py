@@ -1,9 +1,8 @@
 """What this agent puts on the wire, checked against the shared contract."""
 from __future__ import annotations
 
-from google.protobuf.json_format import MessageToDict
-
 from contracts import assert_shape, load
+from google.protobuf.json_format import MessageToDict
 
 from analysis.executor import assessment
 

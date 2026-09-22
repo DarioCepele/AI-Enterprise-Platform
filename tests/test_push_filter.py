@@ -2,7 +2,13 @@
 from __future__ import annotations
 
 import pytest
-from a2a.types import Task, TaskArtifactUpdateEvent, TaskState, TaskStatus, TaskStatusUpdateEvent
+from a2a.types import (
+    Task,
+    TaskArtifactUpdateEvent,
+    TaskState,
+    TaskStatus,
+    TaskStatusUpdateEvent,
+)
 
 from analysis.push import EssentialNotifications
 
@@ -57,7 +63,8 @@ async def test_a_finished_task_travels(sender):
 
 @pytest.mark.asyncio
 async def test_an_artifact_alone_does_not_travel(sender):
-    # The artifact is re-read with the task: the notification says it exists, not what it says.
+    # The artifact is re-read with the task: the notification says it exists,
+    # not what it says.
     await sender.send_notification("t1", TaskArtifactUpdateEvent(task_id="t1"))
 
     assert sender.sent == []
