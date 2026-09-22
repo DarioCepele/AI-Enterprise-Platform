@@ -8,6 +8,10 @@ dependencies = [
     "agent-framework-openai",
     "a2a-sdk[http-server]",
     "fastapi>=0.120",
+    # The version agent_framework_core's own "all" extra pins for
+    # MCPStreamableHTTPTool -- added directly rather than pulling that
+    # extra's few dozen unrelated provider packages in with it.
+    "mcp>=1.24.0,<2",
     "uvicorn[standard]>=0.40",
     "python-dotenv>=1.1",
     "opentelemetry-sdk>=1.44.0",
