@@ -10,6 +10,8 @@ from agent_framework import Agent, BaseChatClient, Content, FunctionTool, tool
 from agent_framework.openai import OpenAIChatCompletionClient
 from dotenv import load_dotenv
 
+from .mcp_tools import build_mcp_tools, mcp_servers_from_env
+
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -82,5 +84,8 @@ def build_knowledge_agent(chat_client: BaseChatClient | None = None) -> Agent:
         ),
         instructions=INSTRUCTIONS,
         client=chat_client or _default_chat_client(),
-        tools=build_knowledge_tools(),
+        tools=[
+            *build_knowledge_tools(),
+            *build_mcp_tools(mcp_servers_from_env()),
+        ],
     )
