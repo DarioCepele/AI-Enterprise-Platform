@@ -38,11 +38,6 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
-# Re-exported as a fixture by importing it -- pytest resolves fixtures by
-# name in the requesting module's namespace, the same reuse
-# `test_end_to_end.py` already does for this fixture.
-from test_agui_bridge import master_agent_url  # noqa: F401
-
 from voice_service.agui_client import AGUIBridgeClient
 from voice_service.api import create_app
 from voice_service.config import Settings
@@ -101,7 +96,7 @@ def delayed_stream_turn(monkeypatch):
 
 
 def test_a_second_turn_cancels_the_first_turns_unsent_reply(
-    master_agent_url,  # noqa: F811 -- the parameter name *is* how pytest resolves the fixture
+    master_agent_url,
     delayed_stream_turn,
 ):
     """Turn 1's audio is sent and transcribed; before its (deliberately

@@ -14,12 +14,10 @@ established (its docstring explains the choices in full): `demo-master-agent`
 started from its own synced `.venv`, `DEMO_FAKE_CLIENT=true` so the reply is
 deterministic (`FakeStreamingChatClient`'s default chunks, joined:
 "I am working on the answer." -- see that module's `EXPECTED_REPLY`), no
-Postgres/memory-service/knowledge-agent/subagents wired in. This module does
-not duplicate those helpers/fixture -- it imports them, since both test
-modules live in the same `tests` package on `pythonpath`
-(`pyproject.toml`'s `pythonpath = ["src", "tests"]` puts `tests/` itself on
-`sys.path`, so `import test_agui_bridge` resolves as a plain top-level
-module, the same as `voice_service` does for `src/`).
+Postgres/memory-service/knowledge-agent/subagents wired in. The fixture that
+starts it (`master_agent_url`) lives in `conftest.py`, shared with
+`test_agui_bridge.py` and `test_barge_in.py` without either module
+importing anything from the others.
 
 Why the exact same transcript text is used for both paths: path (a) transcribes
 the fixture audio for real (faster-whisper, same as `tests/test_stt.py` and
@@ -44,12 +42,6 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 
 from starlette.testclient import TestClient
-
-# Re-exported as a fixture by importing it: pytest resolves fixtures by name
-# in the requesting module's namespace, so this makes `master_agent_url`
-# available to the tests below exactly as it is in `test_agui_bridge.py`,
-# with no copy of the subprocess-management code.
-from test_agui_bridge import master_agent_url  # noqa: F401
 
 from voice_service.agui_client import AGUIBridgeClient
 from voice_service.api import create_app
@@ -85,7 +77,7 @@ def _recv_json_with_timeout(websocket, timeout: float = RECEIVE_TIMEOUT_S) -> di
 
 
 def test_voice_and_text_paths_produce_the_identical_assistant_reply(
-    master_agent_url,  # noqa: F811 -- the parameter name *is* how pytest resolves the fixture
+    master_agent_url,
 ):
     """Path (a): the fixture audio through `/ws/voice`. Path (b): its transcript,
     sent as plain text straight to `demo-master-agent`'s AG-UI endpoint. Both
