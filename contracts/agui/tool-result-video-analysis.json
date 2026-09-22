@@ -1,0 +1,14 @@
+{
+  "contract": "agui/tool-result-video-analysis",
+  "version": 1,
+  "produced_by": ["demo-master-agent"],
+  "consumed_by": ["demo-frontend"],
+  "description": "The tool_result payload of analyze_video, rendered as a video analysis artifact in the timeline.",
+  "sample": {
+    "component": "video-analysis",
+    "id": "art_9f31c0a2",
+    "video_url": "http://files.test/video.mp4",
+    "transcript": "the quick brown fox",
+    "description": "a solid red background"
+  }
+}
