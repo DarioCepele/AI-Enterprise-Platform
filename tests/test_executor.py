@@ -24,11 +24,15 @@ class Update:
 
 
 def a_read(name: str) -> SimpleNamespace:
-    return SimpleNamespace(type="function_call", name="read_document", arguments={"name": name})
+    return SimpleNamespace(
+        type="function_call", name="read_document", arguments={"name": name}
+    )
 
 
 class FakeAgent:
-    def __init__(self, updates: list[Update] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, updates: list[Update] | None = None, error: Exception | None = None
+    ) -> None:
         self._updates = updates or []
         self._error = error
         self.questions: list[str] = []
@@ -72,7 +76,9 @@ class FakeQueue:
         self.events.append(event)
 
 
-async def run_executor(agent: FakeAgent, question: str = "how does Go do typing?") -> list:
+async def run_executor(
+    agent: FakeAgent, question: str = "how does Go do typing?"
+) -> list:
     queue = FakeQueue()
     await KnowledgeExecutor(agent).execute(FakeContext(question), queue)
     return queue.events
@@ -144,7 +150,9 @@ async def test_the_text_streams_while_the_task_works():
 
 @pytest.mark.asyncio
 async def test_a_failing_agent_fails_the_task_instead_of_hanging():
-    events = await run_executor(FakeAgent([Update("half way")], error=RuntimeError("model down")))
+    events = await run_executor(
+        FakeAgent([Update("half way")], error=RuntimeError("model down"))
+    )
 
     assert states(events)[-1] == TaskState.TASK_STATE_FAILED
 
@@ -213,14 +221,36 @@ async def test_the_name_arrives_only_on_the_first_piece():
     events = await run_executor(
         FakeAgent(
             [
-                Update("", [SimpleNamespace(type="function_call", name="read_document", call_id="c1", arguments="")]),
-                Update("", [SimpleNamespace(type="function_call", name="", call_id="c1", arguments='{"name": "go"}')]),
+                Update(
+                    "",
+                    [
+                        SimpleNamespace(
+                            type="function_call",
+                            name="read_document",
+                            call_id="c1",
+                            arguments="",
+                        )
+                    ],
+                ),
+                Update(
+                    "",
+                    [
+                        SimpleNamespace(
+                            type="function_call",
+                            name="",
+                            call_id="c1",
+                            arguments='{"name": "go"}',
+                        )
+                    ],
+                ),
                 Update("Answer."),
             ]
         )
     )
 
-    data = MessageToDict(next(p.data for p in artifacts(events)[0].parts if p.HasField("data")))
+    data = MessageToDict(
+        next(p.data for p in artifacts(events)[0].parts if p.HasField("data"))
+    )
     assert data["documents"] == ["go"]
 
 
@@ -229,21 +259,45 @@ async def test_another_tools_arguments_are_not_mistaken_for_ours():
     events = await run_executor(
         FakeAgent(
             [
-                Update("", [SimpleNamespace(type="function_call", name="another_tool", call_id="c9", arguments="")]),
-                Update("", [SimpleNamespace(type="function_call", name="", call_id="c9", arguments='{"name": "not-ours"}')]),
+                Update(
+                    "",
+                    [
+                        SimpleNamespace(
+                            type="function_call",
+                            name="another_tool",
+                            call_id="c9",
+                            arguments="",
+                        )
+                    ],
+                ),
+                Update(
+                    "",
+                    [
+                        SimpleNamespace(
+                            type="function_call",
+                            name="",
+                            call_id="c9",
+                            arguments='{"name": "not-ours"}',
+                        )
+                    ],
+                ),
                 Update("Answer."),
             ]
         )
     )
 
-    data = MessageToDict(next(p.data for p in artifacts(events)[0].parts if p.HasField("data")))
+    data = MessageToDict(
+        next(p.data for p in artifacts(events)[0].parts if p.HasField("data"))
+    )
     assert data.get("documents", []) == []
 
 
 @pytest.mark.asyncio
 async def test_an_ambiguous_question_leaves_the_task_waiting_for_input():
     events = await run_executor(
-        FakeAgent([Update("[NEEDS-CLARIFICATION] Which language are you asking about?")]),
+        FakeAgent(
+            [Update("[NEEDS-CLARIFICATION] Which language are you asking about?")]
+        ),
         question="how does concurrency work?",
     )
 
@@ -255,7 +309,11 @@ async def test_an_ambiguous_question_leaves_the_task_waiting_for_input():
 
 @pytest.mark.asyncio
 async def test_the_question_travels_with_the_state():
-    events = await run_executor(FakeAgent([Update("[NEEDS-CLARIFICATION] Which language are you asking about?")]))
+    events = await run_executor(
+        FakeAgent(
+            [Update("[NEEDS-CLARIFICATION] Which language are you asking about?")]
+        )
+    )
 
     last = [e for e in events if isinstance(e, TaskStatusUpdateEvent)][-1]
     text = "".join(part.text for part in last.status.message.parts)

@@ -5,9 +5,9 @@ import json
 import logging
 from typing import Any
 
+from a2a.helpers import new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.helpers import new_task_from_user_message
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
 from agent_framework import Agent
@@ -135,10 +135,14 @@ class KnowledgeExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task = context.current_task
         if task is None:
+            if context.message is None:
+                raise ValueError("a request without a task must carry a message")
             task = new_task_from_user_message(context.message)
             await event_queue.enqueue_event(task)
 
-        updater = TaskUpdater(event_queue, task.id, context.context_id)
+        updater = TaskUpdater(
+            event_queue, task.id, context.context_id or task.context_id
+        )
         question = context.get_user_input()
 
         await updater.submit()
@@ -161,14 +165,18 @@ class KnowledgeExecutor(AgentExecutor):
         except Exception as error:
             logger.error("Run failed for '%s'.", question, exc_info=True)
             await updater.failed(
-                message=updater.new_agent_message([Part(text=f"knowledge agent: {error}")])
+                message=updater.new_agent_message(
+                    [Part(text=f"knowledge agent: {error}")]
+                )
             )
             return
 
         answer = "".join(pieces).strip()
 
         if answer.startswith(ASKS):
-            question_back = answer[len(ASKS) :].strip() or "Puoi precisare la richiesta?"
+            question_back = (
+                answer[len(ASKS) :].strip() or "Puoi precisare la richiesta?"
+            )
             await updater.requires_input(
                 message=updater.new_agent_message([Part(text=question_back)])
             )
@@ -200,6 +208,8 @@ class KnowledgeExecutor(AgentExecutor):
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        if context.task_id is None or context.context_id is None:
+            raise ValueError("a cancel must say which task it cancels")
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         await updater.cancel()
         logger.info("Task %s canceled on request.", context.task_id)

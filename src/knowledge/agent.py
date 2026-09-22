@@ -35,7 +35,10 @@ Use it sparingly: it is a question that travels all the way up to a person."""
 
 def catalogue(root: Path = CORPUS) -> dict[str, str]:
     """The available documents, by name."""
-    return {path.stem: path.read_text(encoding="utf-8") for path in sorted(root.glob("*.md"))}
+    return {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in sorted(root.glob("*.md"))
+    }
 
 
 def build_knowledge_tools(root: Path = CORPUS) -> list[FunctionTool]:
@@ -74,7 +77,9 @@ def _default_chat_client() -> BaseChatClient:
 def build_knowledge_agent(chat_client: BaseChatClient | None = None) -> Agent:
     return Agent(
         name="knowledge",
-        description="Answers about programming languages by reading a local knowledge base.",
+        description=(
+            "Answers about programming languages by reading a local knowledge base."
+        ),
         instructions=INSTRUCTIONS,
         client=chat_client or _default_chat_client(),
         tools=build_knowledge_tools(),

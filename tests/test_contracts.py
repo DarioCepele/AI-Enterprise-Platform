@@ -1,9 +1,9 @@
 """What this agent puts on the wire, checked against the shared contract."""
 from __future__ import annotations
 
+from contracts import assert_shape, load
 from google.protobuf.json_format import MessageToDict
 
-from contracts import assert_shape, load
 from knowledge.executor import briefing
 
 

@@ -4,9 +4,11 @@ from __future__ import annotations
 import logging
 
 from a2a.server.tasks import BasePushNotificationSender
-from a2a.types import TaskState
+from a2a.types import Task, TaskArtifactUpdateEvent, TaskState, TaskStatusUpdateEvent
 
 logger = logging.getLogger(__name__)
+
+PushEvent = Task | TaskStatusUpdateEvent | TaskArtifactUpdateEvent
 
 WORTH_NOTIFYING = {
     TaskState.TASK_STATE_COMPLETED,
@@ -17,10 +19,11 @@ WORTH_NOTIFYING = {
 }
 
 
-def _state_of(event) -> int | None:
+def _state_of(event: PushEvent) -> int | None:
     for field in ("status",):
         if hasattr(event, field):
-            return getattr(event, field).state
+            state: int = getattr(event, field).state
+            return state
     return None
 
 
@@ -33,7 +36,7 @@ class EssentialNotifications(BasePushNotificationSender):
     only moments when whoever asked for the work has to move.
     """
 
-    async def send_notification(self, task_id: str, event) -> None:
+    async def send_notification(self, task_id: str, event: PushEvent) -> None:
         state = _state_of(event)
         if state not in WORTH_NOTIFYING:
             return

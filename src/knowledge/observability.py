@@ -58,7 +58,11 @@ class JsonFormatter(logging.Formatter):
             payload["exception"] = self.formatException(record.exc_info)
 
         payload.update(
-            {key: value for key, value in record.__dict__.items() if key not in RESERVED}
+            {
+                key: value
+                for key, value in record.__dict__.items()
+                if key not in RESERVED
+            }
         )
         return json.dumps(payload, ensure_ascii=False, default=str)
 

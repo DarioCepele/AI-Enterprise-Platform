@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 
+import httpx
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import (
     add_a2a_routes_to_fastapi,
@@ -11,7 +12,6 @@ from a2a.server.routes import (
     create_jsonrpc_routes,
     create_rest_routes,
 )
-import httpx
 from a2a.server.tasks import (
     InMemoryPushNotificationConfigStore,
     InMemoryTaskStore,
@@ -25,13 +25,13 @@ from a2a.types import (
     SecurityScheme,
 )
 from agent_framework import Agent
+from fastapi import FastAPI, HTTPException
+
+from .agent import build_knowledge_agent, catalogue
 from .executor import KnowledgeExecutor
 from .extended import SCHEME, ServiceTokenOnly, build_extended_card, card_for_the_caller
 from .observability import configure_logging, configure_tracing
 from .push import EssentialNotifications
-from fastapi import FastAPI, HTTPException
-
-from .agent import build_knowledge_agent, catalogue
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,10 @@ SERVICE_NAME = "knowledge-agent"
 SKILL = AgentSkill(
     id="language-comparison",
     name="Programming language knowledge base",
-    description="Answers about typing, concurrency, errors and ecosystem of the languages in the catalogue.",
+    description=(
+        "Answers about typing, concurrency, errors and ecosystem of the "
+        "languages in the catalogue."
+    ),
     tags=["languages", "knowledge-base"],
 )
 
@@ -51,7 +54,9 @@ def build_agent_card(base_url: str) -> AgentCard:
         description="Knowledge base subagent of the AG-UI laboratory.",
         version="0.1.0",
         supported_interfaces=[
-            AgentInterface(url=base_url, protocol_binding="JSONRPC", protocol_version="1.0")
+            AgentInterface(
+                url=base_url, protocol_binding="JSONRPC", protocol_version="1.0"
+            )
         ],
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
@@ -71,9 +76,11 @@ def build_agent_card(base_url: str) -> AgentCard:
 
 
 def create_app(agent: Agent | None = None, base_url: str | None = None) -> FastAPI:
-    configure_logging(SERVICE_NAME, as_json=os.getenv("KNOWLEDGE_JSON_LOGS", "").lower() == "true")
+    json_logs = os.getenv("KNOWLEDGE_JSON_LOGS", "").lower() == "true"
+    configure_logging(SERVICE_NAME, as_json=json_logs)
 
-    url = base_url or os.getenv("KNOWLEDGE_BASE_URL", "http://localhost:8200/")
+    configured = os.getenv("KNOWLEDGE_BASE_URL", "http://localhost:8200/")
+    url = base_url or configured
     card = build_agent_card(url)
     executor = KnowledgeExecutor(agent or build_knowledge_agent())
     push_store = InMemoryPushNotificationConfigStore()
