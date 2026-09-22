@@ -27,7 +27,9 @@ DEFAULT_ORIGINS = (
 class Settings(BaseSettings):
     """Everything the process service reads from the environment."""
 
-    model_config = SettingsConfigDict(env_prefix="PROCESS_", extra="ignore", frozen=True)
+    model_config = SettingsConfigDict(
+        env_prefix="PROCESS_", extra="ignore", frozen=True
+    )
 
     postgres_dsn: str = Field(default="postgresql://127.0.0.1:5432/processes")
     definitions_path: Path = Field(default=Path("processes"))
@@ -37,7 +39,9 @@ class Settings(BaseSettings):
     pool_min_size: int = Field(default=1, ge=0)
     pool_max_size: int = Field(default=10, ge=1)
     port: int = Field(default=8300, ge=1, le=65535)
-    allowed_origins: Annotated[tuple[str, ...], NoDecode] = Field(default=DEFAULT_ORIGINS)
+    allowed_origins: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=DEFAULT_ORIGINS
+    )
     public_url: str = Field(default="http://localhost:8300")
     push_secret: str = Field(default="laboratory-without-a-secret")
     agents: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
@@ -91,7 +95,8 @@ def env_table() -> str:
     for name, field in Settings.model_fields.items():
         default = field.get_default(call_default_factory=True)
         shown = f"`{default}`" if default not in ("", None) else "*(empty)*"
-        rows.append(f"| `{prefix.upper()}{name.upper()}` | {shown} | {FIELD_NOTES.get(name, '')} |")
+        note = FIELD_NOTES.get(name, "")
+        rows.append(f"| `{prefix.upper()}{name.upper()}` | {shown} | {note} |")
     return "\n".join(rows)
 
 

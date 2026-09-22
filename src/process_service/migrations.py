@@ -7,7 +7,6 @@ service will start.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -108,7 +107,8 @@ LATEST_VERSION = max(migration.version for migration in MIGRATIONS)
 
 async def applied_versions(connection: Any) -> set[int]:
     await connection.execute(SCHEMA_TABLE)
-    rows = await (await connection.execute("SELECT version FROM schema_migrations")).fetchall()
+    result = await connection.execute("SELECT version FROM schema_migrations")
+    rows = await result.fetchall()
     return {int(row[0]) for row in rows}
 
 

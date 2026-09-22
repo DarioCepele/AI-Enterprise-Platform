@@ -41,9 +41,8 @@ def get_tool(name: str) -> Tool:
     try:
         return _TOOLS[name]
     except KeyError:
-        raise KeyError(
-            f"tool '{name}' is not registered. Known: {', '.join(sorted(_TOOLS)) or 'none'}"
-        ) from None
+        known = ", ".join(sorted(_TOOLS)) or "none"
+        raise KeyError(f"tool '{name}' is not registered. Known: {known}") from None
 
 
 def registered() -> list[str]:

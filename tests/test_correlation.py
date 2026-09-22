@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from typing import Any
 
 import pytest
+from conftest import needs_postgres
 from dbos import DBOS, SetWorkflowID
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -22,8 +23,6 @@ from process_service.definitions import parse_definition
 from process_service.engine import Engine, advance_instance, use_engine
 from process_service.observability import JsonFormatter, current_trace, working_on
 from process_service.tools import tool
-
-from conftest import needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -72,10 +71,14 @@ async def test_every_line_written_while_a_step_runs_names_the_instance(
     instance = await store.create(scope=scope, definition=ONE_STEP, payload={})
     with json_logs() as written:
         with SetWorkflowID(str(instance.id)):
-            handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+            handle = await DBOS.start_workflow_async(
+                advance_instance, str(instance.id), scope
+            )
         assert await handle.get_result() == "completed"
 
-    lines = [json.loads(line) for line in written.getvalue().splitlines() if line.strip()]
+    lines = [
+        json.loads(line) for line in written.getvalue().splitlines() if line.strip()
+    ]
     from_the_tool = [line for line in lines if line["logger"] == "test.tool"]
 
     # The tool did not say which instance it was working for, and did not have
@@ -99,7 +102,9 @@ async def test_outside_a_step_a_line_claims_no_instance():
     assert lines["test.inside"]["instance_id"] == "11111111-1111-1111-1111-111111111111"
 
 
-async def test_an_instance_that_runs_inside_a_trace_writes_it_down(engine, store, scope):
+async def test_an_instance_that_runs_inside_a_trace_writes_it_down(
+    engine, store, scope
+):
     """Without a collector there is no trace and nothing is written.
 
     With one, the instance keeps the trace it ran in: from a row somebody is
@@ -112,7 +117,9 @@ async def test_an_instance_that_runs_inside_a_trace_writes_it_down(engine, store
     with tracer.start_as_current_span("a question") as span:
         expected = current_trace()
         with SetWorkflowID(str(instance.id)):
-            handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+            handle = await DBOS.start_workflow_async(
+                advance_instance, str(instance.id), scope
+            )
         assert await handle.get_result() == "completed"
 
     assert expected == format(span.get_span_context().trace_id, "032x")

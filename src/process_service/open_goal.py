@@ -78,7 +78,9 @@ class RemoteParticipant:
         self._gateway = gateway
         self._spent = spent
 
-    async def run(self, messages: Any = None, *, stream: bool = False, **kwargs: Any) -> Any:
+    async def run(
+        self, messages: Any = None, *, stream: bool = False, **kwargs: Any
+    ) -> Any:
         question = _as_text(messages)
         if self._spent.exhausted:
             # Refusing here rather than raising: the manager reads it as an
@@ -101,16 +103,22 @@ class RemoteParticipant:
 
         return AgentSession(session_id=session_id)
 
-    def get_session(self, service_session_id: Any, *, session_id: str | None = None) -> Any:
+    def get_session(
+        self, service_session_id: Any, *, session_id: str | None = None
+    ) -> Any:
         from agent_framework import AgentSession
 
-        return AgentSession(service_session_id=service_session_id, session_id=session_id)
+        return AgentSession(
+            service_session_id=service_session_id, session_id=session_id
+        )
 
 
 def _answer(text: str) -> Any:
     from agent_framework import Message
 
-    return AgentResponse(messages=[Message("assistant", [text])], response_id=uuid4().hex)
+    return AgentResponse(
+        messages=[Message("assistant", [text])], response_id=uuid4().hex
+    )
 
 
 def _last_output(result: Any) -> str:
@@ -152,7 +160,9 @@ def manager_agent() -> Any:
         name="manager",
         description="Plans the work of an open goal and decides when it is finished.",
         client=OpenAIChatCompletionClient(
-            model=os.getenv("OPENAI_CHAT_COMPLETION_MODEL", "anthropic/claude-sonnet-5"),
+            model=os.getenv(
+                "OPENAI_CHAT_COMPLETION_MODEL", "anthropic/claude-sonnet-5"
+            ),
             api_key=os.getenv("OPENAI_API_KEY", ""),
             base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
         ),
@@ -183,7 +193,10 @@ async def pursue(
     ]
 
     workflow = MagenticBuilder(
-        participants=people,
+        # SupportsAgentRun also declares a streaming overload of `run`, which a
+        # participant capped to one question-and-answer has no use for; the
+        # manager only ever calls it non-streaming.
+        participants=people,  # type: ignore[arg-type]
         manager_agent=manager or manager_agent(),
         max_round_count=max_rounds,
     ).build()

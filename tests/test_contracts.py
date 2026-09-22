@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import pytest
-
-from process_service.definitions import parse_definition
-
+from conftest import needs_postgres
 from contracts import assert_shape, load
 
-from conftest import needs_postgres
+from process_service.definitions import parse_definition
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 

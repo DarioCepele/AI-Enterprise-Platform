@@ -11,10 +11,16 @@ from dbos import DBOS
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from .agents import AgentGateway, TOKEN_HEADER, NEEDS_INPUT, TERMINAL, summary_of, token_is_valid
+from .agents import (
+    NEEDS_INPUT,
+    TERMINAL,
+    TOKEN_HEADER,
+    AgentGateway,
+    summary_of,
+    token_is_valid,
+)
 from .catalog import Catalog, load_catalog
 from .config import Settings, get_settings
-from .definitions import DefinitionError
 from .engine import (
     Engine,
     approval_topic,
@@ -46,9 +52,13 @@ def create_app(
 
     # Loaded here, not on the first request: a broken definition has to stop the
     # boot, not surface in front of whoever is using the process.
-    definitions = catalog if catalog is not None else load_catalog(config.definitions_path)
-    gateway = agents if agents is not None else AgentGateway(config.agents, config.public_url)
-    state: dict[str, Any] = {"store": store} if store is not None else {}
+    definitions = (
+        catalog if catalog is not None else load_catalog(config.definitions_path)
+    )
+    gateway = (
+        agents if agents is not None else AgentGateway(config.agents, config.public_url)
+    )
+    state: dict[str, InstanceStore] = {"store": store} if store is not None else {}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -57,7 +67,9 @@ def create_app(
             yield
             return
 
-        pool = build_pool(config.postgres_dsn, config.pool_min_size, config.pool_max_size)
+        pool = build_pool(
+            config.postgres_dsn, config.pool_min_size, config.pool_max_size
+        )
         await pool.open(wait=True)
         async with pool.connection() as connection:
             await run_migrations(connection)
@@ -103,7 +115,9 @@ def create_app(
             raise HTTPException(status_code=503, detail="service not initialized")
         return instance
 
-    def current_scope(scope: str | None = Header(default=None, alias=config.scope_header)) -> str:
+    def current_scope(
+        scope: str | None = Header(default=None, alias=config.scope_header),
+    ) -> str:
         """The authorization boundary, with the same seam as the other services."""
         return (scope or "").strip() or config.default_scope
 
@@ -114,7 +128,11 @@ def create_app(
 
     @app.get("/health")
     @app.get("/health/ready")
-    async def ready(store: InstanceStore = Depends(current_store)) -> dict[str, object]:
+    async def ready(
+        # FastAPI's dependency-injection pattern: not evaluated at definition
+        # time, so B008's "called once at import" concern does not apply here.
+        store: InstanceStore = Depends(current_store),
+    ) -> dict[str, object]:
         """Whether it can serve: without Postgres an instance cannot be written."""
         try:
             await store.ping()
@@ -140,7 +158,9 @@ def create_app(
         }
 
     @app.get("/processes/{process_id}")
-    async def read_process(process_id: str, version: int | None = None) -> dict[str, Any]:
+    async def read_process(
+        process_id: str, version: int | None = None
+    ) -> dict[str, Any]:
         try:
             definition = (
                 definitions.get(process_id, version)
@@ -247,13 +267,18 @@ def create_app(
         if instance is None:
             raise HTTPException(status_code=404, detail="unknown instance")
 
-        waiting = next((step for step in instance.steps if step.step_id == step_id), None)
+        waiting = next(
+            (step for step in instance.steps if step.step_id == step_id), None
+        )
         if waiting is None:
             raise HTTPException(status_code=404, detail=f"unknown step '{step_id}'")
         if waiting.status != "waiting_human":
             raise HTTPException(
                 status_code=409,
-                detail=f"step '{step_id}' is {waiting.status}, it is not waiting for an answer",
+                detail=(
+                    f"step '{step_id}' is {waiting.status}, it is not waiting for an "
+                    "answer"
+                ),
             )
 
         await DBOS.send_async(
@@ -282,13 +307,18 @@ def create_app(
         if instance is None:
             raise HTTPException(status_code=404, detail="unknown instance")
 
-        waiting = next((step for step in instance.steps if step.step_id == step_id), None)
+        waiting = next(
+            (step for step in instance.steps if step.step_id == step_id), None
+        )
         if waiting is None:
             raise HTTPException(status_code=404, detail=f"unknown step '{step_id}'")
         if waiting.status != "waiting_approval":
             raise HTTPException(
                 status_code=409,
-                detail=f"step '{step_id}' is {waiting.status}, it is not waiting for a decision",
+                detail=(
+                    f"step '{step_id}' is {waiting.status}, it is not waiting for a "
+                    "decision"
+                ),
             )
 
         definition = definitions.get(instance.process_id, instance.process_version)
@@ -297,16 +327,27 @@ def create_app(
         if approvers and request.by not in approvers:
             raise HTTPException(
                 status_code=403,
-                detail=f"'{request.by}' cannot decide '{step_id}'. Approvers: {', '.join(approvers)}",
+                detail=(
+                    f"'{request.by}' cannot decide '{step_id}'. "
+                    f"Approvers: {', '.join(approvers)}"
+                ),
             )
 
         await DBOS.send_async(
             destination_id=step_workflow_id(str(instance_id), step_id),
-            message={"decision": request.decision, "by": request.by, "note": request.note},
+            message={
+                "decision": request.decision,
+                "by": request.by,
+                "note": request.note,
+            },
             topic=approval_topic(step_id),
         )
         logger.info(
-            "Instance %s step %s: %s by %s.", instance_id, step_id, request.decision, request.by
+            "Instance %s step %s: %s by %s.",
+            instance_id,
+            step_id,
+            request.decision,
+            request.by,
         )
         return {"state": request.decision}
 

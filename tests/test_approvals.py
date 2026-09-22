@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 import pytest
+from conftest import POSTGRES_DSN, needs_postgres
 from dbos import DBOS, SetWorkflowID
 
 from process_service.api import create_app
@@ -28,8 +29,6 @@ from process_service.engine import (
     use_engine,
 )
 from process_service.tools import tool
-
-from conftest import POSTGRES_DSN, needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -45,7 +44,12 @@ NEEDS_A_YES = parse_definition(
                 "approvers": ["reviewer"],
                 "depends_on": ["prepare"],
             },
-            {"id": "apply", "type": "tool", "tool": "apply_it", "depends_on": ["sign_off"]},
+            {
+                "id": "apply",
+                "type": "tool",
+                "tool": "apply_it",
+                "depends_on": ["sign_off"],
+            },
         ],
     }
 )
@@ -132,7 +136,9 @@ def escalate_it(context):
 async def engine(store, dbos):
     CALLS.clear()
     running = Engine(
-        Catalog([NEEDS_A_YES, NOBODY_COMES, NOBODY_COMES_AND_NOWHERE_TO_GO, AFTER_A_BRANCH]),
+        Catalog(
+            [NEEDS_A_YES, NOBODY_COMES, NOBODY_COMES_AND_NOWHERE_TO_GO, AFTER_A_BRANCH]
+        ),
         store,
     )
     use_engine(running)
@@ -171,14 +177,18 @@ async def wait_for(store, scope, instance_id, ready) -> Any:
 async def waiting_instance(store, scope, definition=NEEDS_A_YES):
     instance = await store.create(scope=scope, definition=definition, payload={})
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     await wait_for(
         store, scope, instance.id, lambda read: read.status == "waiting_approval"
     )
     return instance, handle
 
 
-async def decide(instance_id: str, step_id: str, by: str, decision: str = "approved") -> None:
+async def decide(
+    instance_id: str, step_id: str, by: str, decision: str = "approved"
+) -> None:
     await DBOS.send_async(
         destination_id=step_workflow_id(instance_id, step_id),
         message={"decision": decision, "by": by, "note": None},
@@ -222,7 +232,9 @@ async def test_an_instance_that_waits_costs_nothing(engine, store, scope, pool):
     assert await handle.get_result() == "completed"
 
 
-async def test_the_decision_is_written_down_with_whoever_made_it(engine, app, store, scope):
+async def test_the_decision_is_written_down_with_whoever_made_it(
+    engine, app, store, scope
+):
     instance, handle = await waiting_instance(store, scope)
 
     async with await client_for(app) as client:
@@ -247,7 +259,9 @@ async def test_the_decision_is_written_down_with_whoever_made_it(engine, app, st
     assert CALLS == ["prepare", "apply"]
 
 
-async def test_a_second_decision_on_the_same_step_does_nothing(engine, app, store, scope):
+async def test_a_second_decision_on_the_same_step_does_nothing(
+    engine, app, store, scope
+):
     instance, handle = await waiting_instance(store, scope)
 
     async with await client_for(app) as client:
@@ -291,7 +305,9 @@ async def test_only_the_declared_approvers_can_decide(engine, app, store, scope)
     assert await handle.get_result() == "completed"
 
 
-async def test_a_refusal_stops_the_instance_in_a_state_that_says_so(engine, store, scope):
+async def test_a_refusal_stops_the_instance_in_a_state_that_says_so(
+    engine, store, scope
+):
     instance, handle = await waiting_instance(store, scope)
 
     await decide(str(instance.id), "sign_off", "reviewer", decision="rejected")
@@ -318,8 +334,12 @@ async def test_an_approval_on_a_branch_hands_control_to_the_step_it_names(
         scope=scope, definition=AFTER_A_BRANCH, payload={"amount": 5000}
     )
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
-    await wait_for(store, scope, instance.id, lambda read: read.status == "waiting_approval")
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
+    await wait_for(
+        store, scope, instance.id, lambda read: read.status == "waiting_approval"
+    )
 
     await decide(str(instance.id), "sign_off", "reviewer")
     assert await handle.get_result() == "completed"
@@ -329,11 +349,15 @@ async def test_an_approval_on_a_branch_hands_control_to_the_step_it_names(
     assert CALLS == ["apply"]
 
 
-async def test_nobody_deciding_escalates_where_the_definition_says(engine, store, scope):
+async def test_nobody_deciding_escalates_where_the_definition_says(
+    engine, store, scope
+):
     instance = await store.create(scope=scope, definition=NOBODY_COMES, payload={})
 
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     result = await handle.get_result()
 
     read = await store.get(scope=scope, instance_id=instance.id)
@@ -352,7 +376,9 @@ async def test_a_wait_with_nowhere_to_escalate_fails_instead_of_hanging(
     )
 
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     result = await handle.get_result()
 
     read = await store.get(scope=scope, instance_id=instance.id)
@@ -430,7 +456,9 @@ async def test_the_approval_can_come_after_a_restart(engine, store, scope, tmp_p
     script = tmp_path / "waiter.py"
     script.write_text(textwrap.dedent(WAITS_THEN_DIES), encoding="utf-8")
 
-    child = subprocess.Popen(
+    # S603 is a false positive here: the interpreter is this one and the script
+    # is written by the test just above -- no external input reaches this line.
+    child = subprocess.Popen(  # noqa: S603
         [sys.executable, str(script)],
         cwd=os.getcwd(),
         env={

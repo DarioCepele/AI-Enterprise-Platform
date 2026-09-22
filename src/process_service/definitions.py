@@ -130,7 +130,9 @@ class ProcessDefinition(BaseModel):
         for when the wait runs out, not for the beginning.
         """
         handed = self.handed_to()
-        return [step for step in self.steps if not step.depends_on and step.id not in handed]
+        return [
+            step for step in self.steps if not step.depends_on and step.id not in handed
+        ]
 
 
 REQUIRED_BY_TYPE = {
@@ -176,7 +178,8 @@ def _check_required_fields(definition: ProcessDefinition) -> None:
     for step in definition.steps:
         if step.type not in STEP_TYPES:
             raise DefinitionError(
-                f"step '{step.id}': unknown type '{step.type}'. Known: {', '.join(STEP_TYPES)}"
+                f"step '{step.id}': unknown type '{step.type}'. "
+                f"Known: {', '.join(STEP_TYPES)}"
             )
         required = REQUIRED_BY_TYPE.get(step.type)
         if required and not getattr(step, required[0]):
@@ -191,12 +194,15 @@ def _check_required_fields(definition: ProcessDefinition) -> None:
                 "max_agents and max_tokens. A node without a ceiling does not go "
                 "into a process."
             )
-        if step.limits and step.type == "open_goal":
-            if len(step.participants) > step.limits.max_agents:
-                raise DefinitionError(
-                    f"step '{step.id}': {len(step.participants)} participants but "
-                    f"max_agents is {step.limits.max_agents}"
-                )
+        if (
+            step.limits
+            and step.type == "open_goal"
+            and len(step.participants) > step.limits.max_agents
+        ):
+            raise DefinitionError(
+                f"step '{step.id}': {len(step.participants)} participants but "
+                f"max_agents is {step.limits.max_agents}"
+            )
 
 
 def _check_references(definition: ProcessDefinition) -> None:
@@ -217,12 +223,14 @@ def _check_references(definition: ProcessDefinition) -> None:
             )
         if step.on_timeout and step.on_timeout not in known:
             raise DefinitionError(
-                f"step '{step.id}' escalates to '{step.on_timeout}', which does not exist"
+                f"step '{step.id}' escalates to '{step.on_timeout}', "
+                "which does not exist"
             )
         for branch in step.branches:
             if branch.goto not in known:
                 raise DefinitionError(
-                    f"step '{step.id}' branches to '{branch.goto}', which does not exist"
+                    f"step '{step.id}' branches to '{branch.goto}', "
+                    "which does not exist"
                 )
 
 
@@ -233,7 +241,8 @@ def _check_no_cycles(definition: ProcessDefinition) -> None:
         ready = [step_id for step_id, waiting in pending.items() if not waiting]
         if not ready:
             raise DefinitionError(
-                "these steps depend on each other in a cycle: " + ", ".join(sorted(pending))
+                "these steps depend on each other in a cycle: "
+                + ", ".join(sorted(pending))
             )
         for step_id in ready:
             del pending[step_id]

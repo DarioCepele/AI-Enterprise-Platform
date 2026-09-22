@@ -6,6 +6,7 @@ row, and a row outlives the process that created it.
 """
 from __future__ import annotations
 
+import builtins
 import json
 import logging
 from datetime import datetime
@@ -87,7 +88,10 @@ class InstanceStore:
                 },
             )
         logger.info(
-            "Instance %s of %s@%d created.", instance_id, definition.id, definition.version
+            "Instance %s of %s@%d created.",
+            instance_id,
+            definition.id,
+            definition.version,
         )
         return await self.get(scope=scope, instance_id=instance_id)  # type: ignore[return-value]
 
@@ -109,6 +113,8 @@ class InstanceStore:
             steps = await cursor.fetchall()
         return _instance_of(found, steps)
 
+    # This method shadows the builtin `list` for annotations further down the
+    # class body, which is why those say `builtins.list`.
     async def list(
         self,
         *,
@@ -132,7 +138,8 @@ class InstanceStore:
             instances = []
             for row in rows:
                 await cursor.execute(
-                    "SELECT * FROM instance_steps WHERE instance_id = %s ORDER BY step_id",
+                    "SELECT * FROM instance_steps WHERE instance_id = %s "
+                    "ORDER BY step_id",
                     (row["id"],),
                 )
                 instances.append(_instance_of(row, await cursor.fetchall()))
@@ -149,7 +156,9 @@ class InstanceStore:
                 """,
                 (status, instance_id, step_id),
             )
-            await _write_event(connection, instance_id, step_id, "step_started", {"status": status})
+            await _write_event(
+                connection, instance_id, step_id, "step_started", {"status": status}
+            )
 
     async def waiting_on(
         self,
@@ -227,7 +236,11 @@ class InstanceStore:
                 (status, note, instance_id, step_id),
             )
             await _write_event(
-                connection, instance_id, step_id, "step_noted", {"status": status, "note": note}
+                connection,
+                instance_id,
+                step_id,
+                "step_noted",
+                {"status": status, "note": note},
             )
 
     async def record_effect(self, *, instance_id: UUID, step_id: str, key: str) -> bool:
@@ -251,11 +264,12 @@ class InstanceStore:
                 )
             return done.rowcount == 1
 
-    async def effects_of(self, *, instance_id: UUID) -> list[str]:
+    async def effects_of(self, *, instance_id: UUID) -> builtins.list[str]:
         async with self._pool.connection() as connection:
             rows = await (
                 await connection.execute(
-                    "SELECT key FROM side_effects WHERE instance_id = %s ORDER BY created_at",
+                    "SELECT key FROM side_effects WHERE instance_id = %s "
+                    "ORDER BY created_at",
                     (instance_id,),
                 )
             ).fetchall()
@@ -281,23 +295,35 @@ class InstanceStore:
                 (status, note, instance_id),
             )
             await _write_event(
-                connection, instance_id, None, "instance_status", {"status": status, "note": note}
+                connection,
+                instance_id,
+                None,
+                "instance_status",
+                {"status": status, "note": note},
             )
 
     async def record_event(
-        self, *, instance_id: UUID, kind: str, data: dict[str, Any], step_id: str | None = None
+        self,
+        *,
+        instance_id: UUID,
+        kind: str,
+        data: dict[str, Any],
+        step_id: str | None = None,
     ) -> None:
         """Writes something that happened but did not change a row."""
         async with self._pool.connection() as connection:
             await _write_event(connection, instance_id, step_id, kind, data)
 
-    async def events_of(self, *, instance_id: UUID, after: int = 0) -> list[Event]:
+    async def events_of(
+        self, *, instance_id: UUID, after: int = 0
+    ) -> builtins.list[Event]:
         """The history of an instance, in the order it happened."""
         async with self._pool.connection() as connection, connection.cursor(
             row_factory=dict_row
         ) as cursor:
             await cursor.execute(
-                "SELECT * FROM instance_events WHERE instance_id = %s AND id > %s ORDER BY id",
+                "SELECT * FROM instance_events WHERE instance_id = %s AND id > %s "
+                "ORDER BY id",
                 (instance_id, after),
             )
             return [
@@ -331,7 +357,8 @@ async def _write_event(
     a state written without its event would be a state nobody can explain.
     """
     await connection.execute(
-        "INSERT INTO instance_events (instance_id, step_id, kind, data) VALUES (%s, %s, %s, %s)",
+        "INSERT INTO instance_events (instance_id, step_id, kind, data) "
+        "VALUES (%s, %s, %s, %s)",
         (instance_id, step_id, kind, json.dumps(data, default=str)),
     )
 

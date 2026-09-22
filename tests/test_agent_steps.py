@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 import pytest
+from conftest import POSTGRES_DSN, needs_postgres
 from dbos import DBOS, SetWorkflowID
 
 from process_service.agents import summary_of, token_for
@@ -28,8 +29,6 @@ from process_service.engine import (
     use_engine,
 )
 from process_service.tools import tool
-
-from conftest import POSTGRES_DSN, needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -108,7 +107,9 @@ class FakeAgent:
     def known(self) -> list[str]:
         return ["knowledge"]
 
-    async def ask(self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str):
+    async def ask(
+        self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str
+    ):
         self.asked.append({"agent": agent, "question": question, "step_id": step_id})
         return {
             "task_id": f"task-{len(self.asked)}",
@@ -202,14 +203,22 @@ def step_of(instance, step_id: str):
 
 async def running_instance(store, scope, definition=DELEGATES, payload=None):
     """Starts an instance and waits until its agent step is really waiting."""
-    instance = await store.create(scope=scope, definition=definition, payload=payload or {})
+    instance = await store.create(
+        scope=scope, definition=definition, payload=payload or {}
+    )
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
-    await wait_for(store, scope, instance.id, lambda read: step_of(read, "ask").status == "waiting")
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
+    await wait_for(
+        store, scope, instance.id, lambda read: step_of(read, "ask").status == "waiting"
+    )
     return instance, handle
 
 
-async def test_an_agent_step_asks_once_and_writes_down_the_task(engine, store, scope, agents):
+async def test_an_agent_step_asks_once_and_writes_down_the_task(
+    engine, store, scope, agents
+):
     instance, handle = await running_instance(store, scope)
 
     read = await store.get(scope=scope, instance_id=instance.id)
@@ -225,7 +234,9 @@ async def test_an_agent_step_asks_once_and_writes_down_the_task(engine, store, s
     assert len(agents.asked) == 1
 
 
-async def test_the_answer_resumes_the_instance_and_the_process_goes_on(engine, store, scope):
+async def test_the_answer_resumes_the_instance_and_the_process_goes_on(
+    engine, store, scope
+):
     instance, handle = await running_instance(store, scope)
 
     await answer(str(instance.id), "ask", completion("task-1", "the policy says yes"))
@@ -250,7 +261,12 @@ async def test_a_notification_without_the_text_makes_the_step_read_the_task(
     await answer(
         str(instance.id),
         "ask",
-        {"statusUpdate": {"taskId": "task-1", "status": {"state": "TASK_STATE_COMPLETED"}}},
+        {
+            "statusUpdate": {
+                "taskId": "task-1",
+                "status": {"state": "TASK_STATE_COMPLETED"},
+            }
+        },
     )
     assert await handle.get_result() == "completed"
 
@@ -271,7 +287,9 @@ async def test_a_clarification_puts_the_step_in_front_of_a_person(
     instance, handle = await running_instance(store, scope)
 
     await answer(str(instance.id), "ask", clarification("task-1", "For which year?"))
-    read = await wait_for(store, scope, instance.id, lambda read: read.status == "waiting_human")
+    read = await wait_for(
+        store, scope, instance.id, lambda read: read.status == "waiting_human"
+    )
 
     # The round is not lost: the question is written where somebody can read it,
     # and the same step keeps waiting for the answer to it.
@@ -333,7 +351,9 @@ async def test_a_step_that_nobody_answers_escalates_where_the_definition_says(
     instance = await store.create(scope=scope, definition=IMPATIENT, payload={})
 
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     result = await handle.get_result()
 
     read = await store.get(scope=scope, instance_id=instance.id)
@@ -348,7 +368,9 @@ async def test_a_step_that_nobody_answers_escalates_where_the_definition_says(
 
 @pytest.fixture
 def app(store, agents):
-    return create_app(catalog=Catalog([DELEGATES, IMPATIENT]), store=store, agents=agents)
+    return create_app(
+        catalog=Catalog([DELEGATES, IMPATIENT]), store=store, agents=agents
+    )
 
 
 async def client_for(app) -> httpx.AsyncClient:
@@ -366,7 +388,9 @@ async def test_the_webhook_refuses_a_notification_that_is_not_signed(app, store,
         wrong = await client.post(
             f"/a2a/push/{scope}/{instance.id}/ask",
             json=completion("task-1", "hello"),
-            headers={"X-A2A-Notification-Token": token_for(str(instance.id), "another-step")},
+            headers={
+                "X-A2A-Notification-Token": token_for(str(instance.id), "another-step")
+            },
         )
 
     # A token good for one step is not good for another: the signature covers
@@ -375,14 +399,21 @@ async def test_the_webhook_refuses_a_notification_that_is_not_signed(app, store,
     assert wrong.status_code == 403
 
 
-async def test_the_webhook_wakes_the_instance_and_ignores_progress(engine, app, store, scope):
+async def test_the_webhook_wakes_the_instance_and_ignores_progress(
+    engine, app, store, scope
+):
     instance, handle = await running_instance(store, scope)
     headers = {"X-A2A-Notification-Token": token_for(str(instance.id), "ask")}
 
     async with await client_for(app) as client:
         progress = await client.post(
             f"/a2a/push/{scope}/{instance.id}/ask",
-            json={"statusUpdate": {"taskId": "task-1", "status": {"state": "TASK_STATE_WORKING"}}},
+            json={
+                "statusUpdate": {
+                    "taskId": "task-1",
+                    "status": {"state": "TASK_STATE_WORKING"},
+                }
+            },
             headers=headers,
         )
         done = await client.post(
@@ -475,7 +506,9 @@ async def test_the_answer_finds_the_instance_after_the_asking_process_died(
     script = tmp_path / "asker.py"
     script.write_text(textwrap.dedent(ASKS_THEN_DIES), encoding="utf-8")
 
-    child = subprocess.Popen(
+    # S603 is a false positive here: the interpreter is this one and the script
+    # is written by the test just above -- no external input reaches this line.
+    child = subprocess.Popen(  # noqa: S603
         [sys.executable, str(script)],
         cwd=os.getcwd(),
         env={
@@ -491,7 +524,10 @@ async def test_the_answer_finds_the_instance_after_the_asking_process_died(
         assert child.stdout is not None
         assert child.stdout.readline().strip() == "waiting"
         read = await wait_for(
-            store, scope, instance.id, lambda read: step_of(read, "ask").status == "waiting"
+            store,
+            scope,
+            instance.id,
+            lambda read: step_of(read, "ask").status == "waiting",
         )
     finally:
         child.kill()
@@ -499,7 +535,9 @@ async def test_the_answer_finds_the_instance_after_the_asking_process_died(
 
     assert step_of(read, "ask").task_id == "task-1"
 
-    await answer(str(instance.id), "ask", completion("task-1", "answered after the crash"))
+    await answer(
+        str(instance.id), "ask", completion("task-1", "answered after the crash")
+    )
     # A restarted service recovers every workflow left pending; here the two of
     # them are named, because the test is the one doing the recovering: the step
     # that was waiting, and the instance that was waiting for the step.

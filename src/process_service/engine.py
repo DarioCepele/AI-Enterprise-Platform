@@ -37,7 +37,7 @@ COMPLETED = "completed"
 FAILED = "failed"
 
 
-_ENGINE: "Engine | None" = None
+_ENGINE: Engine | None = None
 
 
 WAITING_HUMAN = "waiting_human"
@@ -94,7 +94,9 @@ def use_engine(engine: Engine) -> None:
 
 def current_engine() -> Engine:
     if _ENGINE is None:
-        raise RuntimeError("the engine has not been wired: call use_engine() at startup")
+        raise RuntimeError(
+            "the engine has not been wired: call use_engine() at startup"
+        )
     return _ENGINE
 
 
@@ -117,7 +119,9 @@ async def run_tool_step(
     await engine.store.finish_step(
         instance_id=UUID(instance_id), step_id=step_id, status=COMPLETED, output=output
     )
-    logger.info("Instance %s: step %s done by tool %s.", instance_id, step_id, tool_name)
+    logger.info(
+        "Instance %s: step %s done by tool %s.", instance_id, step_id, tool_name
+    )
     return output
 
 
@@ -134,13 +138,20 @@ async def record_effect(instance_id: str, step_id: str, key: str) -> bool:
         instance_id=UUID(instance_id), step_id=step_id, key=key
     )
     if not first_time:
-        logger.info("Instance %s: effect '%s' already applied, not repeated.", instance_id, key)
+        logger.info(
+            "Instance %s: effect '%s' already applied, not repeated.",
+            instance_id,
+            key,
+        )
     return first_time
 
 
 @DBOS.step()
 async def decide_branch(
-    instance_id: str, step_id: str, branches: list[dict[str, str]], context: dict[str, Any]
+    instance_id: str,
+    step_id: str,
+    branches: list[dict[str, str]],
+    context: dict[str, Any],
 ) -> str | None:
     """Picks the first branch whose condition holds, and writes down which one.
 
@@ -188,7 +199,11 @@ async def ask_agent(
     if engine.agents is None:
         raise RuntimeError("no agents are configured: an agent step cannot run")
     started = await engine.agents.ask(
-        agent=owner, question=question, scope=scope, instance_id=instance_id, step_id=step_id
+        agent=owner,
+        question=question,
+        scope=scope,
+        instance_id=instance_id,
+        step_id=step_id,
     )
     await engine.store.waiting_on(
         instance_id=UUID(instance_id),
@@ -206,7 +221,9 @@ def approval_topic(step_id: str) -> str:
 
 
 @DBOS.step()
-async def request_approval(instance_id: str, step_id: str, approvers: list[str]) -> None:
+async def request_approval(
+    instance_id: str, step_id: str, approvers: list[str]
+) -> None:
     """Puts the step in front of whoever can decide, and writes down who that is."""
     engine = current_engine()
     waiting_for = ", ".join(approvers) if approvers else "anyone"
@@ -216,11 +233,20 @@ async def request_approval(instance_id: str, step_id: str, approvers: list[str])
         status=WAITING_APPROVAL,
         question=f"waiting for a decision by {waiting_for}",
     )
-    await engine.store.set_status(instance_id=UUID(instance_id), status=WAITING_APPROVAL)
-    logger.info("Instance %s step %s waits for %s to decide.", instance_id, step_id, waiting_for)
+    await engine.store.set_status(
+        instance_id=UUID(instance_id), status=WAITING_APPROVAL
+    )
+    logger.info(
+        "Instance %s step %s waits for %s to decide.",
+        instance_id,
+        step_id,
+        waiting_for,
+    )
 
 
-async def _run_approval_step(instance_id: str, step: Step, context: dict[str, Any]) -> Any:
+async def _run_approval_step(
+    instance_id: str, step: Step, context: dict[str, Any]
+) -> Any:
     """Stops the instance in front of a person, for as long as the step allows.
 
     The wait costs nothing: the workflow is not running, the row says what is
@@ -231,7 +257,9 @@ async def _run_approval_step(instance_id: str, step: Step, context: dict[str, An
     await request_approval(instance_id, step.id, list(step.approvers))
 
     timeout = step.timeout_seconds or DEFAULT_APPROVAL_TIMEOUT_SECONDS
-    decision = await DBOS.recv_async(topic=approval_topic(step.id), timeout_seconds=timeout)
+    decision = await DBOS.recv_async(
+        topic=approval_topic(step.id), timeout_seconds=timeout
+    )
     if decision is None:
         return await _timed_out(instance_id, step, timeout)
 
@@ -296,7 +324,9 @@ async def note_question(instance_id: str, step_id: str, question: str) -> None:
         question=question,
     )
     await engine.store.set_status(instance_id=UUID(instance_id), status=WAITING_HUMAN)
-    logger.info("Instance %s step %s waits for an answer: %s", instance_id, step_id, question)
+    logger.info(
+        "Instance %s step %s waits for an answer: %s", instance_id, step_id, question
+    )
 
 
 @DBOS.step()
@@ -319,8 +349,12 @@ async def run_open_goal(
         raise RuntimeError("no agents are configured: an open goal cannot run")
 
     goal = str(step.input.get("goal") or context.get("goal") or step_id)
-    participants = [(name, await engine.agents.describe(name)) for name in step.participants]
-    await engine.store.mark_step(instance_id=UUID(instance_id), step_id=step_id, status=RUNNING)
+    participants = [
+        (name, await engine.agents.describe(name)) for name in step.participants
+    ]
+    await engine.store.mark_step(
+        instance_id=UUID(instance_id), step_id=step_id, status=RUNNING
+    )
 
     reached = await engine.pursue(
         goal=goal,
@@ -390,9 +424,13 @@ async def note_trace(instance_id: str) -> None:
 
 
 @DBOS.step()
-async def set_instance_status(instance_id: str, status: str, note: str | None = None) -> None:
+async def set_instance_status(
+    instance_id: str, status: str, note: str | None = None
+) -> None:
     engine = current_engine()
-    await engine.store.set_status(instance_id=UUID(instance_id), status=status, note=note)
+    await engine.store.set_status(
+        instance_id=UUID(instance_id), status=status, note=note
+    )
 
 
 def step_workflow_id(instance_id: str, step_id: str) -> str:
@@ -432,12 +470,14 @@ async def _one_step(
 
     try:
         return await _do_step(instance_id, scope, step, context)
-    except Exception as error:  # noqa: BLE001 - the step failed, the instance has not
+    except Exception as error:
         # Whatever the step was doing, the process is entitled to hear that it
         # did not work and which one it was: an exception that escaped here
         # would take the whole instance down with a stack trace instead.
         await fail_step(instance_id, step.id, f"{type(error).__name__}: {error}")
-        logger.warning("Instance %s step %s failed.", instance_id, step.id, exc_info=True)
+        logger.warning(
+            "Instance %s step %s failed.", instance_id, step.id, exc_info=True
+        )
         return _stopped(step.id, FAILED)
 
 
@@ -480,7 +520,12 @@ def _handed_on(step: Step) -> dict[str, Any]:
     """
     if not step.on_timeout:
         return _stopped(step.id, FAILED)
-    return {"step_id": step.id, "state": ESCALATED, "output": None, "goto": step.on_timeout}
+    return {
+        "step_id": step.id,
+        "state": ESCALATED,
+        "output": None,
+        "goto": step.on_timeout,
+    }
 
 
 @DBOS.workflow()
@@ -536,7 +581,11 @@ async def _advance(instance_id: str, scope: str) -> str:
             finished.append(result["step_id"])
             if isinstance(result["output"], dict):
                 context.update(
-                    {key: value for key, value in result["output"].items() if value is not None}
+                    {
+                        key: value
+                        for key, value in result["output"].items()
+                        if value is not None
+                    }
                 )
 
         # An escalated step did not do its work, but it said where the work
@@ -617,7 +666,10 @@ async def _compensate(
             if step.idempotency_key
             else ""
         )
-        if await compensate_step(instance_id, step.id, step.compensate_with, key, context):
+        undone_ok = await compensate_step(
+            instance_id, step.id, step.compensate_with, key, context
+        )
+        if undone_ok:
             undone.append(step.id)
     return undone
 
@@ -649,7 +701,9 @@ async def _run_agent_step(
         # goes back into the same task: starting a new one would throw away what
         # the agent had already worked out.
         await note_question(instance_id, step.id, answer.get("text", ""))
-        from_a_person = await DBOS.recv_async(topic=human_topic(step.id), timeout_seconds=timeout)
+        from_a_person = await DBOS.recv_async(
+            topic=human_topic(step.id), timeout_seconds=timeout
+        )
         if from_a_person is None:
             return await _timed_out(instance_id, step, timeout)
 
@@ -708,7 +762,9 @@ async def read_result(
     try:
         result = await engine.agents.result_of(agent=owner, task_id=task_id)
     except Exception:
-        logger.warning("Task %s of %s could not be read back.", task_id[:8], owner, exc_info=True)
+        logger.warning(
+            "Task %s of %s could not be read back.", task_id[:8], owner, exc_info=True
+        )
         return {}
 
     usage = result.get("usage") or {}
@@ -751,7 +807,7 @@ async def compensate_step(
         output = get_tool(tool_name)(context)
         if inspect.isawaitable(output):
             output = await output
-    except Exception as error:  # noqa: BLE001 - one compensation, not the run
+    except Exception as error:
         await engine.store.note_step(
             instance_id=UUID(instance_id),
             step_id=step_id,
@@ -759,7 +815,10 @@ async def compensate_step(
             note=f"'{tool_name}' failed: {type(error).__name__}: {error}",
         )
         logger.error(
-            "Instance %s: step %s could not be undone.", instance_id, step_id, exc_info=True
+            "Instance %s: step %s could not be undone.",
+            instance_id,
+            step_id,
+            exc_info=True,
         )
         return False
 
@@ -777,12 +836,18 @@ async def compensate_step(
 async def fail_step(instance_id: str, step_id: str, note: str) -> None:
     engine = current_engine()
     await engine.store.finish_step(
-        instance_id=UUID(instance_id), step_id=step_id, status=FAILED, output=None, note=note
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        status=FAILED,
+        output=None,
+        note=note,
     )
 
 
 @DBOS.step()
-async def write_step_output(instance_id: str, step_id: str, output: dict[str, Any]) -> None:
+async def write_step_output(
+    instance_id: str, step_id: str, output: dict[str, Any]
+) -> None:
     engine = current_engine()
     await engine.store.finish_step(
         instance_id=UUID(instance_id), step_id=step_id, status=COMPLETED, output=output
@@ -818,7 +883,11 @@ async def _run_step(instance_id: str, step: Step, context: dict[str, Any]) -> An
         try:
             return await decide_branch(instance_id, step.id, branches, context)
         except ConditionError:
-            logger.error("Instance %s: step %s has a condition that does not hold up.", instance_id, step.id)
+            logger.error(
+                "Instance %s: step %s has a condition that does not hold up.",
+                instance_id,
+                step.id,
+            )
             return FAILED
 
     if step.idempotency_key:

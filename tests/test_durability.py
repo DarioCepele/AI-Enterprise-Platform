@@ -6,17 +6,15 @@ import os
 import subprocess
 import sys
 import textwrap
-from uuid import UUID
 
 import pytest
+from conftest import POSTGRES_DSN, needs_postgres
 from dbos import DBOS
 
 from process_service.catalog import Catalog
 from process_service.definitions import parse_definition
 from process_service.engine import Engine, advance_instance, use_engine
 from process_service.tools import tool
-
-from conftest import POSTGRES_DSN, needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -27,7 +25,12 @@ THREE_STEPS = parse_definition(
         "steps": [
             {"id": "one", "type": "tool", "tool": "count_one"},
             {"id": "two", "type": "tool", "tool": "count_two", "depends_on": ["one"]},
-            {"id": "three", "type": "tool", "tool": "count_three", "depends_on": ["two"]},
+            {
+                "id": "three",
+                "type": "tool",
+                "tool": "count_three",
+                "depends_on": ["two"],
+            },
         ],
     }
 )
@@ -112,7 +115,9 @@ async def test_a_process_of_three_steps_runs_them_in_order(engine, store, scope)
     assert (await store.get(scope=scope, instance_id=instance.id)).status == "completed"
 
 
-async def test_the_steps_already_done_are_not_done_again_after_a_crash(engine, store, scope):
+async def test_the_steps_already_done_are_not_done_again_after_a_crash(
+    engine, store, scope
+):
     """A workflow replayed from the start does not redo the work it recorded.
 
     Each step is a workflow of its own, with an id derived from the instance and
@@ -136,7 +141,9 @@ async def test_the_steps_already_done_are_not_done_again_after_a_crash(engine, s
     assert CALLS == []
 
 
-async def test_an_effect_is_applied_once_even_if_the_step_runs_twice(engine, store, scope):
+async def test_an_effect_is_applied_once_even_if_the_step_runs_twice(
+    engine, store, scope
+):
     instance = await store.create(
         scope=scope, definition=WITH_EFFECT, payload={"request_id": "r-1"}
     )
@@ -162,11 +169,15 @@ async def test_a_decision_takes_one_branch_and_writes_down_why(engine, store, sc
     decided = next(step for step in read.steps if step.step_id == "decide")
     assert CALLS == ["one", "two"]
     assert decided.output == {"when": "amount > 10000", "goto": "big"}
-    assert next(step for step in read.steps if step.step_id == "small").status == "pending"
+    assert (
+        next(step for step in read.steps if step.step_id == "small").status == "pending"
+    )
 
 
 async def test_the_other_branch_runs_when_the_rule_says_so(engine, store, scope):
-    instance = await store.create(scope=scope, definition=BRANCHING, payload={"amount": 10})
+    instance = await store.create(
+        scope=scope, definition=BRANCHING, payload={"amount": 10}
+    )
 
     await advance_instance(str(instance.id), scope)
 
@@ -243,7 +254,9 @@ asyncio.run(main())
 """
 
 
-async def test_an_instance_survives_the_death_of_the_process(engine, store, scope, tmp_path):
+async def test_an_instance_survives_the_death_of_the_process(
+    engine, store, scope, tmp_path
+):
     """The real thing: a process killed mid-step, and recovery from the outside."""
     instance = await store.create(
         scope=scope,
@@ -253,7 +266,12 @@ async def test_an_instance_survives_the_death_of_the_process(engine, store, scop
                 "version": 1,
                 "steps": [
                     {"id": "quick", "type": "tool", "tool": "quick"},
-                    {"id": "endless", "type": "tool", "tool": "endless", "depends_on": ["quick"]},
+                    {
+                        "id": "endless",
+                        "type": "tool",
+                        "tool": "endless",
+                        "depends_on": ["quick"],
+                    },
                 ],
             }
         ),
@@ -262,7 +280,9 @@ async def test_an_instance_survives_the_death_of_the_process(engine, store, scop
     script = tmp_path / "runner.py"
     script.write_text(textwrap.dedent(RESTART_SCRIPT), encoding="utf-8")
 
-    child = subprocess.Popen(
+    # S603 is a false positive here: the interpreter is this one and the script
+    # is written by the test just above -- no external input reaches this line.
+    child = subprocess.Popen(  # noqa: S603
         [sys.executable, str(script)],
         cwd=os.getcwd(),
         env={

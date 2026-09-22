@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from conftest import needs_postgres
 from dbos import DBOS, SetWorkflowID
 
 from process_service.catalog import Catalog
@@ -18,8 +19,6 @@ from process_service.definitions import DefinitionError, parse_definition
 from process_service.engine import Engine, advance_instance, use_engine
 from process_service.open_goal import STOPPED_BY_BUDGET, RemoteParticipant, Spent
 from process_service.tools import tool
-
-from conftest import needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -33,7 +32,9 @@ OPEN = parse_definition(
                 "type": "open_goal",
                 "participants": ["knowledge", "analysis"],
                 "limits": {"max_rounds": 3, "max_agents": 2, "max_tokens": 20000},
-                "input": {"goal": "Decide whether the numbers agree with the documents."},
+                "input": {
+                    "goal": "Decide whether the numbers agree with the documents."
+                },
             },
             {
                 "id": "write_it_down",
@@ -140,7 +141,9 @@ async def test_a_participant_stops_answering_once_the_budget_is_gone():
     assert len(gateway.asked) == 2
 
 
-async def test_the_result_of_an_open_goal_is_an_ordinary_step_output(store, scope, dbos):
+async def test_the_result_of_an_open_goal_is_an_ordinary_step_output(
+    store, scope, dbos
+):
     KEPT.clear()
     reached = {
         "text": "they agree, with one exception",
@@ -162,7 +165,9 @@ async def test_the_result_of_an_open_goal_is_an_ordinary_step_output(store, scop
     instance = await store.create(scope=scope, definition=OPEN, payload={})
 
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     assert await handle.get_result() == "completed"
 
     read = await store.get(scope=scope, instance_id=instance.id)
@@ -191,7 +196,9 @@ async def test_what_the_node_cost_is_in_the_history(store, scope, dbos):
     instance = await store.create(scope=scope, definition=OPEN, payload={})
 
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     assert await handle.get_result() == "completed"
 
     spent = [

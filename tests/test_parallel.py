@@ -11,14 +11,18 @@ import time
 from typing import Any
 
 import pytest
+from conftest import needs_postgres
 from dbos import DBOS, SetWorkflowID
 
 from process_service.catalog import Catalog
 from process_service.definitions import parse_definition
-from process_service.engine import Engine, advance_instance, step_workflow_id, use_engine
+from process_service.engine import (
+    Engine,
+    advance_instance,
+    step_workflow_id,
+    use_engine,
+)
 from process_service.tools import tool
-
-from conftest import needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -61,8 +65,18 @@ TWO_AGENTS = parse_definition(
         "id": "two-agents",
         "version": 1,
         "steps": [
-            {"id": "one", "type": "agent", "owner": "knowledge", "input": {"question": "first?"}},
-            {"id": "two", "type": "agent", "owner": "knowledge", "input": {"question": "second?"}},
+            {
+                "id": "one",
+                "type": "agent",
+                "owner": "knowledge",
+                "input": {"question": "first?"},
+            },
+            {
+                "id": "two",
+                "type": "agent",
+                "owner": "knowledge",
+                "input": {"question": "second?"},
+            },
             {
                 "id": "join",
                 "type": "tool",
@@ -123,7 +137,9 @@ class FakeAgent:
     def known(self) -> list[str]:
         return ["knowledge"]
 
-    async def ask(self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str):
+    async def ask(
+        self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str
+    ):
         self.asked.append(step_id)
         return {"task_id": f"task-{step_id}", "state": "TASK_STATE_SUBMITTED"}
 
@@ -141,7 +157,9 @@ async def engine(store, agents, dbos):
     CALLS.clear()
     ARRIVED.clear()
     BOTH_IN.clear()
-    running = Engine(Catalog([TWO_AT_ONCE, ONE_OF_THEM_BREAKS, TWO_AGENTS]), store, agents)
+    running = Engine(
+        Catalog([TWO_AT_ONCE, ONE_OF_THEM_BREAKS, TWO_AGENTS]), store, agents
+    )
     use_engine(running)
     return running
 
@@ -153,7 +171,9 @@ def step_of(instance, step_id: str):
 async def start(store, scope, definition):
     instance = await store.create(scope=scope, definition=definition, payload={})
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     return instance, handle
 
 
@@ -194,10 +214,16 @@ class TimedAgent(FakeAgent):
         super().__init__()
         self.asked_at: dict[str, float] = {}
 
-    async def ask(self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str):
+    async def ask(
+        self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str
+    ):
         self.asked_at[step_id] = time.perf_counter()
         return await super().ask(
-            agent=agent, question=question, scope=scope, instance_id=instance_id, step_id=step_id
+            agent=agent,
+            question=question,
+            scope=scope,
+            instance_id=instance_id,
+            step_id=step_id,
         )
 
 
@@ -240,7 +266,9 @@ async def test_two_agents_that_take_a_while_cost_the_slower_one_not_the_sum(
 
     began = time.perf_counter()
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     result, _ = await asyncio.gather(
         handle.get_result(), answer_each_step(agents, str(instance.id), expected=2)
     )
@@ -272,7 +300,11 @@ async def test_two_agents_can_be_waiting_at_the_same_time(engine, store, scope, 
     for name in ("one", "two"):
         await DBOS.send_async(
             destination_id=step_workflow_id(str(instance.id), name),
-            message={"task_id": f"task-{name}", "state": "TASK_STATE_COMPLETED", "text": name},
+            message={
+                "task_id": f"task-{name}",
+                "state": "TASK_STATE_COMPLETED",
+                "text": name,
+            },
             topic=name,
         )
 

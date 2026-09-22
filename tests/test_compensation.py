@@ -9,14 +9,19 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from conftest import needs_postgres
 from dbos import DBOS, SetWorkflowID
 
 from process_service.catalog import Catalog
 from process_service.definitions import parse_definition
-from process_service.engine import Engine, advance_instance, approval_topic, step_workflow_id, use_engine
+from process_service.engine import (
+    Engine,
+    advance_instance,
+    approval_topic,
+    step_workflow_id,
+    use_engine,
+)
 from process_service.tools import tool
-
-from conftest import needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -39,7 +44,12 @@ BREAKS_AT_THE_END = parse_definition(
                 "depends_on": ["book"],
                 "compensate_with": "refund_it",
             },
-            {"id": "deliver", "type": "tool", "tool": "cannot_do_it", "depends_on": ["charge"]},
+            {
+                "id": "deliver",
+                "type": "tool",
+                "tool": "cannot_do_it",
+                "depends_on": ["charge"],
+            },
         ],
     }
 )
@@ -62,7 +72,12 @@ UNDO_BREAKS_TOO = parse_definition(
                 "depends_on": ["book"],
                 "compensate_with": "cannot_undo_it",
             },
-            {"id": "deliver", "type": "tool", "tool": "cannot_do_it", "depends_on": ["charge"]},
+            {
+                "id": "deliver",
+                "type": "tool",
+                "tool": "cannot_do_it",
+                "depends_on": ["charge"],
+            },
         ],
     }
 )
@@ -140,9 +155,13 @@ def step_of(instance, step_id: str):
 
 
 async def run(store, scope, definition, payload=None):
-    instance = await store.create(scope=scope, definition=definition, payload=payload or {})
+    instance = await store.create(
+        scope=scope, definition=definition, payload=payload or {}
+    )
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     return instance, handle
 
 

@@ -1,1 +1,2 @@
-"""Durable business processes: versioned definitions, instances that survive restarts."""
+"""Durable business processes: versioned definitions, instances that survive
+restarts."""

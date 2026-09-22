@@ -41,18 +41,22 @@ def test_the_definitions_of_the_repository_load(tmp_path: Path):
 
 def test_a_broken_definition_stops_the_boot_naming_the_file(tmp_path: Path):
     write(tmp_path, "good.yaml", GOOD)
-    write(tmp_path, "broken.yaml", "id: broken\nversion: 1\nsteps:\n  - id: x\n    type: tool\n")
+    write(
+        tmp_path,
+        "broken.yaml",
+        "id: broken\nversion: 1\nsteps:\n  - id: x\n    type: tool\n",
+    )
 
     # Refusing at startup instead of at the first instance: the second way fails
     # in front of whoever is using the process.
-    with pytest.raises(DefinitionError, match="broken.yaml"):
+    with pytest.raises(DefinitionError, match=r"broken.yaml"):
         load_catalog(tmp_path)
 
 
 def test_a_file_that_is_not_yaml_is_named_too(tmp_path: Path):
     write(tmp_path, "bad.yaml", "{{{ not yaml")
 
-    with pytest.raises(DefinitionError, match="bad.yaml"):
+    with pytest.raises(DefinitionError, match=r"bad.yaml"):
         load_catalog(tmp_path)
 
 

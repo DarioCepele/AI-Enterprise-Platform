@@ -54,7 +54,9 @@ def replay(definition: ProcessDefinition, events: list[Event]) -> Replayed:
     same answer, because nothing here asks anybody anything.
     """
     history = _read(events)
-    walked = Replayed(context=dict(history.input), status=history.status, undone=history.undone)
+    walked = Replayed(
+        context=dict(history.input), status=history.status, undone=history.undone
+    )
 
     done: set[str] = set()
     ready = [step.id for step in definition.entry_steps()]
@@ -66,7 +68,8 @@ def replay(definition: ProcessDefinition, events: list[Event]) -> Replayed:
             step = definition.step(step_id)
             if step is None:
                 raise ReplayDiverged(
-                    f"the history mentions '{step_id}', which this definition does not have"
+                    f"the history mentions '{step_id}', which this definition "
+                    "does not have"
                 )
 
             state = history.states.get(step_id)
@@ -107,7 +110,10 @@ def _decision_of(
     be explained by what is written down.
     """
     step = definition.step(step_id)
-    assert step is not None
+    if step is None:
+        raise ReplayDiverged(
+            f"the history mentions '{step_id}', which this definition does not have"
+        )
     for branch in step.branches:
         try:
             holds = evaluate(branch.when, walked.context)
@@ -115,7 +121,8 @@ def _decision_of(
             raise ReplayDiverged(f"step '{step_id}': {error}") from error
         if not holds:
             continue
-        if isinstance(recorded, dict) and recorded.get("goto") not in (None, branch.goto):
+        recorded_goto = recorded.get("goto") if isinstance(recorded, dict) else None
+        if isinstance(recorded, dict) and recorded_goto not in (None, branch.goto):
             raise ReplayDiverged(
                 f"step '{step_id}' took '{recorded['goto']}' when it ran, and takes "
                 f"'{branch.goto}' now: the history no longer explains the instance"

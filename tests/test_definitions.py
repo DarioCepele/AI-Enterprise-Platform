@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import pytest
 
-from process_service.definitions import DefinitionError, ProcessDefinition, parse_definition
+from process_service.definitions import (
+    DefinitionError,
+    ProcessDefinition,
+    parse_definition,
+)
 
 VALID = {
     "id": "example-approval",
@@ -11,7 +15,12 @@ VALID = {
     "name": "Example approval",
     "steps": [
         {"id": "collect", "type": "tool", "tool": "collect_request"},
-        {"id": "check", "type": "agent", "owner": "knowledge", "depends_on": ["collect"]},
+        {
+            "id": "check",
+            "type": "agent",
+            "owner": "knowledge",
+            "depends_on": ["collect"],
+        },
         {
             "id": "decide",
             "type": "decision",
@@ -22,7 +31,12 @@ VALID = {
             ],
         },
         {"id": "approval", "type": "approval", "approvers": ["finance"]},
-        {"id": "execute", "type": "tool", "tool": "apply", "idempotency_key": "request_id"},
+        {
+            "id": "execute",
+            "type": "tool",
+            "tool": "apply",
+            "idempotency_key": "request_id",
+        },
     ],
 }
 
@@ -51,7 +65,10 @@ def test_the_first_steps_are_the_ones_nobody_leads_to():
 
 
 def test_two_steps_with_the_same_id_are_refused_by_name():
-    broken = {**VALID, "steps": [*VALID["steps"], {"id": "collect", "type": "tool", "tool": "x"}]}
+    broken = {
+        **VALID,
+        "steps": [*VALID["steps"], {"id": "collect", "type": "tool", "tool": "x"}],
+    }
 
     with pytest.raises(DefinitionError, match="collect"):
         parse_definition(broken)
@@ -76,7 +93,7 @@ def test_a_cycle_is_refused_with_the_steps_that_form_it():
         ],
     }
 
-    with pytest.raises(DefinitionError, match="a, b|b, a"):
+    with pytest.raises(DefinitionError, match=r"a, b|b, a"):
         parse_definition(broken)
 
 
@@ -144,7 +161,9 @@ def test_a_goto_that_points_nowhere_is_refused():
             {
                 "id": "broken",
                 "version": 1,
-                "steps": [{"id": "only", "type": "tool", "tool": "do", "goto": "elsewhere"}],
+                "steps": [
+                    {"id": "only", "type": "tool", "tool": "do", "goto": "elsewhere"}
+                ],
             }
         )
 

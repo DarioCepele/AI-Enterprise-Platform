@@ -10,16 +10,20 @@ from typing import Any
 
 import httpx
 import pytest
+from conftest import needs_postgres
 from dbos import DBOS, SetWorkflowID
 
 from process_service.api import create_app
 from process_service.catalog import Catalog
 from process_service.definitions import parse_definition
-from process_service.engine import Engine, advance_instance, step_workflow_id, use_engine
+from process_service.engine import (
+    Engine,
+    advance_instance,
+    step_workflow_id,
+    use_engine,
+)
 from process_service.replay import ReplayDiverged, replay
 from process_service.tools import tool
-
-from conftest import needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -55,7 +59,12 @@ WITH_AN_AGENT = parse_definition(
                 "owner": "knowledge",
                 "input": {"question": "what is the rule?"},
             },
-            {"id": "close", "type": "tool", "tool": "handle_small", "depends_on": ["ask"]},
+            {
+                "id": "close",
+                "type": "tool",
+                "tool": "handle_small",
+                "depends_on": ["ask"],
+            },
         ],
     }
 )
@@ -88,7 +97,9 @@ class FakeAgent:
     def known(self) -> list[str]:
         return ["knowledge"]
 
-    async def ask(self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str):
+    async def ask(
+        self, *, agent: str, question: str, scope: str, instance_id: str, step_id: str
+    ):
         CALLS.append("asked")
         return {"task_id": "task-1", "state": "TASK_STATE_SUBMITTED"}
 
@@ -112,9 +123,13 @@ async def client_for(app) -> httpx.AsyncClient:
 
 
 async def run(store, scope, definition, payload=None):
-    instance = await store.create(scope=scope, definition=definition, payload=payload or {})
+    instance = await store.create(
+        scope=scope, definition=definition, payload=payload or {}
+    )
     with SetWorkflowID(str(instance.id)):
-        handle = await DBOS.start_workflow_async(advance_instance, str(instance.id), scope)
+        handle = await DBOS.start_workflow_async(
+            advance_instance, str(instance.id), scope
+        )
     return instance, handle
 
 
@@ -126,13 +141,17 @@ async def test_the_history_says_what_happened_and_in_which_order(engine, store, 
     kinds = [(event.kind, event.step_id) for event in events]
 
     assert ("instance_created", None) in kinds
-    assert kinds.index(("step_finished", "read_it")) < kinds.index(("step_finished", "decide"))
+    assert kinds.index(("step_finished", "read_it")) < kinds.index(
+        ("step_finished", "decide")
+    )
     # A decision is only useful in the history if it says on which condition.
     decided = next(
-        event for event in events if event.kind == "step_finished" and event.step_id == "decide"
+        event
+        for event in events
+        if event.kind == "step_finished" and event.step_id == "decide"
     )
     assert decided.data["output"] == {"when": "amount > 10000", "goto": "big"}
-    assert ("instance_status", None) == kinds[-1]
+    assert kinds[-1] == ("instance_status", None)
 
 
 async def test_replaying_a_finished_instance_takes_the_same_path(engine, store, scope):
@@ -168,7 +187,11 @@ async def test_two_replays_of_the_same_history_do_not_diverge(engine, store, sco
         await asyncio.sleep(0.05)
     await DBOS.send_async(
         destination_id=step_workflow_id(str(instance.id), "ask"),
-        message={"task_id": "task-1", "state": "TASK_STATE_COMPLETED", "text": "the rule is this"},
+        message={
+            "task_id": "task-1",
+            "state": "TASK_STATE_COMPLETED",
+            "text": "the rule is this",
+        },
         topic="ask",
     )
     assert await handle.get_result() == "completed"

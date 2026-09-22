@@ -41,14 +41,20 @@ class Catalog:
     def latest(self, process_id: str) -> ProcessDefinition:
         """The version a new instance starts on."""
         versions = [
-            definition for key, definition in self._by_key.items() if key[0] == process_id
+            definition
+            for key, definition in self._by_key.items()
+            if key[0] == process_id
         ]
         if not versions:
-            raise KeyError(f"process '{process_id}' is not in the catalogue. Known: {self._known()}")
+            raise KeyError(
+                f"process '{process_id}' is not in the catalogue. "
+                f"Known: {self._known()}"
+            )
         return max(versions, key=lambda definition: definition.version)
 
     def _known(self) -> str:
-        return ", ".join(f"{name}@{version}" for name, version in sorted(self._by_key)) or "none"
+        names = (f"{name}@{version}" for name, version in sorted(self._by_key))
+        return ", ".join(names) or "none"
 
 
 def load_catalog(folder: Path | str = DEFAULT_FOLDER) -> Catalog:
@@ -60,8 +66,8 @@ def load_catalog(folder: Path | str = DEFAULT_FOLDER) -> Catalog:
         definition = _read(path)
         if definition.key() in seen:
             raise DefinitionError(
-                f"{path.name}: process '{definition.id}' version {definition.version} is already "
-                f"defined in {seen[definition.key()].name}"
+                f"{path.name}: process '{definition.id}' version {definition.version} "
+                f"is already defined in {seen[definition.key()].name}"
             )
         seen[definition.key()] = path
         definitions.append(definition)

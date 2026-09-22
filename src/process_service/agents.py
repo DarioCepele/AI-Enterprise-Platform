@@ -34,7 +34,10 @@ from .config import get_settings
 logger = logging.getLogger(__name__)
 
 CARD_PATH = ".well-known/agent-card.json"
-TOKEN_HEADER = "X-A2A-Notification-Token"
+# S105 is a false positive here: this is the name of the HTTP header that
+# carries the token, not a credential. The secret comes from settings, in
+# _secret() below.
+TOKEN_HEADER = "X-A2A-Notification-Token"  # noqa: S105
 
 TERMINAL = {
     "TASK_STATE_COMPLETED",
@@ -74,7 +77,9 @@ def summary_of(notification: dict[str, Any]) -> tuple[str, str, str]:
     accepted here, and the caller decides what to ignore.
     """
     task = notification.get("task") or {}
-    status_update = notification.get("statusUpdate") or notification.get("status_update") or {}
+    status_update = (
+        notification.get("statusUpdate") or notification.get("status_update") or {}
+    )
     artifact_update = (
         notification.get("artifactUpdate") or notification.get("artifact_update") or {}
     )
@@ -105,7 +110,9 @@ def summary_of(notification: dict[str, Any]) -> tuple[str, str, str]:
     if not parts:
         message = (status_update.get("status") or {}).get("message") or {}
         parts = [
-            part["text"] for part in message.get("parts") or [] if isinstance(part.get("text"), str)
+            part["text"]
+            for part in message.get("parts") or []
+            if isinstance(part.get("text"), str)
         ]
     return task_id, state, "".join(parts).strip()
 
@@ -168,7 +175,9 @@ class AgentGateway:
             card = await fetch_card(self._urls[name])
             self._cards[name] = card.description
             self._clients[name] = ClientFactory(
-                ClientConfig(httpx_client=httpx.AsyncClient(timeout=60.0), streaming=False)
+                ClientConfig(
+                    httpx_client=httpx.AsyncClient(timeout=60.0), streaming=False
+                )
             ).create(card)
         return self._clients[name]
 
@@ -182,10 +191,14 @@ class AgentGateway:
         webhook, which is what lets the instance suspend instead of waiting.
         """
         if not self.knows(agent):
-            raise KeyError(f"agent '{agent}' is not configured. Known: {', '.join(self.known())}")
+            raise KeyError(
+                f"agent '{agent}' is not configured. Known: {', '.join(self.known())}"
+            )
 
         client = await self._client(agent)
-        message = Message(message_id=uuid4().hex, role=Role.ROLE_USER, parts=[Part(text=text)])
+        message = Message(
+            message_id=uuid4().hex, role=Role.ROLE_USER, parts=[Part(text=text)]
+        )
         if task_id:
             message.task_id = task_id
         if context_id:
@@ -228,7 +241,11 @@ class AgentGateway:
     ) -> dict[str, Any]:
         """Starts a task and returns as soon as it is accepted."""
         return await self._send(
-            agent=agent, text=question, scope=scope, instance_id=instance_id, step_id=step_id
+            agent=agent,
+            text=question,
+            scope=scope,
+            instance_id=instance_id,
+            step_id=step_id,
         )
 
     async def converse(self, *, agent: str, question: str) -> dict[str, Any]:
@@ -240,7 +257,9 @@ class AgentGateway:
         while a step is not.
         """
         if not self.knows(agent):
-            raise KeyError(f"agent '{agent}' is not configured. Known: {', '.join(self.known())}")
+            raise KeyError(
+                f"agent '{agent}' is not configured. Known: {', '.join(self.known())}"
+            )
 
         client = await self._client(agent)
         request = SendMessageRequest(
@@ -270,7 +289,9 @@ class AgentGateway:
             # artifact this call did not see: the task has both.
             read = await self.result_of(agent=agent, task_id=task_id)
             text, usage = read["text"], read["usage"] or usage
-        logger.info("Open goal: %s answered in one call (%d characters).", agent, len(text))
+        logger.info(
+            "Open goal: %s answered in one call (%d characters).", agent, len(text)
+        )
         return {"text": text, "usage": usage, "task_id": task_id}
 
     async def result_of(self, *, agent: str, task_id: str) -> dict[str, Any]:
@@ -292,7 +313,9 @@ class AgentGateway:
                 elif part.HasField("data"):
                     usage = usage or _usage_of(MessageToDict(part.data))
         if not pieces and task.status.HasField("message"):
-            pieces = [part.text for part in task.status.message.parts if part.HasField("text")]
+            pieces = [
+                part.text for part in task.status.message.parts if part.HasField("text")
+            ]
         return {"text": "".join(pieces).strip(), "usage": usage}
 
     async def reply(

@@ -1,17 +1,17 @@
 """Instances: rows that outlive the process that wrote them."""
 from __future__ import annotations
 
+from uuid import uuid4
+
 import httpx
 import pytest
-from uuid import uuid4
+from conftest import needs_postgres
 
 from process_service.api import create_app
 from process_service.catalog import load_catalog
 from process_service.definitions import parse_definition
 from process_service.engine import Engine, use_engine
 from process_service.migrations import LATEST_VERSION, applied_versions, run_migrations
-
-from conftest import needs_postgres
 
 pytestmark = [needs_postgres, pytest.mark.integration]
 
@@ -21,7 +21,12 @@ SIMPLE = parse_definition(
         "version": 1,
         "steps": [
             {"id": "first", "type": "tool", "tool": "do"},
-            {"id": "second", "type": "agent", "owner": "knowledge", "depends_on": ["first"]},
+            {
+                "id": "second",
+                "type": "agent",
+                "owner": "knowledge",
+                "depends_on": ["first"],
+            },
         ],
     }
 )
@@ -37,14 +42,16 @@ REVISED = parse_definition(
 
 async def test_the_migrations_are_recorded_and_idempotent(pool):
     async with pool.connection() as connection:
-        assert await applied_versions(connection) == {
-            version for version in range(1, LATEST_VERSION + 1)
-        }
+        assert await applied_versions(connection) == set(
+            range(1, LATEST_VERSION + 1)
+        )
         assert await run_migrations(connection) == []
 
 
 async def test_starting_an_instance_writes_it_with_its_steps(store, scope):
-    instance = await store.create(scope=scope, definition=SIMPLE, payload={"amount": 12})
+    instance = await store.create(
+        scope=scope, definition=SIMPLE, payload={"amount": 12}
+    )
 
     assert instance.process_id == "simple"
     assert instance.process_version == 1
@@ -150,10 +157,14 @@ async def test_the_api_does_not_show_instances_of_another_scope(app, scope):
             headers={"X-Process-Scope": scope},
         )
         mine = await client.get("/instances", headers={"X-Process-Scope": scope})
-        theirs = await client.get("/instances", headers={"X-Process-Scope": "somebody-else"})
+        theirs = await client.get(
+            "/instances", headers={"X-Process-Scope": "somebody-else"}
+        )
 
     assert started.json()["id"] in {item["id"] for item in mine.json()["instances"]}
-    assert started.json()["id"] not in {item["id"] for item in theirs.json()["instances"]}
+    assert started.json()["id"] not in {
+        item["id"] for item in theirs.json()["instances"]
+    }
 
 
 async def test_readiness_counts_the_definitions(app):
