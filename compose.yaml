@@ -94,6 +94,11 @@ services:
       OPENAI_CHAT_COMPLETION_MODEL: ${KNOWLEDGE_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
       KNOWLEDGE_BASE_URL: http://knowledge-agent:8200/
       KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?required in .env}
+      # Empty by default: a fork with nothing configured here gets no MCP
+      # tools, not a startup error (build_mcp_tools' own reasoning, same as
+      # every other optional dependency in this platform).
+      KNOWLEDGE_MCP_SERVERS: >-
+        ${KNOWLEDGE_MCP_SERVERS:-[{"name": "scraping", "url": "http://scraping-mcp:8600/mcp"}]}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -101,6 +106,23 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  scraping-mcp:
+    deploy:
+      resources:
+        limits:
+          # Headless Chromium is the heavy part; Crawl4AI itself is light.
+          memory: 1.5G
+          cpus: "1.0"
+    build: ../demo-scraping-mcp
+    environment:
+      PORT: "8600"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('localhost', 8600), timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   analysis-agent:
     deploy:
