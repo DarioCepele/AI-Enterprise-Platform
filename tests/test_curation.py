@@ -53,7 +53,11 @@ def test_old_tool_results_are_emptied_but_the_call_stays():
 
     curated, report = curate(messages, ContextPolicy(keep_tool_results=2))
 
-    assert [m["content"] for m in curated] == [CLEARED] * 4 + ["risultato 4", "risultato 5"]
+    assert [m["content"] for m in curated] == [
+        *[CLEARED] * 4,
+        "risultato 4",
+        "risultato 5",
+    ]
     assert len(curated) == 6
     assert report.results_emptied == 4
 
@@ -70,7 +74,8 @@ def test_the_window_cuts_on_a_turn_boundary():
     messages = turn("primo") + turn("secondo") + turn("terzo")
 
     curated, report = curate(
-        messages, ContextPolicy(drop_reasoning=False, keep_tool_results=99, max_messages=7)
+        messages,
+        ContextPolicy(drop_reasoning=False, keep_tool_results=99, max_messages=7),
     )
 
     assert curated[0]["role"] == "user"
@@ -88,7 +93,7 @@ def test_a_conversation_without_turn_boundaries_is_kept_whole():
 
 
 def test_the_last_user_message_is_never_dropped():
-    messages = turn("old") + [msg("user", "last")]
+    messages = [*turn("old"), msg("user", "last")]
 
     curated, _ = curate(messages, ContextPolicy(max_messages=1))
 

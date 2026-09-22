@@ -5,18 +5,21 @@ import asyncio
 import logging
 
 import pytest
+from conftest import needs_backends
 
 from memory_service.curation import ContextPolicy
 from memory_service.models import Snapshot
 from memory_service.service import ThreadMemory
 from memory_service.stores.locks import InProcessLock, PostgresLock
 
-from conftest import needs_backends
-
 pytestmark = [needs_backends, pytest.mark.integration]
 
 TURNS = [
-    {"id": f"m{i}", "role": "user" if i % 2 == 0 else "assistant", "content": f"turn {i}"}
+    {
+        "id": f"m{i}",
+        "role": "user" if i % 2 == 0 else "assistant",
+        "content": f"turn {i}",
+    }
     for i in range(12)
 ]
 
@@ -61,7 +64,9 @@ async def test_two_replicas_compact_a_thread_once(transcripts, pool, scope):
     assert summarizer.calls == 1
 
 
-async def test_the_replica_that_finds_the_lock_taken_says_so(transcripts, pool, scope, caplog):
+async def test_the_replica_that_finds_the_lock_taken_says_so(
+    transcripts, pool, scope, caplog
+):
     summarizer = SlowSummarizer()
     first = a_replica(transcripts, summarizer, PostgresLock(pool))
     second = a_replica(transcripts, summarizer, PostgresLock(pool))
@@ -76,14 +81,20 @@ async def test_the_replica_that_finds_the_lock_taken_says_so(transcripts, pool, 
     assert "already running" in caplog.text
 
 
-async def test_the_lock_is_released_and_the_next_compaction_runs(transcripts, pool, scope):
+async def test_the_lock_is_released_and_the_next_compaction_runs(
+    transcripts, pool, scope
+):
     summarizer = SlowSummarizer()
     replica = a_replica(transcripts, summarizer, PostgresLock(pool))
     await replica.save_snapshot(scope, "t1", Snapshot(messages=TURNS))
 
     await replica.compact_if_needed(scope, "t1")
     later = [
-        {"id": f"n{i}", "role": "user" if i % 2 == 0 else "assistant", "content": f"later {i}"}
+        {
+            "id": f"n{i}",
+            "role": "user" if i % 2 == 0 else "assistant",
+            "content": f"later {i}",
+        }
         for i in range(12)
     ]
     await replica.save_snapshot(scope, "t1", Snapshot(messages=TURNS + later))

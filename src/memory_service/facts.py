@@ -1,4 +1,8 @@
-"""Durable facts remain useful across conversations. Summaries describe one thread; facts belong to the scope, so deleting a conversation does not erase knowledge about the user."""
+"""Durable facts remain useful across conversations.
+
+Summaries describe one thread; facts belong to the scope, so deleting a
+conversation does not erase knowledge about the user.
+"""
 from __future__ import annotations
 
 import json
@@ -23,7 +27,11 @@ class Fact:
 
 
 def parse_facts(raw: str) -> list[Fact]:
-    """Parse model-generated facts, allowing Markdown fences but rejecting missing keys or values. Invalid JSON returns no facts rather than failing the conversation."""
+    """Parse model-generated facts, allowing Markdown fences but rejecting
+    missing keys or values.
+
+    Invalid JSON returns no facts rather than failing the conversation.
+    """
     text = raw.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\n?|```$", "", text, flags=re.MULTILINE).strip()
@@ -49,7 +57,9 @@ def parse_facts(raw: str) -> list[Fact]:
         if not _KEY.match(key) or not value:
             continue
         if key in seen:
-            logger.info("Key '%s' repeated in the extraction: keeping the first value.", key)
+            logger.info(
+                "Key '%s' repeated in the extraction: keeping the first value.", key
+            )
             continue
         seen.add(key)
         facts.append(Fact(key=key, value=value))

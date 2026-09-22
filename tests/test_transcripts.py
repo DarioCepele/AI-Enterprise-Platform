@@ -4,16 +4,17 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from conftest import needs_backends
 
 from memory_service.models import NewMessage
 from memory_service.stores.postgres import PostgresTranscripts
 
-from conftest import needs_backends
-
 pytestmark = [needs_backends, pytest.mark.integration]
 
 
-async def write(store: PostgresTranscripts, scope: str, thread: str, *texts: str) -> None:
+async def write(
+    store: PostgresTranscripts, scope: str, thread: str, *texts: str
+) -> None:
     for text in texts:
         await store.append(scope, thread, NewMessage(role="user", content=text))
 
@@ -73,7 +74,8 @@ async def test_threads_are_separate(transcripts, scope):
     await write(transcripts, scope, "t1", "di t1")
     await write(transcripts, scope, "t2", "di t2")
 
-    assert [m.content for m in await transcripts.tail(scope, "t1", limit=10)] == ["di t1"]
+    tail = await transcripts.tail(scope, "t1", limit=10)
+    assert [m.content for m in tail] == ["di t1"]
 
 
 async def test_scopes_are_separate(transcripts, scope):

@@ -1,4 +1,8 @@
-"""Summarize old turns through a dedicated model interface. Compaction requires inference, runs outside the response path, and reports missing configuration explicitly."""
+"""Summarize old turns through a dedicated model interface.
+
+Compaction requires inference, runs outside the response path, and reports
+missing configuration explicitly.
+"""
 from __future__ import annotations
 
 import json
@@ -9,7 +13,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-INSTRUCTIONS = """Summarize the conversation below for an agent that has to continue it.
+INSTRUCTIONS = """\
+Summarize the conversation below for an agent that has to continue it.
 
 Keep:
 - the decisions taken and the conclusions reached;
@@ -26,7 +31,8 @@ Write in Italian, in dry prose, ten lines at most. Invent nothing that is not
 in the conversation: if a point is unclear, say so."""
 
 
-FACTS_INSTRUCTIONS = """Extract from the conversation the durable facts about the user and their work.
+FACTS_INSTRUCTIONS = """\
+Extract from the conversation the durable facts about the user and their work.
 
 A durable fact stays true in a different conversation, tomorrow: identities and
 roles, stable preferences, constraints, project names, decisions taken. The
@@ -54,7 +60,11 @@ class FactExtractor(Protocol):
 
 
 class OpenAICompatibleSummarizer:
-    """Summarize through a Chat Completions endpoint with a dedicated model and credentials. Compatible providers include OpenRouter and LM Studio."""
+    """Summarize through a Chat Completions endpoint with a dedicated model and
+    credentials.
+
+    Compatible providers include OpenRouter and LM Studio.
+    """
 
     def __init__(
         self,
@@ -75,7 +85,8 @@ class OpenAICompatibleSummarizer:
         return await self._ask(INSTRUCTIONS, messages)
 
     async def extract_facts(self, messages: list[dict[str, Any]]) -> str:
-        """Extract facts separately from summaries so malformed JSON does not discard a valid summary."""
+        """Extract facts separately from summaries so malformed JSON does not
+        discard a valid summary."""
         return await self._ask(FACTS_INSTRUCTIONS, messages)
 
     async def _ask(self, instructions: str, messages: list[dict[str, Any]]) -> str:
@@ -100,7 +111,11 @@ class OpenAICompatibleSummarizer:
 
 
 def _readable(message: dict[str, Any]) -> str:
-    """Render a message for the summarizer. Tool calls become readable notes describing usage instead of wire-format JSON."""
+    """Render a message for the summarizer.
+
+    Tool calls become readable notes describing usage instead of wire-format
+    JSON.
+    """
     role = message.get("role", "?")
     content = message.get("content")
     if not isinstance(content, str) or not content:

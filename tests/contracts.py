@@ -57,7 +57,9 @@ def assert_shape(name: str, payload: Any, *, at: str = "") -> None:
 def _compare(contract: Mapping[str, Any], expected: Any, actual: Any, at: str) -> None:
     where = at or "the payload"
     if isinstance(expected, Mapping):
-        assert isinstance(actual, Mapping), _message(contract, f"{where} is not an object")
+        assert isinstance(actual, Mapping), _message(
+            contract, f"{where} is not an object"
+        )
         missing = sorted(set(expected) - set(actual))
         extra = sorted(set(actual) - set(expected))
         assert not missing and not extra, _message(

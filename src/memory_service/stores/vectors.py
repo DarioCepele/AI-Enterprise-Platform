@@ -73,7 +73,8 @@ class PostgresMemories:
         ) as cursor:
             await cursor.execute(
                 """
-                SELECT thread_id, seq, text, 1 - (embedding <=> %s::vector) AS similarity
+                SELECT thread_id, seq, text,
+                       1 - (embedding <=> %s::vector) AS similarity
                 FROM memories
                 WHERE scope = %s
                 ORDER BY embedding <=> %s::vector
@@ -102,7 +103,8 @@ class PostgresMemories:
         """
         async with self._pool.connection() as connection:
             removed = await connection.execute(
-                "DELETE FROM memories WHERE scope = %s AND thread_id = %s AND seq = ANY(%s)",
+                "DELETE FROM memories "
+                "WHERE scope = %s AND thread_id = %s AND seq = ANY(%s)",
                 (scope, thread_id, list(seqs)),
             )
             return removed.rowcount or 0

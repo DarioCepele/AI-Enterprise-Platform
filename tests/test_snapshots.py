@@ -85,10 +85,16 @@ def test_a_message_without_a_role_gets_a_declared_placeholder():
 
 
 def test_non_textual_content_does_not_become_a_wrong_string():
-    fresh = new_messages([], [{"id": "m1", "role": "user", "content": [{"type": "image"}]}])
+    fresh = new_messages(
+        [], [{"id": "m1", "role": "user", "content": [{"type": "image"}]}]
+    )
 
     assert fresh[0].content == ""
-    assert fresh[0].payload == {"id": "m1", "role": "user", "content": [{"type": "image"}]}
+    assert fresh[0].payload == {
+        "id": "m1",
+        "role": "user",
+        "content": [{"type": "image"}],
+    }
 
 
 def test_the_summary_does_not_come_back_as_a_turn():

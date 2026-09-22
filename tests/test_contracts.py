@@ -3,13 +3,11 @@ from __future__ import annotations
 
 import httpx
 import pytest
-
-from contracts import assert_shape, load, sample
-from memory_service.api import create_app
-from memory_service.models import Snapshot
-from memory_service.service import ThreadMemory
-
 from conftest import needs_backends
+from contracts import assert_shape, load, sample
+
+from memory_service.api import create_app
+from memory_service.service import ThreadMemory
 
 pytestmark = [needs_backends, pytest.mark.integration]
 
@@ -35,7 +33,10 @@ async def test_saving_a_snapshot_answers_with_the_declared_counter(memory, scope
         )
 
     assert saved.status_code == 200
-    assert_shape("memory/write-results", {**sample("memory/write-results"), "save_snapshot": saved.json()})
+    assert_shape(
+        "memory/write-results",
+        {**sample("memory/write-results"), "save_snapshot": saved.json()},
+    )
 
 
 async def test_the_snapshot_read_back_matches_the_contract(memory, scope):
@@ -61,7 +62,9 @@ async def test_the_shared_state_comes_back_as_it_went_in(memory, scope):
     async with await client_for(memory) as client:
         headers = {"X-Memory-Scope": scope}
         await client.put(
-            "/threads/t1/snapshot", json={"messages": [], "state": state}, headers=headers
+            "/threads/t1/snapshot",
+            json={"messages": [], "state": state},
+            headers=headers,
         )
         read = await client.get("/threads/t1/snapshot", headers=headers)
 

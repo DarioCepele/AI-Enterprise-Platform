@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from psycopg.rows import dict_row
@@ -36,7 +36,9 @@ class PostgresTranscripts:
     def __init__(self, pool: AsyncConnectionPool) -> None:
         self._pool = pool
 
-    async def append(self, scope: str, thread_id: str, message: NewMessage) -> StoredMessage:
+    async def append(
+        self, scope: str, thread_id: str, message: NewMessage
+    ) -> StoredMessage:
         """Append a turn and return it with the position it got.
 
         Position and insertion happen in **one** statement: the counter is
@@ -67,7 +69,11 @@ class PostgresTranscripts:
                 },
             )
             written = await cursor.fetchone()
-        return StoredMessage(**message.model_dump(), seq=written["seq"], ts=written["ts"])
+        if written is None:
+            raise RuntimeError("the insertion of the turn returned no position")
+        return StoredMessage(
+            **message.model_dump(), seq=written["seq"], ts=written["ts"]
+        )
 
     async def save_head(
         self,
@@ -132,7 +138,9 @@ class PostgresTranscripts:
         )
         return list(reversed(newest))
 
-    async def _turns(self, query: str, parameters: tuple[Any, ...]) -> list[StoredMessage]:
+    async def _turns(
+        self, query: str, parameters: tuple[Any, ...]
+    ) -> list[StoredMessage]:
         async with self._pool.connection() as connection, connection.cursor(
             row_factory=dict_row
         ) as cursor:
@@ -179,7 +187,8 @@ class PostgresTranscripts:
         ) as cursor:
             await cursor.execute(
                 "SELECT text, covers_to_seq FROM thread_summaries "
-                "WHERE scope = %s AND thread_id = %s ORDER BY covers_to_seq DESC LIMIT 1",
+                "WHERE scope = %s AND thread_id = %s "
+                "ORDER BY covers_to_seq DESC LIMIT 1",
                 (scope, thread_id),
             )
             return await cursor.fetchone()
@@ -244,7 +253,8 @@ class PostgresTranscripts:
     async def set_indexed_upto(self, scope: str, thread_id: str, seq: int) -> None:
         async with self._pool.connection() as connection:
             await connection.execute(
-                "UPDATE threads SET indexed_upto = %s WHERE scope = %s AND thread_id = %s",
+                "UPDATE threads SET indexed_upto = %s "
+                "WHERE scope = %s AND thread_id = %s",
                 (seq, scope, thread_id),
             )
 
@@ -254,7 +264,8 @@ class PostgresTranscripts:
             row_factory=dict_row
         ) as cursor:
             await cursor.execute(
-                "SELECT seq FROM thread_turns WHERE scope = %s AND thread_id = %s ORDER BY seq",
+                "SELECT seq FROM thread_turns "
+                "WHERE scope = %s AND thread_id = %s ORDER BY seq",
                 (scope, thread_id),
             )
             return [int(row["seq"]) for row in await cursor.fetchall()]
@@ -279,7 +290,9 @@ class PostgresTranscripts:
         async with self._pool.connection() as connection, connection.cursor(
             row_factory=dict_row
         ) as cursor:
-            await cursor.execute("SELECT thread_id FROM threads WHERE scope = %s", (scope,))
+            await cursor.execute(
+                "SELECT thread_id FROM threads WHERE scope = %s", (scope,)
+            )
             return [row["thread_id"] for row in await cursor.fetchall()]
 
     async def forget(self, scope: str, thread_id: str) -> int:
@@ -298,7 +311,8 @@ class PostgresTranscripts:
             )
             counted = await cursor.fetchone()
             await cursor.execute(
-                "DELETE FROM threads WHERE scope = %s AND thread_id = %s", (scope, thread_id)
+                "DELETE FROM threads WHERE scope = %s AND thread_id = %s",
+                (scope, thread_id),
             )
         return int(counted["turns"]) if counted else 0
 

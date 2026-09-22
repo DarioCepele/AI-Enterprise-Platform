@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS thread_turns (
     message     jsonb       NOT NULL,
     ts          timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (scope, thread_id, seq),
-    FOREIGN KEY (scope, thread_id) REFERENCES threads (scope, thread_id) ON DELETE CASCADE
+    FOREIGN KEY (scope, thread_id)
+        REFERENCES threads (scope, thread_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS thread_summaries (
@@ -53,7 +54,8 @@ CREATE TABLE IF NOT EXISTS thread_summaries (
     model           text        NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (scope, thread_id, covers_to_seq),
-    FOREIGN KEY (scope, thread_id) REFERENCES threads (scope, thread_id) ON DELETE CASCADE
+    FOREIGN KEY (scope, thread_id)
+        REFERENCES threads (scope, thread_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS scope_facts (
@@ -115,7 +117,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 async def applied_versions(connection: AsyncConnection) -> set[int]:
     await connection.execute(REGISTER)
-    rows = await (await connection.execute("SELECT version FROM schema_migrations")).fetchall()
+    cursor = await connection.execute("SELECT version FROM schema_migrations")
+    rows = await cursor.fetchall()
     return {int(row[0]) for row in rows}
 
 
@@ -141,4 +144,5 @@ async def run_migrations(connection: AsyncConnection) -> list[Migration]:
 
 
 async def missing_migrations(connection: AsyncConnection) -> list[int]:
-    return sorted({migration.version for migration in MIGRATIONS} - await applied_versions(connection))
+    known = {migration.version for migration in MIGRATIONS}
+    return sorted(known - await applied_versions(connection))

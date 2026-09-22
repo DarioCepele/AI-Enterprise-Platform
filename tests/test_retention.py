@@ -5,13 +5,12 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from conftest import needs_backends
 
 from memory_service.api import create_app
 from memory_service.curation import ContextPolicy
 from memory_service.models import NewMessage, Snapshot
 from memory_service.service import ThreadMemory
-
-from conftest import needs_backends
 
 pytestmark = [needs_backends, pytest.mark.integration]
 
@@ -41,7 +40,9 @@ async def test_retention_off_forgets_nothing(memory, pool, scope):
 
 
 async def test_retention_does_not_reach_into_another_scope(memory, pool, scope):
-    await memory.append("another-tenant", "old", NewMessage(role="user", content="theirs"))
+    await memory.append(
+        "another-tenant", "old", NewMessage(role="user", content="theirs")
+    )
     await age(pool, "another-tenant", "old", days=40)
 
     # A maintenance call inside one tenant must not delete another's data: the
@@ -82,14 +83,21 @@ class Embedder:
     WORDS = ("go", "python")
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[1.0 if word in text.lower() else 0.0 for word in self.WORDS] for text in texts]
+        return [
+            [1.0 if word in text.lower() else 0.0 for word in self.WORDS]
+            for text in texts
+        ]
 
 
 def thread_about(*topics: str) -> list[dict]:
     messages: list[dict] = []
     for i, topic in enumerate(topics):
-        messages.append({"id": f"u{i}", "role": "user", "content": f"let us talk about {topic}"})
-        messages.append({"id": f"a{i}", "role": "assistant", "content": f"about {topic}"})
+        messages.append(
+            {"id": f"u{i}", "role": "user", "content": f"let us talk about {topic}"}
+        )
+        messages.append(
+            {"id": f"a{i}", "role": "assistant", "content": f"about {topic}"}
+        )
     return messages
 
 
@@ -162,7 +170,9 @@ async def test_the_admin_endpoints_report_what_they_did(memory, pool, scope):
 
     async with await client_for(memory) as client:
         headers = {"X-Memory-Scope": scope}
-        forgotten = await client.post("/admin/retention", json={"days": 30}, headers=headers)
+        forgotten = await client.post(
+            "/admin/retention", json={"days": 30}, headers=headers
+        )
         rebuilt = await client.post("/admin/reindex", json={}, headers=headers)
 
     assert forgotten.json() == {"threads_forgotten": 1}

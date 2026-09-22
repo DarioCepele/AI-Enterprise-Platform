@@ -39,7 +39,11 @@ class SearchQuery(BaseModel):
 
 
 class Snapshot(BaseModel):
-    """Thread state exchanged through AG-UI. Messages become numbered, searchable turns; other thread state is preserved as supplied."""
+    """Thread state exchanged through AG-UI.
+
+    Messages become numbered, searchable turns; other thread state is preserved
+    as supplied.
+    """
 
     messages: list[dict[str, Any]] = Field(default_factory=list)
     state: dict[str, Any] | None = None

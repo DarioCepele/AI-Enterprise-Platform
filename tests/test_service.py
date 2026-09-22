@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from conftest import needs_backends
 
 from memory_service.api import create_app
 from memory_service.models import NewMessage, Snapshot
 from memory_service.service import ThreadMemory
-
-from conftest import needs_backends
 
 pytestmark = [needs_backends, pytest.mark.integration]
 
@@ -79,7 +78,9 @@ async def test_the_api_forgets_a_thread(memory, scope):
     async with await client_for(memory) as client:
         headers = {"X-Memory-Scope": scope}
         await client.post(
-            "/threads/t1/messages", json={"role": "user", "content": "ciao"}, headers=headers
+            "/threads/t1/messages",
+            json={"role": "user", "content": "ciao"},
+            headers=headers,
         )
         removed = await client.delete("/threads/t1", headers=headers)
         read = await client.get("/threads/t1/messages", headers=headers)
@@ -173,7 +174,10 @@ async def test_the_api_round_trips_a_snapshot(memory, scope):
         headers = {"X-Memory-Scope": scope}
         saved = await client.put(
             "/threads/t1/snapshot",
-            json={"messages": [{"id": "m1", "role": "user", "content": "ciao"}], "state": {"a": 1}},
+            json={
+                "messages": [{"id": "m1", "role": "user", "content": "ciao"}],
+                "state": {"a": 1},
+            },
             headers=headers,
         )
         read = await client.get("/threads/t1/snapshot", headers=headers)
@@ -185,19 +189,28 @@ async def test_the_api_round_trips_a_snapshot(memory, scope):
 
 async def test_the_api_says_404_for_a_thread_it_never_saw(memory, scope):
     async with await client_for(memory) as client:
-        response = await client.get("/threads/mai-visto/snapshot", headers={"X-Memory-Scope": scope})
+        response = await client.get(
+            "/threads/mai-visto/snapshot", headers={"X-Memory-Scope": scope}
+        )
 
     assert response.status_code == 404
 
 
-async def test_the_returned_context_is_pruned_but_the_transcript_is_whole(memory, scope):
+async def test_the_returned_context_is_pruned_but_the_transcript_is_whole(
+    memory, scope
+):
     await memory.save_snapshot(
         scope,
         "t1",
         Snapshot(
             messages=[
                 {"id": "m1", "role": "user", "content": "question"},
-                {"id": "m2", "role": "reasoning", "content": "", "encrypted_value": "[lungo]"},
+                {
+                    "id": "m2",
+                    "role": "reasoning",
+                    "content": "",
+                    "encrypted_value": "[lungo]",
+                },
                 {"id": "m3", "role": "assistant", "content": "answer"},
             ]
         ),
@@ -310,7 +323,9 @@ async def test_the_whole_transcript_has_no_summary_in_it(compacting, scope):
     assert all(m.get("role") != "system" for m in integrale.messages)
 
 
-async def test_the_summary_does_not_get_rewritten_at_every_run(compacting, summarizer, scope):
+async def test_the_summary_does_not_get_rewritten_at_every_run(
+    compacting, summarizer, scope
+):
     await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await compacting.compact_if_needed(scope, "t1")
     await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
@@ -330,7 +345,9 @@ async def test_the_summary_returned_does_not_become_a_turn(compacting, scope):
     assert all(m.get("role") != "system" for m in integrale.messages)
 
 
-async def test_a_broken_summarizer_does_not_break_the_conversation(transcripts, scope, caplog):
+async def test_a_broken_summarizer_does_not_break_the_conversation(
+    transcripts, scope, caplog
+):
     import logging
 
     from memory_service.curation import ContextPolicy
@@ -360,7 +377,9 @@ async def test_without_a_summarizer_nothing_is_compacted(transcripts, scope):
     assert snapshot.curation["summarized"] == 0
 
 
-async def test_forgetting_a_thread_takes_its_summaries_too(compacting, transcripts, scope):
+async def test_forgetting_a_thread_takes_its_summaries_too(
+    compacting, transcripts, scope
+):
     await compacting.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await compacting.compact_if_needed(scope, "t1")
 
@@ -464,7 +483,9 @@ async def test_a_fact_learned_in_one_thread_shows_up_in_another(learning, scope)
     assert "contact: Marta" in other.messages[0]["content"]
 
 
-async def test_facts_do_not_cross_scopes(learning, transcripts, summarizer, extractor, scope):
+async def test_facts_do_not_cross_scopes(
+    learning, transcripts, summarizer, extractor, scope
+):
     from memory_service.curation import ContextPolicy
 
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
@@ -473,14 +494,18 @@ async def test_facts_do_not_cross_scopes(learning, transcripts, summarizer, extr
     altrui = ThreadMemory(
         transcripts, ContextPolicy(max_messages=6), summarizer, extractor)
     await altrui.save_snapshot(
-        f"{scope}-other", "t1", Snapshot(messages=[{"id": "y", "role": "user", "content": "ciao"}])
+        f"{scope}-other",
+        "t1",
+        Snapshot(messages=[{"id": "y", "role": "user", "content": "ciao"}]),
     )
     snapshot = await altrui.read_snapshot(f"{scope}-other", "t1")
 
     assert snapshot.curation["facts"] == 0
 
 
-async def test_the_same_fact_updated_does_not_become_two(learning, extractor, transcripts, scope):
+async def test_the_same_fact_updated_does_not_become_two(
+    learning, extractor, transcripts, scope
+):
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t1")
 
@@ -516,7 +541,10 @@ async def test_unreadable_facts_do_not_break_the_compaction(
     from memory_service.curation import ContextPolicy
 
     memory = ThreadMemory(
-        transcripts, ContextPolicy(max_messages=6), summarizer, RecordingExtractor("not JSON")
+        transcripts,
+        ContextPolicy(max_messages=6),
+        summarizer,
+        RecordingExtractor("not JSON"),
     )
     await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await memory.compact_if_needed(scope, "t1")
@@ -560,7 +588,11 @@ async def test_the_whole_transcript_of_an_unknown_thread_stays_unknown(learning,
 
 
 class WordEmbedder:
-    """Deterministic test embeddings with one axis per keyword. Verify indexing, retrieval, and deletion; real-model checks cover semantic quality."""
+    """Deterministic test embeddings with one axis per keyword.
+
+    Verify indexing, retrieval, and deletion; real-model checks cover semantic
+    quality.
+    """
 
     WORDS = ("go", "python", "carbonara")
 
@@ -570,7 +602,8 @@ class WordEmbedder:
 
     async def embed(self, texts):
         return [
-            [1.0 if word in text.lower() else 0.0 for word in self.WORDS] for text in texts
+            [1.0 if word in text.lower() else 0.0 for word in self.WORDS]
+            for text in texts
         ]
 
 
@@ -594,14 +627,22 @@ def searchable(transcripts, pool, summarizer, extractor, scope):
 def thread_about(*topics: str) -> list[dict]:
     messages = []
     for i, topic in enumerate(topics):
-        messages.append({"id": f"u{i}", "role": "user", "content": f"let us talk about {topic}"})
-        messages.append({"id": f"a{i}", "role": "assistant", "content": f"ecco su {topic}"})
+        messages.append(
+            {"id": f"u{i}", "role": "user", "content": f"let us talk about {topic}"}
+        )
+        messages.append(
+            {"id": f"a{i}", "role": "assistant", "content": f"ecco su {topic}"}
+        )
     return messages
 
 
 async def test_what_leaves_the_window_becomes_searchable(searchable, scope):
     await searchable.save_snapshot(
-        scope, "t1", Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go"))
+        scope,
+        "t1",
+        Snapshot(
+            messages=thread_about("go", "python", "carbonara", "go", "go", "go")
+        ),
     )
     await searchable.compact_if_needed(scope, "t1")
 
@@ -613,7 +654,11 @@ async def test_what_leaves_the_window_becomes_searchable(searchable, scope):
 
 async def test_a_memory_says_which_thread_it_came_from(searchable, scope):
     await searchable.save_snapshot(
-        scope, "t1", Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go"))
+        scope,
+        "t1",
+        Snapshot(
+            messages=thread_about("go", "python", "carbonara", "go", "go", "go")
+        ),
     )
     await searchable.compact_if_needed(scope, "t1")
 
@@ -638,7 +683,11 @@ async def test_nothing_is_indexed_twice(searchable, transcripts, pool, scope):
 
 async def test_forgetting_a_thread_makes_its_memories_unsearchable(searchable, scope):
     await searchable.save_snapshot(
-        scope, "t1", Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go"))
+        scope,
+        "t1",
+        Snapshot(
+            messages=thread_about("go", "python", "carbonara", "go", "go", "go")
+        ),
     )
     await searchable.compact_if_needed(scope, "t1")
 
@@ -647,7 +696,9 @@ async def test_forgetting_a_thread_makes_its_memories_unsearchable(searchable, s
     assert await searchable.search_memories(scope, "carbonara", limit=3) == []
 
 
-async def test_searching_without_an_embedder_returns_nothing_and_says_so(memory, scope, caplog):
+async def test_searching_without_an_embedder_returns_nothing_and_says_so(
+    memory, scope, caplog
+):
     import logging
 
     with caplog.at_level(logging.WARNING):

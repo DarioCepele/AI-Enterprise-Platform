@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from conftest import needs_backends
 
 from memory_service.api import create_app
 from memory_service.service import ThreadMemory
-
-from conftest import needs_backends
 
 pytestmark = [needs_backends, pytest.mark.integration]
 

@@ -1,4 +1,8 @@
-"""HTTP API for the internal memory service. Callers supply a verified scope. Deploy on a private network with service authentication; never expose it directly to browsers or accept an end-user scope."""
+"""HTTP API for the internal memory service. Callers supply a verified scope.
+
+Deploy on a private network with service authentication; never expose it
+directly to browsers or accept an end-user scope.
+"""
 from __future__ import annotations
 
 import logging
@@ -9,12 +13,20 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Qu
 
 from .config import Settings, get_settings
 from .curation import ContextPolicy
+from .embedder import OpenAICompatibleEmbedder
 from .migrations import run_migrations
+from .models import (
+    NewMessage,
+    ReindexRequest,
+    RetentionRequest,
+    SearchQuery,
+    Snapshot,
+    StoredMessage,
+    Transcript,
+)
 from .observability import configure_logging, configure_tracing
-from .models import NewMessage, ReindexRequest, RetentionRequest, SearchQuery, Snapshot, StoredMessage, Transcript
 from .service import ThreadMemory
 from .stores.locks import PostgresLock
-from .embedder import OpenAICompatibleEmbedder
 from .stores.postgres import PostgresTranscripts, build_pool
 from .stores.vectors import PostgresMemories
 from .summarizer import OpenAICompatibleSummarizer
@@ -24,11 +36,13 @@ logger = logging.getLogger(__name__)
 SERVICE_NAME = "memory-service"
 
 
-def create_app(memory: ThreadMemory | None = None, settings: Settings | None = None) -> FastAPI:
+def create_app(
+    memory: ThreadMemory | None = None, settings: Settings | None = None
+) -> FastAPI:
     """Build the application. Pass memory explicitly in tests."""
     config = settings or get_settings()
     configure_logging(SERVICE_NAME, as_json=config.json_logs)
-    state: dict[str, object] = {"memory": memory} if memory is not None else {}
+    state: dict[str, ThreadMemory] = {"memory": memory} if memory is not None else {}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -36,7 +50,9 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
             yield
             return
 
-        pool = build_pool(config.postgres_dsn, config.pool_min_size, config.pool_max_size)
+        pool = build_pool(
+            config.postgres_dsn, config.pool_min_size, config.pool_max_size
+        )
         await pool.open(wait=True)
         memories = PostgresMemories(pool) if config.embedding_model else None
         embedder = (
@@ -60,7 +76,8 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
                 config.summary_base_url, config.summary_api_key, config.summary_model
             )
             logger.info(
-                "Compaction and durable facts active with model %s.", config.summary_model
+                "Compaction and durable facts active with model %s.",
+                config.summary_model,
             )
         else:
             logger.warning(
@@ -156,7 +173,11 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
-        """Store the full thread state without duplicating turns. Run compaction after responding: model latency can otherwise time out the client, and the summary is needed only on the next turn."""
+        """Store the full thread state without duplicating turns.
+
+        Run compaction after responding: model latency can otherwise time out
+        the client, and the summary is needed only on the next turn.
+        """
         written = await memory_instance.save_snapshot(scope, thread_id, snapshot)
         background.add_task(memory_instance.compact_if_needed, scope, thread_id)
         return {"new_turns": written}
@@ -190,7 +211,10 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, list[dict[str, object]]]:
-        """Search memories within the scope by meaning. Use POST to keep conversation content out of proxy URL access logs."""
+        """Search memories within the scope by meaning.
+
+        Use POST to keep conversation content out of proxy URL access logs.
+        """
         found = await memory_instance.search_memories(scope, query.query, query.limit)
         return {
             "memories": [
@@ -210,7 +234,10 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
-        """Forget the threads older than the retention. Meant for a scheduled job, not for a request path."""
+        """Forget the threads older than the retention.
+
+        Meant for a scheduled job, not for a request path.
+        """
         days = request.days if request.days is not None else config.retention_days
         forgotten = await memory_instance.apply_retention(days, scope)
         return {"threads_forgotten": len(forgotten)}
@@ -221,15 +248,21 @@ def create_app(memory: ThreadMemory | None = None, settings: Settings | None = N
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
-        """Rebuild the semantic index of a scope, or of one thread, from the transcripts."""
-        return {"memories_indexed": await memory_instance.reindex(scope, request.thread_id)}
+        """Rebuild the semantic index of a scope, or of one thread, from the
+        transcripts."""
+        indexed = await memory_instance.reindex(scope, request.thread_id)
+        return {"memories_indexed": indexed}
 
     @app.delete("/scope")
     async def forget_scope(
         scope: str = Depends(current_scope),
         memory_instance: ThreadMemory = Depends(current_memory),
     ) -> dict[str, int]:
-        """Forget every thread in one scope. Cross-scope deletion is intentionally unavailable to preserve authorization boundaries."""
+        """Forget every thread in one scope.
+
+        Cross-scope deletion is intentionally unavailable to preserve
+        authorization boundaries.
+        """
         return {"threads_removed": await memory_instance.forget_scope(scope)}
 
     return app

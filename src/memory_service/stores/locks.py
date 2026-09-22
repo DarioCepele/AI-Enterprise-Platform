@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from psycopg_pool import AsyncConnectionPool
@@ -22,7 +23,7 @@ class InProcessLock:
         self._held: set[str] = set()
 
     @asynccontextmanager
-    async def hold(self, name: str):
+    async def hold(self, name: str) -> AsyncIterator[bool]:
         if name in self._held:
             yield False
             return
@@ -54,13 +55,14 @@ class PostgresLock:
         return int.from_bytes(digest, "big", signed=True)
 
     @asynccontextmanager
-    async def hold(self, name: str):
+    async def hold(self, name: str) -> AsyncIterator[bool]:
         try:
             connection_manager = self._pool.connection()
             connection = await connection_manager.__aenter__()
         except Exception:
             logger.warning(
-                "Lock '%s' not taken: the database is unreachable, going on without it.",
+                "Lock '%s' not taken: the database is unreachable, going on "
+                "without it.",
                 name,
                 exc_info=True,
             )
@@ -69,9 +71,11 @@ class PostgresLock:
 
         key = self._key(name)
         try:
-            taken = bool(
-                (await (await connection.execute("SELECT pg_try_advisory_lock(%s)", (key,))).fetchone())[0]
+            cursor = await connection.execute(
+                "SELECT pg_try_advisory_lock(%s)", (key,)
             )
+            answer = await cursor.fetchone()
+            taken = bool(answer and answer[0])
             try:
                 yield taken
             finally:

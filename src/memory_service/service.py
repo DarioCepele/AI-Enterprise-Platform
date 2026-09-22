@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .curation import ContextPolicy, curate, summary_message, window_start
@@ -19,15 +19,19 @@ from .summarizer import FactExtractor, Summarizer
 logger = logging.getLogger(__name__)
 
 
-def _searchable_text(payload: dict) -> str:
-    """Return searchable message text. Exclude reasoning and tool results: reasoning is internal, and tools can be called again."""
+def _searchable_text(payload: dict[str, Any]) -> str:
+    """Return searchable message text.
+
+    Exclude reasoning and tool results: reasoning is internal, and tools can be
+    called again.
+    """
     if payload.get("role") not in {"user", "assistant"}:
         return ""
     content = payload.get("content")
     return content.strip() if isinstance(content, str) else ""
 
 
-def _payload_of(message: StoredMessage) -> dict:
+def _payload_of(message: StoredMessage) -> dict[str, Any]:
     """Return the original message payload, or a minimal representation."""
     if message.payload is not None:
         return message.payload
@@ -63,15 +67,22 @@ class ThreadMemory:
         self._memories = memories
         self._lock = lock or InProcessLock()
 
-    async def append(self, scope: str, thread_id: str, message: NewMessage) -> StoredMessage:
+    async def append(
+        self, scope: str, thread_id: str, message: NewMessage
+    ) -> StoredMessage:
         return await self._durable.append(scope, thread_id, message)
 
     async def tail(self, scope: str, thread_id: str, limit: int) -> Transcript:
         messages = await self._durable.tail(scope, thread_id, limit)
         return Transcript(thread_id=thread_id, messages=messages)
 
-    async def save_snapshot(self, scope: str, thread_id: str, snapshot: Snapshot) -> int:
-        """Store a snapshot and return the number of new turns. Messages are append-only, so repeated full snapshots add no duplicates."""
+    async def save_snapshot(
+        self, scope: str, thread_id: str, snapshot: Snapshot
+    ) -> int:
+        """Store a snapshot and return the number of new turns.
+
+        Messages are append-only, so repeated full snapshots add no duplicates.
+        """
         stored = await self._durable.history(scope, thread_id)
         fresh = new_messages(stored, snapshot.messages)
         for message in fresh:
@@ -87,24 +98,40 @@ class ThreadMemory:
         return len(fresh)
 
     async def compact_if_needed(self, scope: str, thread_id: str) -> None:
-        """Summarize turns leaving the window after the response, never inside a request. Model inference can take tens of seconds and time out snapshot PUT requests; the summary is needed on the next turn."""
+        """Summarize turns leaving the window after the response, never inside a
+        request.
+
+        Model inference can take tens of seconds and time out snapshot PUT
+        requests; the summary is needed on the next turn.
+        """
         nothing_to_do = (
-            self._summarizer is None and self._extractor is None and self._memories is None
+            self._summarizer is None
+            and self._extractor is None
+            and self._memories is None
         )
         if nothing_to_do or not self._policy.max_messages:
             return
 
         async with self._lock.hold(f"compaction:{scope}:{thread_id}") as taken:
             if not taken:
-                logger.info("Compaction of thread %s already running, skipping.", thread_id)
+                logger.info(
+                    "Compaction of thread %s already running, skipping.", thread_id
+                )
                 return
             await self._compact(scope, thread_id)
             await self._learn_facts(scope, thread_id)
             await self._index_memories(scope, thread_id)
 
     async def _index_memories(self, scope: str, thread_id: str) -> None:
-        """Index only turns leaving the context window. Messages still visible to the model do not need semantic retrieval."""
-        if self._embedder is None or self._memories is None or not self._policy.max_messages:
+        """Index only turns leaving the context window.
+
+        Messages still visible to the model do not need semantic retrieval.
+        """
+        if (
+            self._embedder is None
+            or self._memories is None
+            or not self._policy.max_messages
+        ):
             return
 
         history = await self._durable.history(scope, thread_id)
@@ -149,7 +176,10 @@ class ThreadMemory:
         return await self._memories.search(scope, vectors[0], limit)
 
     async def _learn_facts(self, scope: str, thread_id: str) -> None:
-        """Extract durable facts as turns leave the context window, alongside compaction, before the model loses access to them."""
+        """Extract durable facts as turns leave the context window.
+
+        Runs alongside compaction, before the model loses access to them.
+        """
         if self._extractor is None or not self._policy.max_messages:
             return
 
@@ -186,7 +216,7 @@ class ThreadMemory:
 
     async def _compact(self, scope: str, thread_id: str) -> None:
         """Select turns, summarize them, and persist the result."""
-        if self._summarizer is None:
+        if self._summarizer is None or not self._policy.max_messages:
             return
         history = await self._durable.history(scope, thread_id)
         payloads = [_payload_of(message) for message in history]
@@ -222,7 +252,8 @@ class ThreadMemory:
             model=getattr(self._summarizer, "_model", "?"),
         )
         logger.info(
-            "Thread %s compacted: %d messages up to seq %d into %d characters of summary.",
+            "Thread %s compacted: %d messages up to seq %d into %d characters "
+            "of summary.",
             thread_id,
             cut,
             covers_to_seq,
@@ -236,7 +267,11 @@ class ThreadMemory:
         *,
         raw: bool = False,
     ) -> Snapshot | None:
-        """Reconstruct the snapshot, or return None for an unknown thread. By default remove past reasoning and clear older tool results; raw=True returns the full transcript for summaries and diagnostics."""
+        """Reconstruct the snapshot, or return None for an unknown thread.
+
+        By default remove past reasoning and clear older tool results; raw=True
+        returns the full transcript for summaries and diagnostics.
+        """
         head = await self._durable.read_head(scope, thread_id)
         messages = await self._durable.history(scope, thread_id)
         if head is None and not messages:
@@ -271,7 +306,8 @@ class ThreadMemory:
             policy = self._policy
             if summary is None and self._summarizer is not None:
                 logger.info(
-                    "Window suspended on thread %s: the summary is not ready yet.", thread_id
+                    "Window suspended on thread %s: the summary is not ready yet.",
+                    thread_id,
                 )
                 policy = replace(policy, max_messages=None)
             payloads, curation = curate(payloads, policy, summary)
@@ -373,7 +409,8 @@ class ThreadMemory:
                 await self._memories.forget_thread(scope, thread_id, seqs)
             except Exception:
                 logger.error(
-                    "Memories NOT removed from the index for thread %s: they stay searchable.",
+                    "Memories NOT removed from the index for thread %s: they "
+                    "stay searchable.",
                     thread_id,
                     exc_info=True,
                 )

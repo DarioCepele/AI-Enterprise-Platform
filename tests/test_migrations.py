@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from conftest import needs_backends
 
 from memory_service.migrations import (
     LATEST_VERSION,
@@ -12,8 +13,6 @@ from memory_service.migrations import (
 )
 from memory_service.models import NewMessage
 from memory_service.stores.postgres import PostgresTranscripts
-
-from conftest import needs_backends
 
 pytestmark = [needs_backends, pytest.mark.integration]
 
@@ -50,7 +49,9 @@ async def test_the_schema_is_what_the_store_writes_into(pool, scope):
 
     assert stored.seq == 1
     assert (await store.latest_summary(scope, "t1"))["covers_to_seq"] == 1
-    assert await store.facts_of(scope, limit=10) == [{"key": "contact", "value": "Marta"}]
+    assert await store.facts_of(scope, limit=10) == [
+        {"key": "contact", "value": "Marta"}
+    ]
 
 
 async def test_a_thread_takes_its_turns_and_summaries_with_it(pool, scope):
@@ -80,4 +81,4 @@ async def test_a_thread_takes_its_turns_and_summaries_with_it(pool, scope):
 
 
 def test_the_latest_version_is_the_highest_one():
-    assert LATEST_VERSION == max(m.version for m in MIGRATIONS)
+    assert max(m.version for m in MIGRATIONS) == LATEST_VERSION

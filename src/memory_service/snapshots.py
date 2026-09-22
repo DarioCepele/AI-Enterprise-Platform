@@ -1,4 +1,8 @@
-"""Compute new turns from full thread snapshots. The service owns delta detection because it can compare incoming messages with durable history."""
+"""Compute new turns from full thread snapshots.
+
+The service owns delta detection because it can compare incoming messages with
+durable history.
+"""
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -22,7 +26,12 @@ def new_messages(
     stored: Sequence[StoredMessage],
     incoming: Sequence[dict[str, Any]],
 ) -> list[NewMessage]:
-    """Find messages not yet stored. Prefer external identifiers, which survive reordering and rewritten snapshots. For anonymous messages, use position and conservatively count every stored message to avoid duplicates."""
+    """Find messages not yet stored.
+
+    Prefer external identifiers, which survive reordering and rewritten
+    snapshots. For anonymous messages, use position and conservatively count
+    every stored message to avoid duplicates.
+    """
     known_ids = {message.external_id for message in stored if message.external_id}
     fresh: list[NewMessage] = []
 

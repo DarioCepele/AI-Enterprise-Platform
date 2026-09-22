@@ -19,7 +19,11 @@ class Embedder(Protocol):
 
 
 class OpenAICompatibleEmbedder:
-    """Use an OpenAI-compatible embeddings endpoint, including OpenRouter. A dedicated small embedding model handles this independently of the chat model."""
+    """Use an OpenAI-compatible embeddings endpoint, including OpenRouter.
+
+    A dedicated small embedding model handles this independently of the chat
+    model.
+    """
 
     def __init__(
         self,
@@ -39,7 +43,10 @@ class OpenAICompatibleEmbedder:
 
     @property
     def dimensions(self) -> int:
-        """Discover vector dimensions on the first call to avoid hard-coded sizes failing later during insertion."""
+        """Discover vector dimensions on the first call.
+
+        Hard-coded sizes would fail later, during insertion.
+        """
         return self._dimensions
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
