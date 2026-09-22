@@ -60,9 +60,9 @@ def test_a_scope_that_is_not_a_name_falls_back(monkeypatch, value):
 
 
 def test_the_resolver_can_be_replaced_without_touching_the_app():
-    from demo.server.app import create_app
     from demo.agents.master import build_master_agent
     from demo.chat_clients.fake import FakeStreamingChatClient
+    from demo.server.app import create_app
 
     app = create_app(
         agent=build_master_agent(chat_client=FakeStreamingChatClient(chunks=["ok"])),

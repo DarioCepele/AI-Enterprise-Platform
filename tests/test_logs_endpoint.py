@@ -8,6 +8,7 @@ from demo.chat_clients.fake import FakeStreamingChatClient
 from demo.logging_bridge import LogCollector
 from demo.server.app import create_app
 
+
 @pytest.fixture
 def make_app(monkeypatch):
     """Builds the app with an explicit agent on a fake client.
@@ -36,7 +37,9 @@ def test_logs_endpoint_returns_collected_lines(make_app):
         logging.getLogger("demo.tools").info("plan written")
         body = client.get("/logs").json()
 
-    assert [e["message"] for e in body["entries"] if e["source"] == "tools"] == ["plan written"]
+    assert [e["message"] for e in body["entries"] if e["source"] == "tools"] == [
+        "plan written"
+    ]
     assert body["cursor"] != ""
     assert body["dropped"] == 0
 

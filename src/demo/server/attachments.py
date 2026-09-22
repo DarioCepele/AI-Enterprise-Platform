@@ -26,6 +26,7 @@ Only ``InputContentUrlSource`` parts are handled: an inline
 ``InputContentDataSource`` (base64) attachment has no URL to expose, so it is
 left untouched by design.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -70,7 +71,8 @@ def _attachment_notes(content_parts: list[Any]) -> list[str]:
 def annotate_video_audio_attachments(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Return ``messages`` with a text note appended for URL-referenced video/audio parts.
+    """Return ``messages`` with a text note appended for URL-referenced video/audio
+    parts.
 
     Only user messages are inspected (the "incoming turn"), and only messages
     whose ``content`` is already a list of typed parts (the multimodal shape;
@@ -81,7 +83,9 @@ def annotate_video_audio_attachments(
     annotated: list[dict[str, Any]] = []
     for message in messages:
         content = message.get("content")
-        if str(message.get("role", "")).lower() != "user" or not isinstance(content, list):
+        if str(message.get("role", "")).lower() != "user" or not isinstance(
+            content, list
+        ):
             annotated.append(message)
             continue
 
@@ -91,7 +95,10 @@ def annotate_video_audio_attachments(
             continue
 
         new_message = dict(message)
-        new_message["content"] = [*content, {"type": "text", "text": "\n" + "\n".join(notes)}]
+        new_message["content"] = [
+            *content,
+            {"type": "text", "text": "\n" + "\n".join(notes)},
+        ]
         annotated.append(new_message)
 
     return annotated

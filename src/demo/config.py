@@ -4,6 +4,7 @@ One structure, read in one place. What the product is called, which language it
 answers in and which scope it serves are configuration, not constants buried in
 a prompt or in a component: whoever forks this repository changes them here.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,6 +25,7 @@ DEFAULT_ORIGINS = (
 
 SINGLE_TENANT_SCOPE = "local-laboratory"
 
+
 class SubagentConfig(BaseModel):
     """A remote agent this one may call, named as the model will see it."""
 
@@ -35,10 +37,39 @@ class SubagentConfig(BaseModel):
     @classmethod
     def _identifier(cls, value: str) -> str:
         """The name becomes part of a tool name, so it has to be one."""
-        cleaned = "".join(char if char.isalnum() else "_" for char in value.strip().lower())
+        cleaned = "".join(
+            char if char.isalnum() else "_" for char in value.strip().lower()
+        )
         if not cleaned or not cleaned[0].isalpha():
             raise ValueError(f"subagent name '{value}' is not usable as a tool name")
         return cleaned
+
+
+class MCPServerConfig(BaseModel):
+    """An external MCP server this agent may draw tools from.
+
+    `name` becomes the `tool_name_prefix` handed to `MCPStreamableHTTPTool`,
+    so two servers exposing a same-named tool (e.g. both offering
+    `search`) do not collide.
+    """
+
+    name: str
+    url: str
+    token: str = ""
+    allowed_tools: tuple[str, ...] = ()
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def _identifier(cls, value: str) -> str:
+        cleaned = "".join(
+            char if char.isalnum() else "_" for char in value.strip().lower()
+        )
+        if not cleaned or not cleaned[0].isalpha():
+            raise ValueError(
+                f"MCP server name '{value}' is not usable as a tool prefix"
+            )
+        return cleaned
+
 
 class Settings(BaseSettings):
     """Everything the process reads from the environment, validated at once."""
@@ -79,12 +110,16 @@ class Settings(BaseSettings):
     scope_header: str = Field(
         default="", validation_alias=AliasChoices("DEMO_SCOPE_HEADER")
     )
-    json_logs: bool = Field(default=False, validation_alias=AliasChoices("DEMO_JSON_LOGS"))
+    json_logs: bool = Field(
+        default=False, validation_alias=AliasChoices("DEMO_JSON_LOGS")
+    )
 
     memory_service_url: str = Field(
         default="", validation_alias=AliasChoices("DEMO_MEMORY_SERVICE_URL")
     )
-    postgres_dsn: str = Field(default="", validation_alias=AliasChoices("DEMO_POSTGRES_DSN"))
+    postgres_dsn: str = Field(
+        default="", validation_alias=AliasChoices("DEMO_POSTGRES_DSN")
+    )
     knowledge_agent_url: str = Field(
         default="", validation_alias=AliasChoices("DEMO_KNOWLEDGE_AGENT_URL")
     )
@@ -94,7 +129,9 @@ class Settings(BaseSettings):
     subagents: Annotated[tuple[SubagentConfig, ...], NoDecode] = Field(
         default=(), validation_alias=AliasChoices("DEMO_SUBAGENTS")
     )
-    public_url: str = Field(default="", validation_alias=AliasChoices("DEMO_PUBLIC_URL"))
+    public_url: str = Field(
+        default="", validation_alias=AliasChoices("DEMO_PUBLIC_URL")
+    )
     process_service_url: str = Field(
         default="", validation_alias=AliasChoices("DEMO_PROCESS_SERVICE_URL")
     )
@@ -104,12 +141,18 @@ class Settings(BaseSettings):
     subagent_wait_seconds: float = Field(
         default=60.0, validation_alias=AliasChoices("DEMO_SUBAGENT_WAIT_SECONDS")
     )
-    upload_dir: str = Field(default="", validation_alias=AliasChoices("DEMO_UPLOAD_DIR"))
+    upload_dir: str = Field(
+        default="", validation_alias=AliasChoices("DEMO_UPLOAD_DIR")
+    )
     upload_max_bytes: int = Field(
-        default=200 * 1024 * 1024, validation_alias=AliasChoices("DEMO_UPLOAD_MAX_BYTES")
+        default=200 * 1024 * 1024,
+        validation_alias=AliasChoices("DEMO_UPLOAD_MAX_BYTES"),
     )
     upload_ttl_seconds: float = Field(
         default=3600.0, validation_alias=AliasChoices("DEMO_UPLOAD_TTL_SECONDS")
+    )
+    mcp_servers: Annotated[tuple[MCPServerConfig, ...], NoDecode] = Field(
+        default=(), validation_alias=AliasChoices("DEMO_MCP_SERVERS")
     )
 
     @field_validator(
@@ -146,6 +189,17 @@ class Settings(BaseSettings):
             return ()
         return json.loads(text)
 
+    @field_validator("mcp_servers", mode="before")
+    @classmethod
+    def _mcp_servers(cls, value: object) -> object:
+        """A JSON list, or nothing. An empty variable means nothing, not an error."""
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return ()
+        return json.loads(text)
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _origins(cls, value: object) -> object:
@@ -156,7 +210,7 @@ class Settings(BaseSettings):
         return origins or DEFAULT_ORIGINS
 
     @model_validator(mode="after")
-    def _knowledge_agent_is_a_subagent(self) -> "Settings":
+    def _knowledge_agent_is_a_subagent(self) -> Settings:
         """The single-agent variables stay valid, as one entry in the list.
 
         A fork that only has one subagent should not have to learn a JSON list
@@ -192,9 +246,11 @@ class Settings(BaseSettings):
                 "without a model."
             )
 
+
 def get_settings() -> Settings:
     """Builds the Settings from the environment. No cache: tests change the env."""
     return Settings()
+
 
 # What each variable decides, next to the fields it decides it for. The table in
 # the README is generated from here: one written by hand is one that lies after
@@ -207,7 +263,9 @@ FIELD_NOTES = {
         "Model the analyze_video tool talks to for frame description, kept separate "
         "from the conversation's own model since it must accept images natively."
     ),
-    "use_fake_client": "Deterministic answers without a model. For tests and offline work.",
+    "use_fake_client": (
+        "Deterministic answers without a model. For tests and offline work."
+    ),
     "allowed_origins": "Comma-separated origins allowed by CORS.",
     "product_name": "What the agent calls itself in its own instructions.",
     "product_language": "Language the agent answers in.",
@@ -218,15 +276,21 @@ FIELD_NOTES = {
     ),
     "json_logs": "Structured logs for a collector instead of the readable line.",
     "memory_service_url": (
-        "Memory service. Without it the conversation lives in RAM and dies with the process."
+        "Memory service. Without it the conversation lives in RAM and dies "
+        "with the process."
     ),
     "postgres_dsn": (
         "Shared logs and deduplicated notifications. Without it both are per replica."
     ),
-    "knowledge_agent_url": "One subagent, the short way. Ignored when DEMO_SUBAGENTS is set.",
-    "process_service_url": "Where durable processes live. Empty: the agent cannot start one.",
+    "knowledge_agent_url": (
+        "One subagent, the short way. Ignored when DEMO_SUBAGENTS is set."
+    ),
+    "process_service_url": (
+        "Where durable processes live. Empty: the agent cannot start one."
+    ),
     "voice_service_url": (
-        "demo-voice-service, for its POST /transcribe. Empty: the video-analysis tool is not shown."
+        "demo-voice-service, for its POST /transcribe. Empty: the "
+        "video-analysis tool is not shown."
     ),
     "knowledge_service_token": "Service token of that subagent, for its extended card.",
     "subagents": 'Subagents as JSON: [{"name":"x","url":"http://...","token":""}].',
@@ -234,12 +298,15 @@ FIELD_NOTES = {
     "subagent_wait_seconds": (
         "How long a turn waits before letting the outcome arrive by notification."
     ),
-    "upload_dir": (
-        "Folder for ephemeral video uploads. Empty: the OS temp folder."
-    ),
+    "upload_dir": ("Folder for ephemeral video uploads. Empty: the OS temp folder."),
     "upload_max_bytes": "Largest accepted upload for /uploads. Bigger is refused.",
     "upload_ttl_seconds": (
         "How long an uploaded file stays fetchable before it is swept away."
+    ),
+    "mcp_servers": (
+        'External MCP servers as JSON: [{"name":"x","url":"http://...",'
+        '"token":"","allowed_tools":[]}]. Each server\'s tools are added to the '
+        "agent's own, connected lazily on first use."
     ),
 }
 
@@ -250,7 +317,7 @@ def env_table() -> str:
     for name, field in Settings.model_fields.items():
         alias = (
             next(iter(field.validation_alias.choices))
-            if field.validation_alias is not None
+            if isinstance(field.validation_alias, AliasChoices)
             else name.upper()
         )
         default = field.get_default(call_default_factory=True)

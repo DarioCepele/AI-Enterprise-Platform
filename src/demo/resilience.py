@@ -10,11 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 DEFAULT_ATTEMPTS = 3
 DEFAULT_BACKOFF = 0.2
@@ -24,7 +21,7 @@ class BreakerOpen(RuntimeError):
     """Raised instead of calling a service that has been failing."""
 
 
-async def with_retries(
+async def with_retries[T](
     call: Callable[[], Awaitable[T]],
     attempts: int = DEFAULT_ATTEMPTS,
     backoff: float = DEFAULT_BACKOFF,
@@ -69,7 +66,7 @@ class Breaker:
             return False
         return self._now() - self._opened_at < self._cooldown
 
-    async def call(self, call: Callable[[], Awaitable[T]]) -> T:
+    async def call[T](self, call: Callable[[], Awaitable[T]]) -> T:
         if self.is_open:
             raise BreakerOpen(f"{self._name} is not answering: not calling it for now")
 
@@ -77,7 +74,11 @@ class Breaker:
             result = await call()
         except Exception:
             self._failures += 1
-            if self._failures == self._threshold:
+            if self._failures >= self._threshold:
+                # Re-stamp on every failure past the threshold, not just the
+                # first one: a probe that fails again after a cooldown must
+                # push the cooldown window forward, or `is_open` will keep
+                # comparing against a stale timestamp and stay closed.
                 self._opened_at = self._now()
                 logger.warning(
                     "%s failed %d times in a row: stops calling it for %.0fs.",

@@ -62,7 +62,9 @@ async def test_a_subagent_adds_its_start_and_finish():
 @pytest.mark.asyncio
 async def test_the_start_carries_the_name_and_the_pair_shares_the_id():
     async def work():
-        async with subagent_run("knowledge", "how does Go do typing?", parent_tool_call_id="c1"):
+        async with subagent_run(
+            "knowledge", "how does Go do typing?", parent_tool_call_id="c1"
+        ):
             await asyncio.sleep(0)
 
     events = await collect(Relay([work]))
@@ -114,7 +116,10 @@ async def test_the_error_event_reaches_the_stream_before_the_failure():
         async for event in relay.run({}):
             events.append(event)
 
-    assert [e.type for e in events] == [EventType.SUBAGENT_STARTED, EventType.SUBAGENT_ERROR]
+    assert [e.type for e in events] == [
+        EventType.SUBAGENT_STARTED,
+        EventType.SUBAGENT_ERROR,
+    ]
     assert events[-1].code == "ConnectionError"
 
 

@@ -39,14 +39,18 @@ async def test_after_the_last_attempt_the_error_comes_back():
     assert flaky.calls == 3
 
 
+# The breaker raises what the call raised until it opens, and BreakerOpen after:
+# the tests below wait for `Exception` because both are the expected outcome.
 @pytest.mark.asyncio
 async def test_the_breaker_stops_calling_after_enough_failures(caplog):
-    breaker = Breaker(name="memory", threshold=2, cooldown_seconds=60, now=lambda: 1000.0)
+    breaker = Breaker(
+        name="memory", threshold=2, cooldown_seconds=60, now=lambda: 1000.0
+    )
     flaky = Flaky(failures=99)
 
     with caplog.at_level(logging.WARNING, logger="demo.resilience"):
         for _ in range(4):
-            with pytest.raises(Exception):
+            with pytest.raises(Exception):  # noqa: B017
                 await breaker.call(flaky)
 
     # Two failures open it; what comes after is refused without a round trip,
@@ -58,10 +62,12 @@ async def test_the_breaker_stops_calling_after_enough_failures(caplog):
 @pytest.mark.asyncio
 async def test_the_breaker_tries_again_after_the_cooldown():
     now = [1000.0]
-    breaker = Breaker(name="memory", threshold=1, cooldown_seconds=30, now=lambda: now[0])
+    breaker = Breaker(
+        name="memory", threshold=1, cooldown_seconds=30, now=lambda: now[0]
+    )
     flaky = Flaky(failures=1)
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await breaker.call(flaky)
     now[0] += 31
 
@@ -69,16 +75,38 @@ async def test_the_breaker_tries_again_after_the_cooldown():
 
 
 @pytest.mark.asyncio
+async def test_the_breaker_reopens_if_the_probe_after_cooldown_fails_again():
+    now = [1000.0]
+    breaker = Breaker(
+        name="memory", threshold=1, cooldown_seconds=30, now=lambda: now[0]
+    )
+    flaky = Flaky(failures=99)
+
+    with pytest.raises(Exception):  # noqa: B017
+        await breaker.call(flaky)
+    now[0] += 31
+
+    # The probe fails again: the breaker must reopen right away instead of
+    # waiting for a fresh cooldown window measured from the stale timestamp.
+    with pytest.raises(Exception):  # noqa: B017
+        await breaker.call(flaky)
+
+    assert breaker.is_open is True
+
+
+@pytest.mark.asyncio
 async def test_a_success_closes_the_breaker_again():
-    breaker = Breaker(name="memory", threshold=2, cooldown_seconds=0, now=lambda: 1000.0)
+    breaker = Breaker(
+        name="memory", threshold=2, cooldown_seconds=0, now=lambda: 1000.0
+    )
     flaky = Flaky(failures=1)
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await breaker.call(flaky)
     assert await breaker.call(flaky) == "answered"
 
     flaky.failures = 99
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await breaker.call(flaky)
 
     # The count starts over on success: an old failure plus a new one is not

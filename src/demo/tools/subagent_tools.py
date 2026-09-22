@@ -1,6 +1,8 @@
 """The tools with which the master queries its subagents over A2A."""
+
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -10,8 +12,6 @@ from uuid import uuid4
 from a2a.types import AgentCard
 from agent_framework import Content, FunctionTool, tool
 from agent_framework.ag_ui import state_update
-
-import asyncio
 
 from ..a2a.client import A2AClient, Progress, fetch_agent_card
 from ..a2a.push import token_for, webhook_url
@@ -112,7 +112,9 @@ class Subagent:
         extended = await self._client.extended_card(self.config.token)
         if extended is None:
             return
-        catalogue = next((s.description for s in extended.skills if s.id == "catalogue"), "")
+        catalogue = next(
+            (s.description for s in extended.skills if s.id == "catalogue"), ""
+        )
         if not catalogue:
             return
         logger.info("Extended card of %s: %s", self.config.name, catalogue)
@@ -198,7 +200,9 @@ def _ask_tool(remote: Subagent) -> FunctionTool:
                 except TimeoutError:
                     late = True
         except Exception:
-            logger.error("Agent %s unreachable for '%s'.", remote.name, question, exc_info=True)
+            logger.error(
+                "Agent %s unreachable for '%s'.", remote.name, question, exc_info=True
+            )
             return Content.from_text(
                 f"The {remote.name} agent did not answer: go on with what you know, "
                 "stating that this part is not verified."
@@ -206,10 +210,16 @@ def _ask_tool(remote: Subagent) -> FunctionTool:
 
         answer = "".join(pieces).strip()
         briefing = next(
-            (a.data for a in briefings if a.data and a.data.get("component") == "briefing"), None
+            (
+                a.data
+                for a in briefings
+                if a.data and a.data.get("component") == "briefing"
+            ),
+            None,
         )
         logger.info(
-            "Agent %s on '%s': task %s, states %s, %d artifacts in %.2fs, %d characters.",
+            "Agent %s on '%s': task %s, states %s, %d artifacts in %.2fs, "
+            "%d characters.",
             remote.name,
             question,
             task_id[:8] or "?",
@@ -221,16 +231,19 @@ def _ask_tool(remote: Subagent) -> FunctionTool:
 
         if late:
             logger.info(
-                "Task %s of %s outlasts the wait: going on, the outcome will arrive by webhook.",
+                "Task %s of %s outlasts the wait: going on, the outcome will "
+                "arrive by webhook.",
                 task_id[:8] or "?",
                 remote.name,
             )
             partial = f" So far it said: {answer}" if answer else ""
             return Content.from_text(
-                f"The {remote.name} agent is still working and I did not wait any longer."
+                f"The {remote.name} agent is still working and I did not wait "
+                "any longer."
                 + partial
-                + " The outcome will arrive as a notification and will be available next turn:"
-                " tell the user that instead of inventing the answer."
+                + " The outcome will arrive as a notification and will be "
+                "available next turn: tell the user that instead of inventing "
+                "the answer."
             )
 
         if question_from_the_subagent:
@@ -242,8 +255,10 @@ def _ask_tool(remote: Subagent) -> FunctionTool:
             )
             return state_update(
                 text=(
-                    f"The {remote.name} agent stopped and asks: {question_from_the_subagent}\n"
-                    "Pass the question on to the user instead of answering in their place. "
+                    f"The {remote.name} agent stopped and asks: "
+                    f"{question_from_the_subagent}\n"
+                    "Pass the question on to the user instead of answering "
+                    "in their place. "
                     "When the user answers, use 'answer_subagent'."
                 ),
                 state={
@@ -294,7 +309,9 @@ def _ask_tool(remote: Subagent) -> FunctionTool:
 
 def _answer_tool(remotes: dict[str, Subagent]) -> FunctionTool:
     async def answer_subagent(
-        answer: Annotated[str, "The user's answer to the clarification the subagent asked for"],
+        answer: Annotated[
+            str, "The user's answer to the clarification the subagent asked for"
+        ],
     ) -> Content:
         """Resumes the subagent that asked for a clarification.
 
@@ -310,7 +327,9 @@ def _answer_tool(remotes: dict[str, Subagent]) -> FunctionTool:
         name = str(waiting.get("agent", ""))
         remote = remotes.get(name)
         if remote is None:
-            logger.warning("The subagent '%s' that asked is no longer configured.", name)
+            logger.warning(
+                "The subagent '%s' that asked is no longer configured.", name
+            )
             return Content.from_text(
                 f"The agent '{name}' that asked the question is no longer configured: "
                 "tell the user, and go on without it."
@@ -330,11 +349,17 @@ def _answer_tool(remotes: dict[str, Subagent]) -> FunctionTool:
                     if progress.artifact and progress.artifact.text:
                         pieces.append(progress.artifact.text)
         except Exception:
-            logger.error("Resuming task %s of %s failed.", task_id[:8], name, exc_info=True)
-            return Content.from_text(f"I could not resume the {name} agent: tell the user.")
+            logger.error(
+                "Resuming task %s of %s failed.", task_id[:8], name, exc_info=True
+            )
+            return Content.from_text(
+                f"I could not resume the {name} agent: tell the user."
+            )
 
         text = "".join(pieces).strip()
-        logger.info("Task %s of %s resumed: %d characters.", task_id[:8], name, len(text))
+        logger.info(
+            "Task %s of %s resumed: %d characters.", task_id[:8], name, len(text)
+        )
         return state_update(
             text=text or "The subagent added nothing after the clarification.",
             state={"subagent_pending": {}},

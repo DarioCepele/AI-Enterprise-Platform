@@ -10,6 +10,7 @@ thread" and the agent starts without history, on writes the error is logged.
 In both cases the line ends up on `demo.*`, hence in the LOG tab: silent
 amnesia is the worst defect this piece could have.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,6 +24,7 @@ from ..resilience import Breaker, with_retries
 logger = logging.getLogger(__name__)
 
 SCOPE_HEADER = "X-Memory-Scope"
+
 
 class MemoryServiceSnapshotStore:
     """The threads' memory, held by the memory service."""
@@ -44,7 +46,9 @@ class MemoryServiceSnapshotStore:
     async def _call(self, request):
         """Retries what may pass, and stops calling what keeps failing."""
         return await self._breaker.call(
-            lambda: with_retries(request, attempts=self._attempts, backoff=self._backoff)
+            lambda: with_retries(
+                request, attempts=self._attempts, backoff=self._backoff
+            )
         )
 
     @staticmethod
@@ -65,9 +69,12 @@ class MemoryServiceSnapshotStore:
             "interrupt": snapshot.interrupt,
             "session_state": snapshot.session_state,
         }
+
         async def put() -> httpx.Response:
             response = await self._client.put(
-                f"/threads/{thread_id}/snapshot", json=body, headers=self._headers(scope)
+                f"/threads/{thread_id}/snapshot",
+                json=body,
+                headers=self._headers(scope),
             )
             response.raise_for_status()
             return response
@@ -75,7 +82,6 @@ class MemoryServiceSnapshotStore:
         try:
             response = await self._call(put)
         except Exception:
-
             logger.error("Memory NOT saved for thread %s.", thread_id, exc_info=True)
             return
         logger.info(
@@ -99,7 +105,6 @@ class MemoryServiceSnapshotStore:
                 return None
             payload = response.json()
         except Exception:
-
             logger.error(
                 "Memory of thread %s unreadable: starting without history.",
                 thread_id,
@@ -110,7 +115,6 @@ class MemoryServiceSnapshotStore:
         messages = payload.get("messages") or []
         curation = payload.get("curation")
         if curation:
-
             logger.info(
                 "Context from memory: %d messages (%d reasonings removed, "
                 "%d results emptied, %d dropped).",
@@ -144,7 +148,9 @@ class MemoryServiceSnapshotStore:
         prevent.
         """
         if scope is None:
-            raise ValueError("clear() without a scope is not supported by the memory service")
+            raise ValueError(
+                "clear() without a scope is not supported by the memory service"
+            )
         response = await self._client.delete("/scope", headers=self._headers(scope))
         response.raise_for_status()
 

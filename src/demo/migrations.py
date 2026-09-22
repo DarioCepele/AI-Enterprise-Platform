@@ -8,6 +8,7 @@ perche' un agente debba avere un database.
 Numerate, idempotenti, registrate, applicate all'avvio: la stessa abitudine
 degli altri servizi.
 """
+
 from __future__ import annotations
 
 import logging
@@ -63,7 +64,9 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 async def applied_versions(connection: AsyncConnection) -> set[int]:
     await connection.execute(REGISTER)
-    rows = await (await connection.execute("SELECT version FROM schema_migrations")).fetchall()
+    rows = await (
+        await connection.execute("SELECT version FROM schema_migrations")
+    ).fetchall()
     return {int(row[0]) for row in rows}
 
 

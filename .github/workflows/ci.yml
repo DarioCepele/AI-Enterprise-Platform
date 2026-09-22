@@ -38,6 +38,8 @@ jobs:
           enable-cache: true
 
       - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy src
       - run: uv run pytest -q
         env:
           AGUI_LAB_CONTRACTS: ${{ github.workspace }}/.contracts/contracts

@@ -2,6 +2,7 @@ import logging
 
 from demo.logging_bridge import MAX_LOG_EVENTS, LogCollector
 
+
 def test_collects_application_logs():
     with LogCollector() as collector:
         logging.getLogger("demo.tools").info("plan written")
@@ -41,6 +42,12 @@ def test_reading_twice_from_the_same_cursor_is_idempotent():
         logging.getLogger("demo.a").info("one")
 
     assert collector.since("")["entries"] == collector.since("")["entries"]
+
+def test_a_non_numeric_cursor_is_treated_as_the_start():
+    with LogCollector() as collector:
+        logging.getLogger("demo.a").info("one")
+
+    assert collector.since("not-a-number")["entries"] == collector.since("")["entries"]
 
 def test_the_buffer_is_capped_and_reports_what_it_dropped():
     with LogCollector() as collector:

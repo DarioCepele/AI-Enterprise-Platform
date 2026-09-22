@@ -1,4 +1,5 @@
 """Building the master agent."""
+
 from __future__ import annotations
 
 from agent_framework import Agent, BaseChatClient
@@ -6,12 +7,14 @@ from agent_framework.openai import OpenAIChatCompletionClient
 
 from ..chat_clients.fake import FakeStreamingChatClient
 from ..config import get_settings
+from ..plan import PlanStore
 from ..telemetry import log_context_size
+from ..tools.mcp_tools import build_mcp_tools
 from ..tools.memory_tools import build_memory_tools
-from ..tools.plan_tools import PlanStore, build_plan_tools
+from ..tools.plan_tools import build_plan_tools
 from ..tools.process_tools import build_process_tools
-from ..tools.subagent_tools import build_subagent_tools
 from ..tools.skill_tools import build_skill_tools
+from ..tools.subagent_tools import build_subagent_tools
 from ..tools.ui_tools import get_tools
 from ..tools.video_tools import build_video_tools
 
@@ -34,7 +37,15 @@ When you have to compare several items along common dimensions, use the
 
 When the user attaches or refers to a video (you will see its URL as a
 "[allegato video: ...]" note), call `analyze_video` with that URL: nothing
-about what it says or shows is visible any other way.
+about what it says or shows is visible any other way. Its result gives you
+the real transcript and a detailed description -- read them and answer
+from them; the same detail is also shown to the user directly in an
+artifact rendered next to your answer, so you do not need to repeat it
+verbatim, but you already have what you need for whatever they ask next
+about that same video. Do not call `analyze_video` again just because they
+ask a follow-up question about it: only call it again if what they need
+genuinely is not covered by the description you already have (a closer
+look, a different focus), passing that as `question`.
 
 When a question falls in the domain of one of your `ask_*` tools, call that
 tool: the answer comes from that agent, not from your memory. Their
@@ -50,6 +61,7 @@ If the user refers to something already said that you cannot see in the
 context, call `search_memories` before saying you do not know: past
 conversations are not all in front of you."""
 
+
 def instructions_for(product: str, language: str) -> str:
     """The prompt says the product's name and the language it answers in.
 
@@ -58,6 +70,7 @@ def instructions_for(product: str, language: str) -> str:
     using it.
     """
     return INSTRUCTIONS.format(product=product, language=language)
+
 
 def _default_chat_client() -> BaseChatClient:
     settings = get_settings()
@@ -70,6 +83,7 @@ def _default_chat_client() -> BaseChatClient:
         base_url=settings.base_url,
     )
 
+
 def build_master_agent(
     chat_client: BaseChatClient | None = None,
     plan_store: PlanStore | None = None,
@@ -78,13 +92,16 @@ def build_master_agent(
     settings = get_settings()
 
     subagent_tools = build_subagent_tools(settings.subagents)
-    process_tools = build_process_tools(settings.process_service_url, settings.default_scope)
+    process_tools = build_process_tools(
+        settings.process_service_url, settings.default_scope
+    )
     video_tools = build_video_tools(settings.voice_service_url)
     memory_tools = (
         build_memory_tools(settings.memory_service_url, settings.default_scope)
         if settings.memory_service_url
         else []
     )
+    mcp_tools = build_mcp_tools(settings.mcp_servers)
     return Agent(
         name="master",
         instructions=instructions_for(settings.product_name, settings.product_language),
@@ -97,7 +114,7 @@ def build_master_agent(
             *subagent_tools,
             *process_tools,
             *video_tools,
+            *mcp_tools,
         ],
-
         middleware=[log_context_size],
     )

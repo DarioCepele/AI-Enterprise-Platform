@@ -44,7 +44,9 @@ def test_a_failed_step_is_logged_as_an_error_with_its_reason():
     todo_write.func(steps=STEPS)
 
     with LogCollector() as collector:
-        todo_set_status.func(step_id=1, status="failed", note="the tool does not answer")
+        todo_set_status.func(
+            step_id=1, status="failed", note="the tool does not answer"
+        )
 
     entry = collector.since("")["entries"][0]
     assert entry["level"] == "ERROR"

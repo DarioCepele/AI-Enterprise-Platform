@@ -9,15 +9,17 @@ import httpx
 import pytest
 
 from demo.a2a.push import HEADER, summary_of, token_for, token_is_valid, webhook_url
-from demo.chat_clients.fake import FakeStreamingChatClient
 from demo.agents.master import build_master_agent
+from demo.chat_clients.fake import FakeStreamingChatClient
 from demo.server.app import create_app
 
 NOTIFICATION = {
     "task": {
         "id": "task-99",
         "status": {"state": "TASK_STATE_COMPLETED"},
-        "artifacts": [{"name": "briefing", "parts": [{"text": "Goroutines are lightweight."}]}],
+        "artifacts": [
+            {"name": "briefing", "parts": [{"text": "Goroutines are lightweight."}]}
+        ],
     }
 }
 
@@ -42,7 +44,11 @@ def test_the_url_carries_the_correlation():
 
 
 def test_a_notification_is_read_without_trusting_its_shape():
-    assert summary_of(NOTIFICATION) == ("task-99", "TASK_STATE_COMPLETED", "Goroutines are lightweight.")
+    assert summary_of(NOTIFICATION) == (
+        "task-99",
+        "TASK_STATE_COMPLETED",
+        "Goroutines are lightweight.",
+    )
     assert summary_of({}) == ("", "", "")
     assert summary_of({"task": {"id": "x"}}) == ("x", "", "")
 
@@ -102,7 +108,9 @@ async def test_a_notification_signed_for_another_thread_is_refused(app, thread):
 
 
 @pytest.mark.asyncio
-async def test_without_a_memory_service_the_outcome_stays_in_the_logs(app, caplog, monkeypatch, thread):
+async def test_without_a_memory_service_the_outcome_stays_in_the_logs(
+    app, caplog, monkeypatch, thread
+):
     monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "")
 
     with caplog.at_level(logging.WARNING, logger="demo.server.app"):
@@ -144,14 +152,18 @@ async def test_the_outcome_is_written_into_the_thread_memory(app, monkeypatch, t
     assert "Goroutines are lightweight." in body["content"]
 
 
-PROGRESS = {"statusUpdate": {"taskId": "task-99", "status": {"state": "TASK_STATE_WORKING"}}}
+PROGRESS = {
+    "statusUpdate": {"taskId": "task-99", "status": {"state": "TASK_STATE_WORKING"}}
+}
 
 
 @pytest.mark.asyncio
 async def test_progress_notifications_are_ignored(app, caplog, thread):
     transport = httpx.ASGITransport(app=app)
     with caplog.at_level(logging.INFO, logger="demo.server.app"):
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
             response = await client.post(
                 f"/a2a/push/tenant-a/{thread}",
                 json=PROGRESS,

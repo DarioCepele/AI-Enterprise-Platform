@@ -1,4 +1,5 @@
 """Subagent push notifications: who receives them, and how they are trusted."""
+
 from __future__ import annotations
 
 import hashlib
@@ -42,7 +43,9 @@ def token_for(thread_id: str, at: float | None = None) -> str:
     return hmac.new(_secret(), payload, hashlib.sha256).hexdigest()
 
 
-def token_is_valid(thread_id: str, received: str | None, at: float | None = None) -> bool:
+def token_is_valid(
+    thread_id: str, received: str | None, at: float | None = None
+) -> bool:
     """Accepts the current window and the one before it.
 
     The subagent registers the webhook when the task starts and calls back when
@@ -53,7 +56,9 @@ def token_is_valid(thread_id: str, received: str | None, at: float | None = None
         return False
     now = at if at is not None else time.time()
     return any(
-        hmac.compare_digest(token_for(thread_id, at=now - offset * _window_seconds()), received)
+        hmac.compare_digest(
+            token_for(thread_id, at=now - offset * _window_seconds()), received
+        )
         for offset in (0, 1)
     )
 
@@ -84,8 +89,12 @@ def summary_of(notification: dict[str, Any]) -> tuple[str, str, str]:
     caller decides what to ignore.
     """
     task = notification.get("task") or {}
-    status_update = notification.get("statusUpdate") or notification.get("status_update") or {}
-    artifact_update = notification.get("artifactUpdate") or notification.get("artifact_update") or {}
+    status_update = (
+        notification.get("statusUpdate") or notification.get("status_update") or {}
+    )
+    artifact_update = (
+        notification.get("artifactUpdate") or notification.get("artifact_update") or {}
+    )
 
     task_id = str(
         task.get("id")
@@ -152,7 +161,8 @@ class SeenNotifications:
             await self._pool.open()
             async with self._pool.connection() as connection:
                 await connection.execute(
-                    "DELETE FROM seen_notifications WHERE seen_at < now() - %s * interval '1 second'",
+                    "DELETE FROM seen_notifications "
+                    "WHERE seen_at < now() - %s * interval '1 second'",
                     (self._ttl,),
                 )
                 written = await connection.execute(

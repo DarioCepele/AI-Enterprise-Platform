@@ -16,16 +16,18 @@ REQUEST = {
 
 async def collect_events(app) -> list[dict]:
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        async with client.stream(
+    async with (
+        httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+        client.stream(
             "POST", "/agui", json=REQUEST, headers={"Accept": "text/event-stream"}
-        ) as response:
-            assert response.status_code == 200
-            events = []
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    events.append(json.loads(line[len("data: "):]))
-            return events
+        ) as response,
+    ):
+        assert response.status_code == 200
+        events = []
+        async for line in response.aiter_lines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[len("data: "):]))
+        return events
 
 @pytest.mark.asyncio
 async def test_run_starts_and_finishes(app):

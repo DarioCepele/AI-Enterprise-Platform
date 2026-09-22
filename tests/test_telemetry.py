@@ -13,11 +13,11 @@ from agent_framework import (
     ResponseStream,
     UsageDetails,
 )
-
 from agent_framework._middleware import ChatMiddlewareLayer
 
 from demo.agents.master import build_master_agent
 from demo.telemetry import measure
+
 
 class UsageReportingClient(ChatMiddlewareLayer, BaseChatClient):
     """Answers a fixed text and declares a known token usage."""
@@ -50,7 +50,10 @@ class UsageReportingClient(ChatMiddlewareLayer, BaseChatClient):
         async def _stream():
 
             yield ChatResponseUpdate(
-                contents=[Content.from_text("done"), Content.from_usage(usage_details=self._usage)],
+                contents=[
+                    Content.from_text("done"),
+                    Content.from_usage(usage_details=self._usage),
+                ],
                 role="assistant",
             )
 

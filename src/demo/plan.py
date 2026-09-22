@@ -1,14 +1,15 @@
 """The work plan: domain state, not a tool detail."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 STEP_STATUSES = ("pending", "in_progress", "completed", "failed")
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 class PlanStore:
@@ -39,7 +40,9 @@ class PlanStore:
         }
 
     def snapshot(self) -> dict[str, Any]:
-        """A copy of the plan. A copy and not a reference: the caller serializes it later."""
+        """A copy of the plan. A copy and not a reference: the caller serializes it
+        later.
+        """
         return {
             "status": self._plan["status"],
             "steps": [dict(step) for step in self._plan["steps"]],
@@ -65,9 +68,7 @@ class PlanStore:
         }
         return self.snapshot()
 
-    def set_status(
-        self, step_id: int, status: str, note: str | None
-    ) -> dict[str, Any]:
+    def set_status(self, step_id: int, status: str, note: str | None) -> dict[str, Any]:
         """Changes a step's status and recomputes the plan's own."""
         if status not in STEP_STATUSES:
             raise ValueError(

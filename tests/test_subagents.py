@@ -42,7 +42,11 @@ class Remote:
             )
             return
         yield Progress(
-            task_id="t-1", context_id="c-1", state="completed", raw_state=3, text=self.answer
+            task_id="t-1",
+            context_id="c-1",
+            state="completed",
+            raw_state=3,
+            text=self.answer,
         )
 
 
@@ -100,10 +104,15 @@ async def test_each_tool_talks_to_its_own_subagent():
 
 @pytest.mark.asyncio
 async def test_the_answer_goes_back_to_the_subagent_that_asked():
-    remotes = {"knowledge": Remote("resumed knowledge"), "legal": Remote("resumed legal")}
+    remotes = {
+        "knowledge": Remote("resumed knowledge"),
+        "legal": Remote("resumed legal"),
+    }
     answer_subagent = tools_for([KNOWLEDGE, LEGAL], remotes)[-1]
 
-    token = current_pending.set({"task_id": "t-99", "agent": "legal", "question": "which?"})
+    token = current_pending.set(
+        {"task_id": "t-99", "agent": "legal", "question": "which?"}
+    )
     try:
         result = await answer_subagent.func(answer="the answer")
     finally:
@@ -146,7 +155,9 @@ async def test_the_answer_goes_back_into_the_conversation_the_task_belongs_to():
 async def test_an_answer_for_a_subagent_that_is_gone_says_so(caplog):
     answer_subagent = tools_for([KNOWLEDGE], {"knowledge": Remote("a")})[-1]
 
-    token = current_pending.set({"task_id": "t-99", "agent": "retired", "question": "which?"})
+    token = current_pending.set(
+        {"task_id": "t-99", "agent": "retired", "question": "which?"}
+    )
     try:
         with caplog.at_level(logging.WARNING, logger="demo.tools.subagent_tools"):
             result = await answer_subagent.func(answer="the answer")
@@ -169,7 +180,12 @@ async def test_the_artifact_says_which_subagent_produced_it():
                 name="briefing",
                 description="",
                 text="the answer",
-                data={"component": "briefing", "question": "q", "documents": ["d"], "summary": "s"},
+                data={
+                    "component": "briefing",
+                    "question": "q",
+                    "documents": ["d"],
+                    "summary": "s",
+                },
             )
             yield progress
 
@@ -191,7 +207,12 @@ def test_a_single_subagent_needs_no_json(monkeypatch):
     # The compose file has been passing these two for three stages: a fork with
     # one subagent should not have to learn a JSON list to say so.
     assert get_settings().subagents == (
-        SubagentConfig(name="knowledge", url="http://kb:8200/", token="secret"),
+        SubagentConfig(
+            name="knowledge",
+            url="http://kb:8200/",
+            # Not a credential: the value monkeypatch put in the environment above.
+            token="secret",  # noqa: S106
+        ),
     )
 
 

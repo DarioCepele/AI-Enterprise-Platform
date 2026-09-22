@@ -74,7 +74,9 @@ def service(monkeypatch):
 
 
 def tools():
-    return {tool.name: tool for tool in build_process_tools("http://processes.test", SCOPE)}
+    return {
+        tool.name: tool for tool in build_process_tools("http://processes.test", SCOPE)
+    }
 
 
 def test_without_a_process_service_there_are_no_tools():
@@ -140,7 +142,11 @@ async def test_the_status_says_what_is_waiting_and_who_has_to_act(service):
 async def test_what_the_service_refused_is_passed_on_in_its_own_words(service):
     service["replies"]["/processes/nothing/instances"] = (
         404,
-        {"detail": "process 'nothing' is not in the catalogue. Known: example-approval"},
+        {
+            "detail": (
+                "process 'nothing' is not in the catalogue. Known: example-approval"
+            )
+        },
     )
 
     answer = await tools()["start_process"].func(process_id="nothing")
@@ -151,7 +157,9 @@ async def test_what_the_service_refused_is_passed_on_in_its_own_words(service):
 
 
 @pytest.mark.asyncio
-async def test_a_service_that_does_not_answer_does_not_break_the_turn(service, monkeypatch):
+async def test_a_service_that_does_not_answer_does_not_break_the_turn(
+    service, monkeypatch
+):
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)
 

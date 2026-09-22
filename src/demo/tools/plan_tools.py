@@ -3,22 +3,19 @@
 The tools emit no text for the user: they mutate `state.plan`, and the
 work-plan panel is a pure function of that object.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated
 
 from agent_framework import Content, FunctionTool, tool
 from agent_framework.ag_ui import state_update
 
-from demo.tools.ui_tools import STATE_KEY
-
-from ..plan import STEP_STATUSES, PlanStore
+from ..plan import PlanStore
 from ..server.run_context import plan_of_run
 
 logger = logging.getLogger(__name__)
-
-
 
 
 def build_plan_tools(store: PlanStore | None = None) -> list[FunctionTool]:
@@ -42,7 +39,8 @@ def build_plan_tools(store: PlanStore | None = None) -> list[FunctionTool]:
     def todo_write(
         steps: Annotated[
             list[dict],
-            "The steps of the plan. Each step: id (integer, from 1), title, detail, source.",
+            "The steps of the plan. Each step: id (integer, from 1), title, "
+            "detail, source.",
         ],
     ) -> Content:
         """Writes the work plan, replacing the previous one.
@@ -62,9 +60,7 @@ def build_plan_tools(store: PlanStore | None = None) -> list[FunctionTool]:
     def todo_set_status(
         step_id: Annotated[int, "The id of the step to update"],
         status: Annotated[str, "One of: pending, in_progress, completed, failed"],
-        note: Annotated[
-            str | None, "Reason, required when status is failed"
-        ] = None,
+        note: Annotated[str | None, "Reason, required when status is failed"] = None,
     ) -> Content:
         """Updates the status of one step of the plan.
 

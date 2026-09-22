@@ -3,6 +3,7 @@
 It serves the tests and offline development. It isolates the rest of the system
 from the LLM.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -69,7 +70,9 @@ class FakeStreamingChatClient(ChatMiddlewareLayer, BaseChatClient):
         return ResponseStream(_stream(), finalizer=ChatResponse.from_updates)
 
 
-class ToolCallingFakeClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
+class ToolCallingFakeClient(
+    FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient
+):
     """First round: calls `tool_name` with `tool_args`. Later rounds: text.
 
     It inherits from FunctionInvocationLayer, without which Agent does not run

@@ -61,7 +61,9 @@ async def test_reading_rebuilds_the_snapshot():
 
 @pytest.mark.asyncio
 async def test_an_unknown_thread_reads_as_nothing():
-    store, _ = store_talking_to(lambda _: httpx.Response(404, json={"detail": "unknown"}))
+    store, _ = store_talking_to(
+        lambda _: httpx.Response(404, json={"detail": "unknown"})
+    )
 
     assert await store.get(scope="tenant-a", thread_id="never-seen") is None
 
@@ -80,7 +82,9 @@ async def test_a_memory_service_down_does_not_stop_the_conversation(caplog):
 
 @pytest.mark.asyncio
 async def test_a_failed_save_is_logged_and_does_not_raise(caplog):
-    store, _ = store_talking_to(lambda _: httpx.Response(500, json={"detail": "broken"}))
+    store, _ = store_talking_to(
+        lambda _: httpx.Response(500, json={"detail": "broken"})
+    )
 
     with caplog.at_level(logging.ERROR, logger="demo.memory.remote_store"):
 
@@ -90,7 +94,9 @@ async def test_a_failed_save_is_logged_and_does_not_raise(caplog):
 
 @pytest.mark.asyncio
 async def test_deleting_reports_whether_something_was_there():
-    store, seen = store_talking_to(lambda _: httpx.Response(200, json={"buckets_removed": 2}))
+    store, seen = store_talking_to(
+        lambda _: httpx.Response(200, json={"buckets_removed": 2})
+    )
 
     removed = await store.delete(scope="tenant-a", thread_id="t1")
 
@@ -100,7 +106,9 @@ async def test_deleting_reports_whether_something_was_there():
 
 @pytest.mark.asyncio
 async def test_clearing_everything_without_a_scope_is_refused():
-    store, seen = store_talking_to(lambda _: httpx.Response(200, json={"threads_removed": 0}))
+    store, seen = store_talking_to(
+        lambda _: httpx.Response(200, json={"threads_removed": 0})
+    )
 
     with pytest.raises(ValueError):
         await store.clear()
@@ -109,7 +117,9 @@ async def test_clearing_everything_without_a_scope_is_refused():
 
 @pytest.mark.asyncio
 async def test_clearing_a_scope_hits_that_scope_only():
-    store, seen = store_talking_to(lambda _: httpx.Response(200, json={"threads_removed": 3}))
+    store, seen = store_talking_to(
+        lambda _: httpx.Response(200, json={"threads_removed": 3})
+    )
 
     await store.clear(scope="tenant-a")
 

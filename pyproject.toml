@@ -24,14 +24,37 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.8",
+    "types-protobuf>=7.35.1.20260906",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.12"
+# Not `strict`: it would also demand annotations and typed calls inside
+# `logging_bridge.py`, `resilience.py` and the video tools, which a separate
+# piece of work owns right now. These are the checks that find real bugs.
+check_untyped_defs = true
+disallow_incomplete_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_equality = true
+no_implicit_reexport = true
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "UP", "B", "I", "S", "C4", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
 
 [build-system]
 requires = ["hatchling"]

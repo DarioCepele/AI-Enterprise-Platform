@@ -80,7 +80,7 @@ def test_a_missing_upload_is_a_404(make_app):
 
 def test_an_upload_past_its_ttl_is_no_longer_reachable(make_app):
     now = {"t": 1_000.0}
-    app, store = make_app(ttl_seconds=60.0, clock=lambda: now["t"])
+    app, _store = make_app(ttl_seconds=60.0, clock=lambda: now["t"])
 
     with TestClient(app) as client:
         created = client.post("/uploads", content=b"clip")
@@ -95,7 +95,7 @@ def test_an_upload_past_its_ttl_is_no_longer_reachable(make_app):
 
 def test_the_lazy_sweep_deletes_the_expired_file_from_disk(make_app, tmp_path):
     now = {"t": 1_000.0}
-    app, store = make_app(ttl_seconds=60.0, clock=lambda: now["t"])
+    app, _store = make_app(ttl_seconds=60.0, clock=lambda: now["t"])
 
     with TestClient(app) as client:
         created = client.post("/uploads", content=b"clip")

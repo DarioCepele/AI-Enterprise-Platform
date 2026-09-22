@@ -1,31 +1,40 @@
-"""FastAPI app: exposes the master agent over AG-UI on SSE, plus the operational logs."""
+"""FastAPI app: exposes the master agent over AG-UI on SSE, plus the operational
+logs.
+"""
+
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from psycopg_pool import AsyncConnectionPool
 from agent_framework import Agent
 from agent_framework.ag_ui import (
     AGUIThreadSnapshotStore,
     InMemoryAGUIThreadSnapshotStore,
     add_agent_framework_fastapi_endpoint,
 )
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from psycopg_pool import AsyncConnectionPool
 
+from ..a2a.client import A2AClient, fetch_agent_card
+from ..a2a.push import (
+    HEADER,
+    SeenNotifications,
+    is_terminal,
+    summary_of,
+    token_is_valid,
+)
 from ..agents.master import build_master_agent
 from ..config import get_settings
 from ..logging_bridge import LogCollector, SharedLogStream
+from ..memory.remote_store import MemoryServiceSnapshotStore
 from ..migrations import run_migrations
 from ..observability import configure_logging, configure_tracing
-from ..a2a.client import A2AClient, fetch_agent_card
-from ..a2a.push import HEADER, SeenNotifications, is_terminal, summary_of, token_is_valid
-from ..memory.remote_store import MemoryServiceSnapshotStore
 from .run_context import LabRunner
 from .scope import ScopeResolver, scope_of_request
 from .uploads import UploadStore, build_upload_router
@@ -37,6 +46,7 @@ SERVICE_NAME = "master-agent"
 DEFAULT_STATE = {"artifacts": [], "plan": {"status": "idle", "steps": []}}
 
 MAX_REQUEST_BYTES = 1_000_000
+
 
 def _default_snapshot_store() -> AGUIThreadSnapshotStore:
     """The thread store: the memory service when configured, otherwise RAM.
@@ -54,6 +64,7 @@ def _default_snapshot_store() -> AGUIThreadSnapshotStore:
     logger.info("Thread memory in the memory service: %s", url)
     return MemoryServiceSnapshotStore(url)
 
+
 def _where(dsn: str) -> str:
     """L'indirizzo senza le credenziali: un log non e' il posto per una password."""
     return dsn.split("@")[-1] or "the configured database"
@@ -68,9 +79,12 @@ def _shared_pool() -> AsyncConnectionPool | None:
     """
     dsn = get_settings().postgres_dsn
     if not dsn:
-        logger.info("Shared state kept in this process: no DEMO_POSTGRES_DSN configured.")
+        logger.info(
+            "Shared state kept in this process: no DEMO_POSTGRES_DSN configured."
+        )
         return None
     return AsyncConnectionPool(dsn, min_size=1, max_size=4, open=False)
+
 
 def create_app(
     agent: Agent | None = None,
@@ -79,7 +93,9 @@ def create_app(
     scope_resolver: ScopeResolver | None = None,
     upload_store: UploadStore | None = None,
 ) -> FastAPI:
-    """Builds the app. `agent`, `collector`, the store and the resolver are passed in tests."""
+    """Builds the app. `agent`, `collector`, the store and the resolver are passed
+    in tests.
+    """
     resolve_scope: ScopeResolver = scope_resolver or scope_of_request
     # Uvicorn configures only its own loggers: without this, `demo.*` ends up in
     # the handler of last resort, which prints only WARNING and above and leaves
@@ -106,7 +122,10 @@ def create_app(
         await pool.open(wait=True)
         async with pool.connection() as connection:
             await run_migrations(connection)
-        logger.info("Shared logs and notification memory on %s.", _where(get_settings().postgres_dsn))
+        logger.info(
+            "Shared logs and notification memory on %s.",
+            _where(get_settings().postgres_dsn),
+        )
         try:
             async with log_stream.running():
                 yield
@@ -117,7 +136,9 @@ def create_app(
     app = FastAPI(title=get_settings().product_name, lifespan=lifespan)
 
     @app.middleware("http")
-    async def refuse_oversized_bodies(request: Request, call_next):
+    async def refuse_oversized_bodies(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """A ceiling on what a client may send.
 
         Without one, the process holds whatever arrives: the limit is generous
@@ -137,6 +158,7 @@ def create_app(
                 status_code=413,
             )
         return await call_next(request)
+
     app.state.scope_resolver = resolve_scope
 
     allowed_origins = list(get_settings().allowed_origins)
@@ -144,7 +166,6 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
-
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )
@@ -174,13 +195,15 @@ def create_app(
             checked.append("memory")
             try:
                 async with httpx.AsyncClient(timeout=2.0) as http:
-                    answer = await http.get(f"{settings.memory_service_url}/health/ready")
+                    answer = await http.get(
+                        f"{settings.memory_service_url}/health/ready"
+                    )
                     answer.raise_for_status()
             except Exception as error:
                 raise HTTPException(
                     status_code=503, detail=f"memory service unreachable: {error}"
                 ) from error
-        if settings.postgres_dsn:
+        if settings.postgres_dsn and pool is not None:
             checked.append("shared state")
             try:
                 async with pool.connection() as connection:
@@ -189,7 +212,9 @@ def create_app(
                 # Quel database porta i log condivisi e la memoria delle
                 # notifiche, non le conversazioni: si segnala, e non toglie
                 # l'agente dal servizio.
-                logger.warning("Shared state unreachable: logs degraded.", exc_info=True)
+                logger.warning(
+                    "Shared state unreachable: logs degraded.", exc_info=True
+                )
                 return {"status": "degraded", "checked": checked, "detail": str(error)}
         return {"status": "ok", "checked": checked}
 
@@ -205,7 +230,9 @@ def create_app(
             finally:
                 await client.aclose()
         except Exception:
-            logger.error("Outcome of task %s not recoverable.", task_id[:8], exc_info=True)
+            logger.error(
+                "Outcome of task %s not recoverable.", task_id[:8], exc_info=True
+            )
             return ""
 
     async def note_in_memory(
@@ -218,23 +245,33 @@ def create_app(
         """
         url = get_settings().memory_service_url
         if not url:
-            logger.warning("No memory service: the outcome of task %s stays in the logs.", task_id[:8])
+            logger.warning(
+                "No memory service: the outcome of task %s stays in the logs.",
+                task_id[:8],
+            )
             return
         message = (
             f"The subagent completed task {task_id[:8]} ({state}).\n{text}"
             if text
-            else f"The subagent closed task {task_id[:8]} with state {state}, with no answer."
+            else f"The subagent closed task {task_id[:8]} with state {state}, "
+            "with no answer."
         )
         try:
             async with httpx.AsyncClient(base_url=url, timeout=5.0) as http:
                 response = await http.post(
                     f"/threads/{thread_id}/messages",
-                    json={"role": "assistant", "content": message, "meta": {"task_id": task_id}},
+                    json={
+                        "role": "assistant",
+                        "content": message,
+                        "meta": {"task_id": task_id},
+                    },
                     headers={"X-Memory-Scope": scope},
                 )
                 response.raise_for_status()
         except Exception:
-            logger.error("Outcome of task %s NOT noted in memory.", task_id[:8], exc_info=True)
+            logger.error(
+                "Outcome of task %s NOT noted in memory.", task_id[:8], exc_info=True
+            )
 
     @app.post("/a2a/push/{scope}/{thread_id}")
     async def subagent_notification(
@@ -252,7 +289,9 @@ def create_app(
         notification = await request.json()
         task_id, state, text = summary_of(notification)
         if not token_is_valid(thread_id, token):
-            logger.warning("Push notification refused for task %s: invalid token.", task_id)
+            logger.warning(
+                "Push notification refused for task %s: invalid token.", task_id
+            )
             raise HTTPException(status_code=403, detail="invalid token")
 
         if not is_terminal(state):
@@ -261,7 +300,9 @@ def create_app(
             return {"state": "progress ignored"}
 
         if not await seen.first_time(thread_id, task_id, state):
-            logger.info("Notification for task %s already seen: ignored.", task_id[:8] or "?")
+            logger.info(
+                "Notification for task %s already seen: ignored.", task_id[:8] or "?"
+            )
             return {"state": "already seen"}
 
         if not text:
@@ -292,24 +333,36 @@ def create_app(
             try:
                 return await log_stream.since(cursor)
             except Exception:
-                logger.warning("Shared logs unreadable: answering with this replica's own.")
+                logger.warning(
+                    "Shared logs unreadable: answering with this replica's own."
+                )
         return log_collector.since(cursor)
 
     uploads = upload_store or UploadStore(
-        directory=Path(get_settings().upload_dir) if get_settings().upload_dir else None,
+        directory=Path(get_settings().upload_dir)
+        if get_settings().upload_dir
+        else None,
         max_bytes=get_settings().upload_max_bytes,
         ttl_seconds=get_settings().upload_ttl_seconds,
     )
-    app.include_router(build_upload_router(uploads, base_url=lambda request: str(request.base_url).rstrip("/")))
+    app.include_router(
+        build_upload_router(
+            uploads, base_url=lambda request: str(request.base_url).rstrip("/")
+        )
+    )
 
     store = snapshot_store or _default_snapshot_store()
 
     async def state_of_thread(thread_id: str) -> dict | None:
-        snapshot = await store.get(scope=get_settings().default_scope, thread_id=thread_id)
+        snapshot = await store.get(
+            scope=get_settings().default_scope, thread_id=thread_id
+        )
         state = getattr(snapshot, "state", None)
         return state if isinstance(state, dict) else None
 
-    runner = LabRunner(agent=agent or build_master_agent(), state_loader=state_of_thread)
+    runner = LabRunner(
+        agent=agent or build_master_agent(), state_loader=state_of_thread
+    )
     add_agent_framework_fastapi_endpoint(
         app,
         runner,

@@ -62,11 +62,16 @@ from demo.vision import HttpVisionClient
 
 needs_windows = pytest.mark.skipif(
     sys.platform != "win32",
-    reason="the audio fixture is synthesized with Windows SAPI (System.Speech.Synthesis)",
+    reason=(
+        "the audio fixture is synthesized with Windows SAPI (System.Speech.Synthesis)"
+    ),
 )
 needs_real_model = pytest.mark.skipif(
     not get_settings().api_key,
-    reason="OPENAI_API_KEY is empty: this test makes one real, billed call to a vision model",
+    reason=(
+        "OPENAI_API_KEY is empty: this test makes one real, "
+        "billed call to a vision model"
+    ),
 )
 pytestmark = [needs_windows, needs_real_model, pytest.mark.asyncio]
 
@@ -106,7 +111,8 @@ async def _wait_until_ready(base_url: str, process: subprocess.Popen) -> None:
             if process.poll() is not None:
                 output = process.stdout.read() if process.stdout else ""
                 raise RuntimeError(
-                    f"demo-voice-service exited early (code {process.returncode}):\n{output}"
+                    "demo-voice-service exited early "
+                    f"(code {process.returncode}):\n{output}"
                 )
             try:
                 response = await client.get(f"{base_url}/health/live")
@@ -116,12 +122,15 @@ async def _wait_until_ready(base_url: str, process: subprocess.Popen) -> None:
                 pass
             await asyncio.sleep(0.3)
     process.kill()
-    raise RuntimeError(f"demo-voice-service did not become ready within {STARTUP_TIMEOUT_S}s")
+    raise RuntimeError(
+        f"demo-voice-service did not become ready within {STARTUP_TIMEOUT_S}s"
+    )
 
 
 @pytest.fixture
 async def voice_service_url():
-    """Starts a real `demo-voice-service` (its own venv, its own process) and tears it down.
+    """Starts a real `demo-voice-service` (its own venv, its own process) and
+    tears it down.
 
     Mirrors `demo-voice-service/tests/test_agui_bridge.py`'s
     `master_agent_url` fixture, in the opposite direction: that one starts a
@@ -135,7 +144,8 @@ async def voice_service_url():
     python = _voice_service_python()
     if not python.exists():
         pytest.skip(
-            f"demo-voice-service has no synced .venv at {REPO_ROOT / 'demo-voice-service'} "
+            "demo-voice-service has no synced .venv at "
+            f"{REPO_ROOT / 'demo-voice-service'} "
             "(expected a sibling repo with `uv sync` already run)."
         )
 
@@ -147,7 +157,9 @@ async def voice_service_url():
     env = dict(os.environ)
     env["VOICE_PORT"] = str(port)
 
-    process = subprocess.Popen(
+    # Not untrusted input: the interpreter is the sibling repo's own .venv,
+    # located a few lines above, and the module name is fixed.
+    process = subprocess.Popen(  # noqa: S603
         [str(python), "-m", "voice_service"],
         cwd=str(REPO_ROOT / "demo-voice-service"),
         env=env,
@@ -202,8 +214,10 @@ $synth.SetOutputToWaveFile('{out_path}', $fmt)
 $synth.Speak('{text}')
 $synth.Dispose()
 """
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+    # Not untrusted input: the executable is Windows' own shell and the script is
+    # the literal built above, from values this test itself chose.
+    result = subprocess.run(  # noqa: S603
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],  # noqa: S607
         capture_output=True,
         text=True,
         timeout=30,
@@ -283,14 +297,14 @@ class _VideoHandler(BaseHTTPRequestHandler):
 
     video_bytes: bytes = b""
 
-    def do_GET(self) -> None:  # noqa: N802 -- BaseHTTPRequestHandler's own naming
+    def do_GET(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "video/mp4")
         self.send_header("Content-Length", str(len(self.video_bytes)))
         self.end_headers()
         self.wfile.write(self.video_bytes)
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: object) -> None:
         pass  # keep test output focused on the assertions, not access logs
 
 
@@ -322,7 +336,10 @@ async def test_the_live_answer_cites_both_the_spoken_word_and_the_visual_detail(
     `pytest -s`) -- a real model does not answer with predictable text, so
     what actually came back is worth seeing, not just asserting against.
     """
-    tools = {t.name: t for t in build_video_tools(voice_service_url, vision_client=HttpVisionClient())}
+    tools = {
+        t.name: t
+        for t in build_video_tools(voice_service_url, vision_client=HttpVisionClient())
+    }
 
     answer = await tools["analyze_video"].func(video_url=video_url)
     payload = json.loads(answer.additional_properties[DISPLAY_KEY])

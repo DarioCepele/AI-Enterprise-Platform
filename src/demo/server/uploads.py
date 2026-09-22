@@ -7,6 +7,7 @@ module is that somewhere -- a small, self-cleaning folder, not a datastore.
 Nothing here is durable by construction: an upload that is not read again
 within its TTL is gone, on purpose, consistent with the rest of the plan.
 """
+
 from __future__ import annotations
 
 import logging
@@ -137,7 +138,9 @@ class UploadStore:
         return path
 
 
-def build_upload_router(store: UploadStore, base_url: Callable[[Request], str]) -> APIRouter:
+def build_upload_router(
+    store: UploadStore, base_url: Callable[[Request], str]
+) -> APIRouter:
     """The two routes for the store above: `POST /uploads`, `GET /uploads/{id}`.
 
     `base_url` builds the URL prefix returned to the caller from the request
@@ -150,7 +153,11 @@ def build_upload_router(store: UploadStore, base_url: Callable[[Request], str]) 
     async def create_upload(request: Request) -> dict[str, str]:
         declared = request.headers.get("content-length")
         if declared and int(declared) > store.max_bytes:
-            logger.warning("Upload refused: %s bytes declared, limit %s.", declared, store.max_bytes)
+            logger.warning(
+                "Upload refused: %s bytes declared, limit %s.",
+                declared,
+                store.max_bytes,
+            )
             raise HTTPException(
                 status_code=413,
                 detail=f"upload too large: over {store.max_bytes} bytes",

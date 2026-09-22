@@ -1,9 +1,10 @@
 """Tools that produce artifacts rendered by the frontend."""
+
 from __future__ import annotations
 
 import logging
-from uuid import uuid4
 from typing import Annotated
+from uuid import uuid4
 
 from agent_framework import Content, FunctionTool, tool
 from agent_framework.ag_ui import state_update
@@ -25,7 +26,9 @@ def ui_table(
     Use this tool when you have to compare several items along common dimensions.
     """
     artifact_id = f"art_{uuid4().hex[:8]}"
-    logger.info("Table '%s' produced: %d columns, %d rows.", title, len(columns), len(rows))
+    logger.info(
+        "Table '%s' produced: %d columns, %d rows.", title, len(columns), len(rows)
+    )
     return state_update(
         text=f"I showed the table '{title}' with {len(rows)} entries.",
         tool_result={
@@ -35,13 +38,11 @@ def ui_table(
             "columns": columns,
             "rows": rows,
         },
-
         state={
-            "artifacts": [
-                {"id": artifact_id, "component": "ui-table", "title": title}
-            ]
+            "artifacts": [{"id": artifact_id, "component": "ui-table", "title": title}]
         },
     )
+
 
 def get_tools() -> list[FunctionTool]:
     """The native tools available to the master agent."""

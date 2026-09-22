@@ -11,7 +11,9 @@ from demo.server.run_context import current_thread
 
 
 def a_record(message: str = "plan written", **extra) -> logging.LogRecord:
-    record = logging.LogRecord("demo.tools", logging.INFO, __file__, 1, message, (), None)
+    record = logging.LogRecord(
+        "demo.tools", logging.INFO, __file__, 1, message, (), None
+    )
     record.__dict__.update(extra)
     return record
 
@@ -78,6 +80,8 @@ async def test_the_app_starts_with_tracing_off(monkeypatch):
     from demo.chat_clients.fake import FakeStreamingChatClient
     from demo.server.app import create_app
 
-    app = create_app(agent=build_master_agent(chat_client=FakeStreamingChatClient(chunks=["ok"])))
+    app = create_app(
+        agent=build_master_agent(chat_client=FakeStreamingChatClient(chunks=["ok"]))
+    )
 
     assert app is not None

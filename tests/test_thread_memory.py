@@ -21,6 +21,7 @@ from agent_framework import (
 from demo.agents.master import build_master_agent
 from demo.server.app import create_app
 
+
 class RecordingChatClient(BaseChatClient):
     """Records the messages received on each call, then answers a fixed text."""
 
@@ -43,13 +44,19 @@ class RecordingChatClient(BaseChatClient):
 
             async def _once() -> ChatResponse:
                 return ChatResponse(
-                    messages=[Message(role="assistant", contents=[Content.from_text(self._reply)])]
+                    messages=[
+                        Message(
+                            role="assistant", contents=[Content.from_text(self._reply)]
+                        )
+                    ]
                 )
 
             return _once()
 
         async def _stream():
-            yield ChatResponseUpdate(contents=[Content.from_text(self._reply)], role="assistant")
+            yield ChatResponseUpdate(
+                contents=[Content.from_text(self._reply)], role="assistant"
+            )
 
         return ResponseStream(_stream(), finalizer=ChatResponse.from_updates)
 
@@ -71,16 +78,18 @@ async def run_turn(app, *, thread_id: str, message_id: str, text: str) -> list[d
         "forwardedProps": {},
     }
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        async with client.stream(
+    async with (
+        httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+        client.stream(
             "POST", "/agui", json=request, headers={"Accept": "text/event-stream"}
-        ) as response:
-            assert response.status_code == 200
-            return [
-                json.loads(line[len("data: "):])
-                async for line in response.aiter_lines()
-                if line.startswith("data: ")
-            ]
+        ) as response,
+    ):
+        assert response.status_code == 200
+        return [
+            json.loads(line[len("data: "):])
+            async for line in response.aiter_lines()
+            if line.startswith("data: ")
+        ]
 
 @pytest.fixture
 def recording() -> RecordingChatClient:
@@ -92,7 +101,9 @@ def memory_app(recording: RecordingChatClient):
 
 @pytest.mark.asyncio
 async def test_second_turn_sees_the_first(memory_app, recording):
-    await run_turn(memory_app, thread_id="t1", message_id="m1", text="remember the number 4271")
+    await run_turn(
+        memory_app, thread_id="t1", message_id="m1", text="remember the number 4271"
+    )
     await run_turn(memory_app, thread_id="t1", message_id="m2", text="which number?")
 
     second_turn = recording.seen[-1]

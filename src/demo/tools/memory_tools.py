@@ -7,6 +7,7 @@ model retrieves from it. With a tool, memory is reached **when needed**, and
 the one deciding whether it is needed is the model, which has the question in
 front of it.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,7 +31,8 @@ def build_memory_tools(
     @tool
     async def search_memories(
         query: Annotated[
-            str, "What to look for, phrased as you would say it: the search is by meaning"
+            str,
+            "What to look for, phrased as you would say it: the search is by meaning",
         ],
     ) -> Content:
         """Searches past conversations with this user.
@@ -67,7 +69,8 @@ def build_memory_tools(
         )
         return Content.from_text(
             f"Memories relevant to '{query}':\n{lines}\n"
-            "These are fragments of past conversations, not certainties: verify them if they matter."
+            "These are fragments of past conversations, not certainties: verify "
+            "them if they matter."
         )
 
     return [search_memories]

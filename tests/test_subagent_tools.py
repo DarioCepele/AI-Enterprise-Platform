@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
 import pytest
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
+from demo.a2a.client import Progress
 from demo.config import SubagentConfig
 from demo.tools.subagent_tools import build_subagent_tools
 
@@ -18,12 +20,13 @@ def card(streaming: bool = True) -> AgentCard:
         version="0.1.0",
         capabilities=AgentCapabilities(streaming=streaming),
         supported_interfaces=[
-            AgentInterface(url="http://kb:8200/", protocol_binding="JSONRPC", protocol_version="1.0")
+            AgentInterface(
+                url="http://kb:8200/",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
         ],
     )
-
-
-from demo.a2a.client import Progress
 
 
 def a_progress(text: str = "", state: str = "working", raw: int = 2) -> Progress:
@@ -51,7 +54,9 @@ def tool_with(remote: FakeRemote, streaming: bool = True, loader=None):
         return card(streaming)
 
     return build_subagent_tools(
-        [KNOWLEDGE], card_loader=loader or load, client_factory=lambda config, _card: remote
+        [KNOWLEDGE],
+        card_loader=loader or load,
+        client_factory=lambda config, _card: remote,
     )[0]
 
 
@@ -232,7 +237,9 @@ async def test_the_answer_resumes_the_same_task():
 
     remote = RemoteThatResumes()
     answer_tool = tools_with(remote)[1]
-    token = current_pending.set({"task_id": "t-99", "agent": "knowledge", "question": "which?"})
+    token = current_pending.set(
+        {"task_id": "t-99", "agent": "knowledge", "question": "which?"}
+    )
     try:
         result = await answer_tool.func(answer="Go")
     finally:
@@ -255,7 +262,10 @@ async def test_resuming_clears_the_pending_state():
     finally:
         current_pending.reset(token)
 
-    assert result.additional_properties["__ag_ui_tool_result_state__"]["subagent_pending"] == {}
+    assert (
+        result.additional_properties["__ag_ui_tool_result_state__"]["subagent_pending"]
+        == {}
+    )
 
 
 @pytest.mark.asyncio
@@ -291,7 +301,9 @@ def tool_with_card(remote, token: str, extended: bool = True):
     async def load(config):
         return AgentCard(
             name="knowledge",
-            capabilities=AgentCapabilities(streaming=True, extended_agent_card=extended),
+            capabilities=AgentCapabilities(
+                streaming=True, extended_agent_card=extended
+            ),
         )
 
     return build_subagent_tools(
@@ -311,7 +323,8 @@ async def test_the_catalogue_reaches_the_tool_description():
     # The model knows what there is to ask for only because the master
     # authenticated. The description is rebuilt with the card, so the tool object
     # carries it only after the first call: from the next turn the model sees it.
-    assert remote.received_token == "secret"
+    # Not a credential: "secret" is the fixture token handed to the tool above.
+    assert remote.received_token == "secret"  # noqa: S105
     assert "go, python, rust" in the_tool.description
 
 

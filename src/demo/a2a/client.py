@@ -1,8 +1,9 @@
 """A2A client written against the stable SDK."""
+
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
@@ -12,11 +13,11 @@ from a2a.client import Client, ClientCallContext, ClientConfig, ClientFactory
 from a2a.types import (
     AgentCard,
     GetExtendedAgentCardRequest,
+    GetTaskRequest,
     Message,
     Part,
     Role,
     SendMessageConfiguration,
-    GetTaskRequest,
     SendMessageRequest,
     TaskPushNotificationConfig,
     TaskState,
@@ -104,11 +105,11 @@ async def fetch_agent_card(url: str, timeout: float = 10.0) -> AgentCard:
         return ParseDict(response.json(), AgentCard(), ignore_unknown_fields=True)
 
 
-def _text_of(parts) -> str:
+def _text_of(parts: Iterable[Any]) -> str:
     return "".join(part.text for part in parts if part.text)
 
 
-def _artifact_of(artifact) -> Artifact:
+def _artifact_of(artifact: Any) -> Artifact:
     data = None
     for part in artifact.parts:
         if part.HasField("data"):
@@ -128,7 +129,9 @@ def _artifact_of(artifact) -> Artifact:
 class A2AClient:
     """Talks to a remote agent while seeing the task's lifecycle."""
 
-    def __init__(self, card: AgentCard, http_client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self, card: AgentCard, http_client: httpx.AsyncClient | None = None
+    ) -> None:
         self._http = http_client or httpx.AsyncClient(timeout=120.0)
         self._client: Client = ClientFactory(
             ClientConfig(httpx_client=self._http, streaming=True)
@@ -161,7 +164,9 @@ class A2AClient:
             url, token = webhook
             request.configuration.CopyFrom(
                 SendMessageConfiguration(
-                    task_push_notification_config=TaskPushNotificationConfig(url=url, token=token)
+                    task_push_notification_config=TaskPushNotificationConfig(
+                        url=url, token=token
+                    )
                 )
             )
 
@@ -177,14 +182,18 @@ class A2AClient:
                     context_id=conversation,
                     state=STATES.get(task.status.state, "unknown"),
                     raw_state=task.status.state,
-                    text=_text_of(task.status.message.parts) if task.status.message.parts else "",
+                    text=_text_of(task.status.message.parts)
+                    if task.status.message.parts
+                    else "",
                 )
             elif response.HasField("status_update"):
                 update = response.status_update
                 current = update.task_id or current
                 conversation = update.context_id or conversation
                 update_message = update.status.message
-                update_text = _text_of(update_message.parts) if update_message.parts else ""
+                update_text = (
+                    _text_of(update_message.parts) if update_message.parts else ""
+                )
                 yield Progress(
                     task_id=current,
                     context_id=conversation,
@@ -196,15 +205,15 @@ class A2AClient:
                     else "",
                 )
             elif response.HasField("artifact_update"):
-                update = response.artifact_update
-                current = update.task_id or current
-                conversation = update.context_id or conversation
+                artifact_update = response.artifact_update
+                current = artifact_update.task_id or current
+                conversation = artifact_update.context_id or conversation
                 yield Progress(
                     task_id=current,
                     context_id=conversation,
                     state=STATES[TaskState.TASK_STATE_WORKING],
                     raw_state=TaskState.TASK_STATE_WORKING,
-                    artifact=_artifact_of(update.artifact),
+                    artifact=_artifact_of(artifact_update.artifact),
                 )
             elif response.HasField("message"):
                 yield Progress(
@@ -223,7 +232,9 @@ class A2AClient:
         A caller without the right receives an error, and in that case we go on
         with the public card instead of stopping.
         """
-        context = ClientCallContext(service_parameters={"Authorization": f"Bearer {token}"})
+        context = ClientCallContext(
+            service_parameters={"Authorization": f"Bearer {token}"}
+        )
         try:
             return await self._client.get_extended_agent_card(
                 GetExtendedAgentCardRequest(), context=context

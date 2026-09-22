@@ -6,6 +6,7 @@ that is deliberately all -- answering a clarification or approving a step is
 something a **person** does, in the panel, because those are the moments the
 process stopped to ask somebody.
 """
+
 from __future__ import annotations
 
 import json
@@ -46,7 +47,9 @@ def build_process_tools(service_url: str, scope: str) -> list[FunctionTool]:
 
     async def call(method: str, path: str, payload: Any = None) -> Any:
         async with httpx.AsyncClient(timeout=TIMEOUT) as http:
-            response = await http.request(method, f"{base}{path}", json=payload, headers=headers)
+            response = await http.request(
+                method, f"{base}{path}", json=payload, headers=headers
+            )
         if response.status_code >= 400:
             said = _detail(response)
             raise RuntimeError(said)
@@ -68,7 +71,8 @@ def build_process_tools(service_url: str, scope: str) -> list[FunctionTool]:
         if not processes:
             return Content.from_text("No process is defined in the service.")
         listing = ", ".join(
-            f"{item['id']}@{item['version']} ({item['steps']} steps)" for item in processes
+            f"{item['id']}@{item['version']} ({item['steps']} steps)"
+            for item in processes
         )
         logger.info("Process catalogue: %d definitions.", len(processes))
         return Content.from_text(f"Processes that can be started: {listing}.")
@@ -153,9 +157,8 @@ def build_process_tools(service_url: str, scope: str) -> list[FunctionTool]:
             if step["status"] in ("waiting_human", "waiting_approval")
         ]
         for step in waiting:
-            lines.append(
-                f"Step '{step['step_id']}' is waiting: {step.get('question') or 'no question given'}"
-            )
+            question = step.get("question") or "no question given"
+            lines.append(f"Step '{step['step_id']}' is waiting: {question}")
         if waiting:
             # The agent must not answer in the user's place, and must not
             # pretend it can: this is a person's decision, in the panel.
@@ -164,7 +167,9 @@ def build_process_tools(service_url: str, scope: str) -> list[FunctionTool]:
                 "pass the question on instead of deciding."
             )
 
-        done = sum(1 for step in instance.get("steps", []) if step["status"] == "completed")
+        done = sum(
+            1 for step in instance.get("steps", []) if step["status"] == "completed"
+        )
         lines.append(f"{done} of {len(instance.get('steps', []))} steps completed.")
         logger.info("Instance %s read: %s.", instance_id[:8], status)
         return Content.from_text("\n".join(lines))
@@ -178,6 +183,6 @@ def _detail(response: httpx.Response) -> str:
         said = response.json()
     except ValueError:
         return f"{response.status_code} {response.reason_phrase}"
-    if isinstance(said, dict) and isinstance(said.get("detail"), str):
-        return said["detail"]
+    if isinstance(said, dict) and isinstance(detail := said.get("detail"), str):
+        return detail
     return f"{response.status_code} {response.reason_phrase}"

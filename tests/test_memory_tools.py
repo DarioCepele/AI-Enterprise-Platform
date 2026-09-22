@@ -11,7 +11,12 @@ from demo.tools.memory_tools import build_memory_tools
 
 MEMORIES = {
     "memories": [
-        {"thread_id": "t9", "seq": 4, "text": "the contact is Marta", "similarity": 0.83},
+        {
+            "thread_id": "t9",
+            "seq": 4,
+            "text": "the contact is Marta",
+            "similarity": 0.83,
+        },
         {"thread_id": "t9", "seq": 7, "text": "budget 18k", "similarity": 0.61},
     ]
 }

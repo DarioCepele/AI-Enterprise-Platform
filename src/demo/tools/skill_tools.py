@@ -3,6 +3,7 @@
 The format is the open one the ecosystem adopted, not a registry of our own:
 a skill written here travels elsewhere without being rewritten.
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,12 +21,14 @@ _FRONTMATTER = re.compile(r"\A---\s*\n(?P<meta>.*?)\n---\s*\n(?P<body>.*)\Z", re
 
 _FIELD = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*):\s*(?P<value>.*)$")
 
+
 def parse_skill(text: str) -> dict[str, str]:
     """Splits a SKILL.md into metadata and body. Raises if the shape is wrong."""
     match = _FRONTMATTER.match(text)
     if match is None:
         raise ValueError(
-            "SKILL.md without frontmatter: a --- block is required at the top of the file"
+            "SKILL.md without frontmatter: a --- block is required at the top "
+            "of the file"
         )
 
     meta: dict[str, str] = {}
@@ -48,6 +51,7 @@ def parse_skill(text: str) -> dict[str, str]:
         "body": match.group("body").strip(),
     }
 
+
 def list_skills(root: Path = SKILLS_DIR) -> list[dict[str, Any]]:
     """The available skills, sorted by name. A broken skill raises right away."""
     found = []
@@ -55,6 +59,7 @@ def list_skills(root: Path = SKILLS_DIR) -> list[dict[str, Any]]:
         parsed = parse_skill(skill_file.read_text(encoding="utf-8"))
         found.append(parsed)
     return found
+
 
 def build_skill_tools(root: Path = SKILLS_DIR) -> list[FunctionTool]:
     """The load_skill tool, bound to a folder of skills.

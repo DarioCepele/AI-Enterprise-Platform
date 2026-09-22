@@ -10,7 +10,7 @@ which every model can read (and later pass back as a tool argument).
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -47,7 +47,9 @@ class RecordingChatClient(FakeStreamingChatClient):
         **kwargs: Any,
     ) -> Any:
         self._seen.append(list(messages))
-        return super()._inner_get_response(messages=messages, stream=stream, options=options, **kwargs)
+        return super()._inner_get_response(
+            messages=messages, stream=stream, options=options, **kwargs
+        )
 
 
 def _all_text(messages: list[Message]) -> str:
@@ -63,13 +65,15 @@ def _all_text(messages: list[Message]) -> str:
 async def _run(request: dict[str, Any], seen: list[list[Message]]) -> None:
     app = create_app(agent=build_master_agent(chat_client=RecordingChatClient(seen)))
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        async with client.stream(
+    async with (
+        httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+        client.stream(
             "POST", "/agui", json=request, headers={"Accept": "text/event-stream"}
-        ) as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    json.loads(line[len("data: "):])
+        ) as response,
+    ):
+        async for line in response.aiter_lines():
+            if line.startswith("data: "):
+                json.loads(line[len("data: "):])
 
 
 def _request(thread_id: str, content: Any) -> dict[str, Any]:

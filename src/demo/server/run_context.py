@@ -1,4 +1,5 @@
 """The state that lives as long as a run, and not as long as the process."""
+
 from __future__ import annotations
 
 import asyncio
@@ -22,13 +23,15 @@ from .attachments import annotate_video_audio_attachments
 
 logger = logging.getLogger(__name__)
 
-current_run_events: contextvars.ContextVar[asyncio.Queue | None] = contextvars.ContextVar(
-    "current_run_events", default=None
+current_run_events: contextvars.ContextVar[asyncio.Queue | None] = (
+    contextvars.ContextVar("current_run_events", default=None)
 )
 current_plan: contextvars.ContextVar[PlanStore | None] = contextvars.ContextVar(
     "current_plan", default=None
 )
-current_thread: contextvars.ContextVar[str] = contextvars.ContextVar("current_thread", default="")
+current_thread: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "current_thread", default=""
+)
 current_pending: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "current_pending", default=None
 )
@@ -40,6 +43,7 @@ def _pending_from(input_data: dict[str, Any]) -> dict[str, Any] | None:
     state = input_data.get("state") or {}
     waiting = state.get("subagent_pending") if isinstance(state, dict) else None
     return waiting if isinstance(waiting, dict) and waiting else None
+
 
 _END = object()
 
@@ -91,7 +95,9 @@ async def subagent_run(
             await queue.put(SubagentFinishedEvent(subagent_run_id=run_id))
 
 
-def plan_from_state(input_data: dict[str, Any], stored: dict[str, Any] | None = None) -> PlanStore:
+def plan_from_state(
+    input_data: dict[str, Any], stored: dict[str, Any] | None = None
+) -> PlanStore:
     if stored:
         return PlanStore(stored)
     state = input_data.get("state") or {}
@@ -106,11 +112,15 @@ class LabRunner(AgentFrameworkAgent):
     Subagent events are interleaved with the framework's own.
     """
 
-    def __init__(self, *args: Any, state_loader: StateLoader | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self, *args: Any, state_loader: StateLoader | None = None, **kwargs: Any
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._state_loader = state_loader
 
-    def _framework_events(self, input_data: dict[str, Any]) -> AsyncGenerator[BaseEvent, None]:
+    def _framework_events(
+        self, input_data: dict[str, Any]
+    ) -> AsyncGenerator[BaseEvent, None]:
         return super().run(input_data)
 
     async def _stored_state(self, input_data: dict[str, Any]) -> dict[str, Any] | None:
@@ -137,12 +147,17 @@ class LabRunner(AgentFrameworkAgent):
             # text too means the model deciding which tools to call can always
             # read and reuse it, regardless of what the client does with the raw
             # media content.
-            input_data = {**input_data, "messages": annotate_video_audio_attachments(raw_messages)}
+            input_data = {
+                **input_data,
+                "messages": annotate_video_audio_attachments(raw_messages),
+            }
 
         queue: asyncio.Queue = asyncio.Queue()
         stored_state = await self._stored_state(input_data)
         plan = plan_from_state(input_data, (stored_state or {}).get("plan"))
-        pending = (stored_state or {}).get("subagent_pending") or _pending_from(input_data)
+        pending = (stored_state or {}).get("subagent_pending") or _pending_from(
+            input_data
+        )
 
         async def pump() -> None:
             events_token = current_run_events.set(queue)

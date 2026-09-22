@@ -24,7 +24,7 @@ import logging
 import threading
 from collections import deque
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ MAX_LOG_EVENTS = 500
 
 
 def _timestamp(record: logging.LogRecord) -> str:
-    return datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(
+    return datetime.fromtimestamp(record.created, tz=UTC).isoformat(
         timespec="milliseconds"
     )
 
@@ -47,8 +47,14 @@ class _CollectingHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         message = record.getMessage()
         if record.exc_info:
-
-            message = f"{message}\n{self.formatter.formatException(record.exc_info)}"
+            # `logging.Handler.formatter` is typed `Formatter | None` because
+            # the base class allows a handler with none set -- this one
+            # always gets one via `setFormatter` right after construction
+            # (see `LogCollector.__init__`), but fall back to a plain one
+            # rather than assume it, so a future call site that skips
+            # `setFormatter` degrades instead of raising.
+            formatter = self.formatter or logging.Formatter()
+            message = f"{message}\n{formatter.formatException(record.exc_info)}"
 
         self._collector.append(
             {
@@ -90,7 +96,10 @@ class LogCollector:
             self._forward = sink
 
     def attach(self) -> None:
-        """Attaches the collector to the `demo` logger. Calling it twice does not duplicate."""
+        """Attaches the collector to the `demo` logger.
+
+        Calling it twice does not duplicate.
+        """
         if self._handler is not None:
             return
         self._handler = _CollectingHandler(self)
@@ -112,7 +121,7 @@ class LogCollector:
 
     def since(self, cursor: str) -> dict[str, Any]:
         """The lines after `cursor`, the new cursor, and how many were lost."""
-        seen = int(cursor) if cursor else 0
+        seen = int(cursor) if cursor.isdigit() else 0
         with self._lock:
             entries = [dict(e) for e in self._entries if e["seq"] > seen]
             oldest_kept = self._entries[0]["seq"] if self._entries else self._next_seq
@@ -184,7 +193,8 @@ class SharedLogStream:
                 )
         except Exception:
             logger.warning(
-                "%d logs not published to the shared stream: they stay in this replica.",
+                "%d logs not published to the shared stream: they stay in "
+                "this replica.",
                 len(batch),
                 exc_info=True,
             )
@@ -220,7 +230,13 @@ class SharedLogStream:
             oldest = (await reader.fetchone())[0]
 
         entries = [
-            {"seq": int(row[0]), "ts": row[1], "level": row[2], "source": row[3], "message": row[4]}
+            {
+                "seq": int(row[0]),
+                "ts": row[1],
+                "level": row[2],
+                "source": row[3],
+                "message": row[4],
+            }
             for row in rows
         ]
         # What the reader asked for and will never see: the lines trimmed away

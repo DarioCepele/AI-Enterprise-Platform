@@ -30,7 +30,8 @@ def _test_database(dsn: str | None) -> str | None:
 POSTGRES_DSN = _test_database(os.getenv("DEMO_POSTGRES_DSN"))
 
 needs_postgres = pytest.mark.skipif(
-    not POSTGRES_DSN, reason="DEMO_POSTGRES_DSN is required: this test needs a real Postgres"
+    not POSTGRES_DSN,
+    reason="DEMO_POSTGRES_DSN is required: this test needs a real Postgres",
 )
 
 pytestmark = [needs_postgres, pytest.mark.asyncio]
@@ -52,7 +53,9 @@ def _create_database_if_missing(dsn: str) -> None:
 @pytest.fixture
 async def pool():
     _create_database_if_missing(POSTGRES_DSN or "")
-    connection_pool = AsyncConnectionPool(POSTGRES_DSN or "", min_size=1, max_size=4, open=False)
+    connection_pool = AsyncConnectionPool(
+        POSTGRES_DSN or "", min_size=1, max_size=4, open=False
+    )
     await connection_pool.open(wait=True)
     try:
         async with connection_pool.connection() as connection:
@@ -82,14 +85,21 @@ async def test_two_replicas_are_read_through_one_cursor(pool):
     first, first_stream = a_replica(pool)
     second, second_stream = a_replica(pool)
 
-    first.append({"ts": "t", "level": "INFO", "source": "a", "message": "from the first"})
-    second.append({"ts": "t", "level": "INFO", "source": "b", "message": "from the second"})
+    first.append(
+        {"ts": "t", "level": "INFO", "source": "a", "message": "from the first"}
+    )
+    second.append(
+        {"ts": "t", "level": "INFO", "source": "b", "message": "from the second"}
+    )
     await first_stream.flush()
     await second_stream.flush()
 
     page = await first_stream.since("")
 
-    assert [entry["message"] for entry in page["entries"]] == ["from the first", "from the second"]
+    assert [entry["message"] for entry in page["entries"]] == [
+        "from the first",
+        "from the second",
+    ]
 
 
 async def test_the_cursor_does_not_repeat_what_was_already_read(pool):
@@ -118,7 +128,9 @@ async def test_a_trimmed_window_keeps_the_last_lines(pool):
     collector, stream = a_replica(pool, maxlen=2)
 
     for i in range(5):
-        collector.append({"ts": "t", "level": "INFO", "source": "a", "message": f"line {i}"})
+        collector.append(
+            {"ts": "t", "level": "INFO", "source": "a", "message": f"line {i}"}
+        )
         await stream.flush()
 
     page = await stream.since("")
@@ -136,7 +148,9 @@ async def test_the_lines_lost_between_two_reads_are_counted(pool):
     seen = await stream.since("")
 
     for i in range(1, 5):
-        collector.append({"ts": "t", "level": "INFO", "source": "a", "message": f"line {i}"})
+        collector.append(
+            {"ts": "t", "level": "INFO", "source": "a", "message": f"line {i}"}
+        )
         await stream.flush()
 
     page = await stream.since(seen["cursor"])
@@ -168,7 +182,9 @@ async def test_the_drain_task_publishes_without_being_asked(pool):
     collector, stream = a_replica(pool, flush_seconds=0.01)
 
     async with stream.running():
-        collector.append({"ts": "t", "level": "INFO", "source": "a", "message": "published"})
+        collector.append(
+            {"ts": "t", "level": "INFO", "source": "a", "message": "published"}
+        )
         await asyncio.sleep(0.1)
         page = await stream.since("")
 

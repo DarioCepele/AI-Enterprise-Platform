@@ -2,6 +2,7 @@ import json
 
 from demo.tools.ui_tools import DISPLAY_KEY, STATE_KEY, get_tools, ui_table
 
+
 def test_get_tools_exposes_ui_table():
     names = [t.name for t in get_tools()]
     assert "ui_table" in names

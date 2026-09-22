@@ -105,20 +105,26 @@ async def test_a_second_run_does_not_inherit_the_first_plan():
             "forwardedProps": {},
         }
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            async with client.stream(
+        async with (
+            httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+            client.stream(
                 "POST", "/agui", json=request, headers={"Accept": "text/event-stream"}
-            ) as response:
-                return [
-                    json.loads(line[len("data: "):])
-                    async for line in response.aiter_lines()
-                    if line.startswith("data: ")
-                ]
+            ) as response,
+        ):
+            return [
+                json.loads(line[len("data: "):])
+                async for line in response.aiter_lines()
+                if line.startswith("data: ")
+            ]
 
     await run_once(
-        "t1", "todo_write", {"steps": [{"id": 1, "title": "Step", "detail": "", "source": ""}]}
+        "t1",
+        "todo_write",
+        {"steps": [{"id": 1, "title": "Step", "detail": "", "source": ""}]},
     )
-    events = await run_once("t2", "todo_set_status", {"step_id": 1, "status": "completed"})
+    events = await run_once(
+        "t2", "todo_set_status", {"step_id": 1, "status": "completed"}
+    )
 
     plans = [
         e["snapshot"]["plan"]
@@ -164,20 +170,26 @@ async def test_a_shared_store_does_leak_which_is_why_it_is_not_the_default():
             "forwardedProps": {},
         }
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            async with client.stream(
+        async with (
+            httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+            client.stream(
                 "POST", "/agui", json=request, headers={"Accept": "text/event-stream"}
-            ) as response:
-                return [
-                    json.loads(line[len("data: "):])
-                    async for line in response.aiter_lines()
-                    if line.startswith("data: ")
-                ]
+            ) as response,
+        ):
+            return [
+                json.loads(line[len("data: "):])
+                async for line in response.aiter_lines()
+                if line.startswith("data: ")
+            ]
 
     await run_once(
-        "t1", "todo_write", {"steps": [{"id": 1, "title": "Step", "detail": "", "source": ""}]}
+        "t1",
+        "todo_write",
+        {"steps": [{"id": 1, "title": "Step", "detail": "", "source": ""}]},
     )
-    events = await run_once("t2", "todo_set_status", {"step_id": 1, "status": "completed"})
+    events = await run_once(
+        "t2", "todo_set_status", {"step_id": 1, "status": "completed"}
+    )
 
     completed = [
         step
