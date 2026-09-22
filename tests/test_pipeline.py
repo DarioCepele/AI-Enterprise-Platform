@@ -12,7 +12,8 @@ the "turn ends mid-stream" behaviour a live conversation needs.
 from __future__ import annotations
 
 import wave
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 
 from starlette.testclient import TestClient
@@ -28,7 +29,8 @@ RECEIVE_TIMEOUT_S = 90  # generous: first call loads Silero + faster-whisper on 
 
 
 def _load_pcm16_bytes(path: Path) -> bytes:
-    """Reads a 16-bit PCM wav's raw frames, no resampling (fixture is already 16kHz mono)."""
+    """Reads a 16-bit PCM wav's raw frames, no resampling
+    (fixture is already 16kHz mono)."""
     with wave.open(str(path), "rb") as wav_file:
         assert wav_file.getsampwidth() == 2, "fixture must be 16-bit PCM"
         assert wav_file.getnchannels() == 1, "fixture must be mono"
@@ -52,10 +54,10 @@ def test_streamed_turn_produces_a_user_transcript():
             future = pool.submit(websocket.receive_json)
             try:
                 message = future.result(timeout=RECEIVE_TIMEOUT_S)
-            except FutureTimeoutError:
+            except FutureTimeoutError as err:
                 raise AssertionError(
                     f"no user_transcript message received within {RECEIVE_TIMEOUT_S}s"
-                )
+                ) from err
 
     assert message["type"] == "user_transcript"
     assert EXPECTED_PHRASE in message["text"].lower()

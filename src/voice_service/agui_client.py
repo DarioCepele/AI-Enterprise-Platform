@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import httpx
@@ -67,8 +67,9 @@ class AGUIBridgeClient:
         reply_parts = [chunk async for chunk in self.stream_turn(text)]
         return "".join(reply_parts)
 
-    async def stream_turn(self, text: str) -> AsyncIterator[str]:
-        """Sends `text` as a user message and yields the assistant's reply incrementally.
+    async def stream_turn(self, text: str) -> AsyncGenerator[str, None]:
+        """Sends `text` as a user message and yields the assistant's reply
+        incrementally.
 
         Consumes the run's SSE stream *as it arrives* and never waits for
         `RUN_FINISHED` before yielding -- that is the point of this method
@@ -108,29 +109,31 @@ class AGUIBridgeClient:
             "forwardedProps": {},
         }
         buffer = ""
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-            async with client.stream(
+        async with (
+            httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client,
+            client.stream(
                 "POST",
                 AGUI_PATH,
                 json=request_body,
                 headers={"Accept": "text/event-stream"},
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
+            ) as response,
+        ):
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                event = json.loads(line[len("data: ") :])
+                event_type = event.get("type")
+                if event_type == "TEXT_MESSAGE_CONTENT":
+                    delta = event.get("delta")
+                    if not delta:
                         continue
-                    event = json.loads(line[len("data: ") :])
-                    event_type = event.get("type")
-                    if event_type == "TEXT_MESSAGE_CONTENT":
-                        delta = event.get("delta")
-                        if not delta:
-                            continue
-                        buffer += delta
-                        buffer, sentences = _pop_complete_sentences(buffer)
-                        for sentence in sentences:
-                            yield sentence
-                    elif event_type == "RUN_ERROR":
-                        raise AGUIRunError(event.get("message") or "AG-UI run failed")
+                    buffer += delta
+                    buffer, sentences = _pop_complete_sentences(buffer)
+                    for sentence in sentences:
+                        yield sentence
+                elif event_type == "RUN_ERROR":
+                    raise AGUIRunError(event.get("message") or "AG-UI run failed")
 
         if buffer:
             yield buffer

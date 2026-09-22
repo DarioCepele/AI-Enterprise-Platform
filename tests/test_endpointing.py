@@ -30,7 +30,8 @@ This module has two kinds of test:
 from __future__ import annotations
 
 import wave
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 
 from starlette.testclient import TestClient
@@ -48,12 +49,14 @@ from voice_service.pipeline import (
 FIXTURES = Path(__file__).parent / "fixtures"
 MIDPAUSE_FIXTURE = FIXTURES / "speech_en_midpause.wav"
 
-CHUNK_BYTES = 3_200  # 100ms of 16kHz mono 16-bit PCM -- same slice size as the other ws tests
+# 100ms of 16kHz mono 16-bit PCM -- same slice size as the other ws tests
+CHUNK_BYTES = 3_200
 RECEIVE_TIMEOUT_S = 90  # generous: first call loads Silero + faster-whisper on CPU
 
 
 def _load_pcm16_bytes(path: Path) -> bytes:
-    """Reads a 16-bit PCM wav's raw frames, no resampling (fixture is already 16kHz mono)."""
+    """Reads a 16-bit PCM wav's raw frames, no resampling
+    (fixture is already 16kHz mono)."""
     with wave.open(str(path), "rb") as wav_file:
         assert wav_file.getsampwidth() == 2, "fixture must be 16-bit PCM"
         assert wav_file.getnchannels() == 1, "fixture must be mono"
@@ -68,8 +71,8 @@ def _recv_json_with_timeout(websocket, timeout: float = RECEIVE_TIMEOUT_S) -> di
         future = pool.submit(websocket.receive_json)
         try:
             return future.result(timeout=timeout)
-        except FutureTimeoutError:
-            raise AssertionError(f"no message received within {timeout}s")
+        except FutureTimeoutError as err:
+            raise AssertionError(f"no message received within {timeout}s") from err
 
 
 # --- Settings/pipeline wiring -------------------------------------------------
@@ -119,10 +122,13 @@ def test_build_voice_pipeline_keeps_old_defaults_with_no_arguments():
 
     endpointing_stage = pipeline.processors[1]
     assert endpointing_stage._silence_threshold_s == SILENCE_THRESHOLD_S == 0.6
-    assert endpointing_stage._analysis_window_samples == int(ANALYSIS_WINDOW_S * SAMPLE_RATE)
+    assert endpointing_stage._analysis_window_samples == int(
+        ANALYSIS_WINDOW_S * SAMPLE_RATE
+    )
 
 
-# --- The known limitation: silence-only endpointing cuts a natural mid-sentence pause ---
+# --- The known limitation: silence-only endpointing cuts a natural
+#     mid-sentence pause ---
 
 
 def test_a_midsentence_pause_longer_than_the_silence_threshold_splits_the_turn_in_two():

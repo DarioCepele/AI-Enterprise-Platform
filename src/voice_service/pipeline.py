@@ -36,17 +36,25 @@ import tempfile
 import uuid
 import wave
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
-
-from pipecat.frames.frames import DataFrame, InputAudioRawFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    DataFrame,
+    Frame,
+    InputAudioRawFrame,
+    TranscriptionFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from .stt import transcribe
 from .vad import contains_speech
+
+if TYPE_CHECKING:
+    from pipecat.transcriptions.language import Language
 
 SAMPLE_RATE = 16_000
 """PCM16 mono sample rate this pipeline (and `/ws/voice`) expects."""
@@ -89,8 +97,8 @@ class TurnEndpointingProcessor(FrameProcessor):
         sample_rate: int = SAMPLE_RATE,
         analysis_window_s: float = ANALYSIS_WINDOW_S,
         silence_threshold_s: float = SILENCE_THRESHOLD_S,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._sample_rate = sample_rate
         self._analysis_window_samples = max(1, int(analysis_window_s * sample_rate))
@@ -101,7 +109,7 @@ class TurnEndpointingProcessor(FrameProcessor):
         self._speech_seen = False
         self._silence_run_s = 0.0
 
-    async def process_frame(self, frame, direction: FrameDirection):
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InputAudioRawFrame):
@@ -120,9 +128,13 @@ class TurnEndpointingProcessor(FrameProcessor):
             await self._analyze_chunk(chunk)
 
     async def _analyze_chunk(self, chunk_bytes: bytes) -> None:
-        samples = np.frombuffer(chunk_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        samples = (
+            np.frombuffer(chunk_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        )
         # contains_speech() runs Silero inference -- keep it off the event loop.
-        has_speech = await asyncio.to_thread(contains_speech, samples, self._sample_rate)
+        has_speech = await asyncio.to_thread(
+            contains_speech, samples, self._sample_rate
+        )
         chunk_duration_s = len(samples) / self._sample_rate
 
         if has_speech:
@@ -141,18 +153,22 @@ class TurnEndpointingProcessor(FrameProcessor):
         self._speech_seen = False
         self._silence_run_s = 0.0
 
-        await self.push_frame(EndOfTurnAudioFrame(audio=turn_audio, sample_rate=self._sample_rate))
+        await self.push_frame(
+            EndOfTurnAudioFrame(audio=turn_audio, sample_rate=self._sample_rate)
+        )
 
 
 class TranscriptionProcessor(FrameProcessor):
     """Transcribes a finished turn's audio and emits a `TranscriptionFrame`."""
 
-    def __init__(self, *, language: str | None = None, user_id: str = "user", **kwargs):
+    def __init__(
+        self, *, language: str | None = None, user_id: str = "user", **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._language = language
         self._user_id = user_id
 
-    async def process_frame(self, frame, direction: FrameDirection):
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
 
         if isinstance(frame, EndOfTurnAudioFrame):
@@ -164,7 +180,8 @@ class TranscriptionProcessor(FrameProcessor):
         if not frame.audio:
             return
 
-        tmp_path = Path(tempfile.gettempdir()) / f"voice-service-turn-{uuid.uuid4().hex}.wav"
+        tmp_name = f"voice-service-turn-{uuid.uuid4().hex}.wav"
+        tmp_path = Path(tempfile.gettempdir()) / tmp_name
         try:
             _write_pcm16_wav(tmp_path, frame.audio, frame.sample_rate)
             # faster-whisper inference -- keep it off the event loop too.
@@ -177,15 +194,20 @@ class TranscriptionProcessor(FrameProcessor):
                 TranscriptionFrame(
                     text=text,
                     user_id=self._user_id,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    language=self._language,
+                    timestamp=datetime.now(UTC).isoformat(),
+                    # Pipecat types this as its `Language` StrEnum; what we
+                    # hold is the same ISO 639-1 string (or None), passed
+                    # through unchanged as it always has been.
+                    language=cast("Language | None", self._language),
                     finalized=True,
                 )
             )
 
 
 def _write_pcm16_wav(path: Path, pcm_bytes: bytes, sample_rate: int) -> None:
-    """Writes raw 16-bit PCM mono audio as a wav file `voice_service.stt.transcribe` can read."""
+    """Writes raw 16-bit PCM mono audio as a wav file `voice_service.stt.transcribe`
+    can read.
+    """
     with wave.open(str(path), "wb") as wav_file:
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)

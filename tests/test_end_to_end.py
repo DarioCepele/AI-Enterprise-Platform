@@ -39,14 +39,11 @@ from __future__ import annotations
 
 import asyncio
 import wave
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 
 from starlette.testclient import TestClient
-
-from voice_service.agui_client import AGUIBridgeClient
-from voice_service.api import create_app
-from voice_service.config import Settings
 
 # Re-exported as a fixture by importing it: pytest resolves fixtures by name
 # in the requesting module's namespace, so this makes `master_agent_url`
@@ -54,15 +51,21 @@ from voice_service.config import Settings
 # with no copy of the subprocess-management code.
 from test_agui_bridge import master_agent_url  # noqa: F401
 
+from voice_service.agui_client import AGUIBridgeClient
+from voice_service.api import create_app
+from voice_service.config import Settings
+
 FIXTURES = Path(__file__).parent / "fixtures"
 SPEECH_FIXTURE = FIXTURES / "speech_en.wav"
 
-CHUNK_BYTES = 3_200  # 100ms of 16kHz mono 16-bit PCM -- same slice size as test_pipeline.py
+# 100ms of 16kHz mono 16-bit PCM -- same slice size as test_pipeline.py
+CHUNK_BYTES = 3_200
 RECEIVE_TIMEOUT_S = 90  # generous: first call loads Silero + faster-whisper on CPU
 
 
 def _load_pcm16_bytes(path: Path) -> bytes:
-    """Reads a 16-bit PCM wav's raw frames, no resampling (fixture is already 16kHz mono)."""
+    """Reads a 16-bit PCM wav's raw frames, no resampling
+    (fixture is already 16kHz mono)."""
     with wave.open(str(path), "rb") as wav_file:
         assert wav_file.getsampwidth() == 2, "fixture must be 16-bit PCM"
         assert wav_file.getnchannels() == 1, "fixture must be mono"
@@ -77,11 +80,13 @@ def _recv_json_with_timeout(websocket, timeout: float = RECEIVE_TIMEOUT_S) -> di
         future = pool.submit(websocket.receive_json)
         try:
             return future.result(timeout=timeout)
-        except FutureTimeoutError:
-            raise AssertionError(f"no message received within {timeout}s")
+        except FutureTimeoutError as err:
+            raise AssertionError(f"no message received within {timeout}s") from err
 
 
-def test_voice_and_text_paths_produce_the_identical_assistant_reply(master_agent_url):
+def test_voice_and_text_paths_produce_the_identical_assistant_reply(
+    master_agent_url,  # noqa: F811 -- the parameter name *is* how pytest resolves the fixture
+):
     """Path (a): the fixture audio through `/ws/voice`. Path (b): its transcript,
     sent as plain text straight to `demo-master-agent`'s AG-UI endpoint. Both
     must produce the exact same reply string.

@@ -28,8 +28,20 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from pipecat.frames.frames import EndFrame, InputAudioRawFrame, TranscriptionFrame
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from pipecat.frames.frames import (
+    EndFrame,
+    Frame,
+    InputAudioRawFrame,
+    TranscriptionFrame,
+)
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.workers.runner import WorkerRunner
 
@@ -68,7 +80,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/transcribe")
-    async def transcribe(file: UploadFile = File(...)) -> dict[str, str]:
+    async def transcribe(
+        file: UploadFile = File(...),  # noqa: B008 -- FastAPI's documented pattern for multipart uploads
+    ) -> dict[str, str]:
         """Transcribes one whole audio file, uploaded as `multipart/form-data`.
 
         Distinct from `/ws/voice`: this is a batch, "one file in, one
@@ -98,7 +112,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="Uploaded file is empty")
 
         suffix = Path(file.filename).suffix if file.filename else ".wav"
-        tmp_path = Path(tempfile.gettempdir()) / f"voice-service-transcribe-{uuid.uuid4().hex}{suffix}"
+        tmp_name = f"voice-service-transcribe-{uuid.uuid4().hex}{suffix}"
+        tmp_path = Path(tempfile.gettempdir()) / tmp_name
         try:
             tmp_path.write_bytes(audio_bytes)
             # faster-whisper inference is CPU-bound -- keep it off the event loop.
@@ -171,7 +186,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             analysis_window_s=config.analysis_window_s,
             silence_threshold_s=config.silence_threshold_s,
         )
-        worker = PipelineWorker(pipeline, params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE))
+        worker_params = PipelineParams(audio_in_sample_rate=SAMPLE_RATE)
+        worker = PipelineWorker(pipeline, params=worker_params)
         worker.add_reached_downstream_filter((TranscriptionFrame,))
         bridge = AGUIBridgeClient(config.master_agent_url)
 
@@ -184,8 +200,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         current_turn = 0
         send_lock = asyncio.Lock()
 
-        @worker.event_handler("on_frame_reached_downstream")
-        async def _send_transcript(_worker: PipelineWorker, frame) -> None:
+        # pipecat's `event_handler` is itself untyped, so mypy cannot see that
+        # the handler below stays typed once decorated.
+        @worker.event_handler("on_frame_reached_downstream")  # type: ignore[untyped-decorator]
+        async def _send_transcript(_worker: PipelineWorker, frame: Frame) -> None:
             nonlocal current_turn
             if not isinstance(frame, TranscriptionFrame):
                 return
@@ -194,7 +212,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             my_turn = current_turn
 
             async with send_lock:
-                await websocket.send_json({"type": "user_transcript", "text": frame.text})
+                await websocket.send_json(
+                    {"type": "user_transcript", "text": frame.text}
+                )
 
             reply = bridge.stream_turn(frame.text)
             superseded = False
@@ -210,7 +230,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if superseded:
                         break
 
-                    # Kokoro inference is CPU-bound and synchronous -- keep it off the event loop.
+                    # Kokoro inference is CPU-bound and synchronous -- keep it off
+                    # the event loop.
                     audio_bytes = await asyncio.to_thread(synthesize_speech, sentence)
                     if not audio_bytes:
                         continue
@@ -231,7 +252,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         break
             except Exception:
                 logger.error(
-                    "Turn not answered by %s: the transcript was sent, the reply was not.",
+                    "Turn not answered by %s: the transcript was sent, the reply was "
+                    "not.",
                     config.master_agent_url,
                     exc_info=True,
                 )
@@ -259,7 +281,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 audio_bytes = message.get("bytes")
                 if audio_bytes:
                     await worker.queue_frame(
-                        InputAudioRawFrame(audio=audio_bytes, sample_rate=SAMPLE_RATE, num_channels=1)
+                        InputAudioRawFrame(
+                            audio=audio_bytes, sample_rate=SAMPLE_RATE, num_channels=1
+                        )
                     )
         except WebSocketDisconnect:
             pass

@@ -94,7 +94,9 @@ async def master_agent_url():
     env["DEMO_KNOWLEDGE_AGENT_URL"] = ""
     env["DEMO_SUBAGENTS"] = ""
 
-    process = subprocess.Popen(
+    # Safe: the interpreter path is derived from this file's own location and the
+    # rest of the argv is hardcoded (the port is an int from _free_port()).
+    process = subprocess.Popen(  # noqa: S603
         [
             str(python),
             "-m",
@@ -131,7 +133,8 @@ async def _wait_until_ready(base_url: str, process: subprocess.Popen) -> None:
             if process.poll() is not None:
                 output = process.stdout.read() if process.stdout else ""
                 raise RuntimeError(
-                    f"demo-master-agent exited early (code {process.returncode}):\n{output}"
+                    f"demo-master-agent exited early "
+                    f"(code {process.returncode}):\n{output}"
                 )
             try:
                 response = await client.get(f"{base_url}/health/live")
@@ -141,7 +144,9 @@ async def _wait_until_ready(base_url: str, process: subprocess.Popen) -> None:
                 pass
             await asyncio.sleep(0.3)
     process.kill()
-    raise RuntimeError(f"demo-master-agent did not become ready within {STARTUP_TIMEOUT_S}s")
+    raise RuntimeError(
+        f"demo-master-agent did not become ready within {STARTUP_TIMEOUT_S}s"
+    )
 
 
 async def test_a_fixed_transcript_gets_a_nonempty_predictable_reply(master_agent_url):
@@ -160,7 +165,9 @@ async def test_a_fixed_transcript_gets_a_nonempty_predictable_reply(master_agent
     assert second_reply == EXPECTED_REPLY
 
 
-async def test_stream_turn_yields_chunks_that_join_back_to_the_same_reply(master_agent_url):
+async def test_stream_turn_yields_chunks_that_join_back_to_the_same_reply(
+    master_agent_url,
+):
     """`stream_turn` (added for Step 4 of the plan's Tappa 1 -- feeding TTS as
     text arrives) against the same real run: it must yield at least one
     chunk, and joining every chunk it yields must reproduce exactly what

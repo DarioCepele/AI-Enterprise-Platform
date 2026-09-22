@@ -31,32 +31,36 @@ from __future__ import annotations
 
 import asyncio
 import wave
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
-
-from voice_service.agui_client import AGUIBridgeClient
-from voice_service.api import create_app
-from voice_service.config import Settings
 
 # Re-exported as a fixture by importing it -- pytest resolves fixtures by
 # name in the requesting module's namespace, the same reuse
 # `test_end_to_end.py` already does for this fixture.
 from test_agui_bridge import master_agent_url  # noqa: F401
 
+from voice_service.agui_client import AGUIBridgeClient
+from voice_service.api import create_app
+from voice_service.config import Settings
+
 FIXTURES = Path(__file__).parent / "fixtures"
 SPEECH_FIXTURE = FIXTURES / "speech_en.wav"
 
-CHUNK_BYTES = 3_200  # 100ms of 16kHz mono 16-bit PCM -- same slice size as the other ws tests
+# 100ms of 16kHz mono 16-bit PCM -- same slice size as the other ws tests
+CHUNK_BYTES = 3_200
 RECEIVE_TIMEOUT_S = 90  # generous: first call loads Silero + faster-whisper on CPU
 STREAM_DELAY_S = 4.0  # a wide, deliberate window -- see module docstring
-MAX_MESSAGES = 12  # generous ceiling so a stuck test fails fast instead of hanging forever
+# generous ceiling so a stuck test fails fast instead of hanging forever
+MAX_MESSAGES = 12
 
 
 def _load_pcm16_bytes(path: Path) -> bytes:
-    """Reads a 16-bit PCM wav's raw frames, no resampling (fixture is already 16kHz mono)."""
+    """Reads a 16-bit PCM wav's raw frames, no resampling
+    (fixture is already 16kHz mono)."""
     with wave.open(str(path), "rb") as wav_file:
         assert wav_file.getsampwidth() == 2, "fixture must be 16-bit PCM"
         assert wav_file.getnchannels() == 1, "fixture must be mono"
@@ -76,8 +80,8 @@ def _recv_json_with_timeout(websocket, timeout: float = RECEIVE_TIMEOUT_S) -> di
         future = pool.submit(websocket.receive_json)
         try:
             return future.result(timeout=timeout)
-        except FutureTimeoutError:
-            raise AssertionError(f"no message received within {timeout}s")
+        except FutureTimeoutError as err:
+            raise AssertionError(f"no message received within {timeout}s") from err
 
 
 @pytest.fixture
@@ -96,7 +100,10 @@ def delayed_stream_turn(monkeypatch):
     monkeypatch.setattr(AGUIBridgeClient, "stream_turn", _delayed)
 
 
-def test_a_second_turn_cancels_the_first_turns_unsent_reply(master_agent_url, delayed_stream_turn):
+def test_a_second_turn_cancels_the_first_turns_unsent_reply(
+    master_agent_url,  # noqa: F811 -- the parameter name *is* how pytest resolves the fixture
+    delayed_stream_turn,
+):
     """Turn 1's audio is sent and transcribed; before its (deliberately
     delayed) reply is ready to send, turn 2's audio is sent, transcribed,
     and becomes `current_turn`. Turn 1 must then stop -- no
@@ -153,9 +160,12 @@ def test_a_second_turn_cancels_the_first_turns_unsent_reply(master_agent_url, de
             ):
                 break
 
-    assert second_transcript_seen, f"never saw the second turn's transcript; got {seen_types}"
+    assert second_transcript_seen, (
+        f"never saw the second turn's transcript; got {seen_types}"
+    )
     assert turn_cancelled_seen, (
-        f"never saw assistant_turn_cancelled for the superseded first turn; got {seen_types}"
+        "never saw assistant_turn_cancelled for the superseded first turn; "
+        f"got {seen_types}"
     )
     # Turn 1 was superseded before it ever reached a text/audio send (the
     # staleness check runs before each one, and turn 1's delayed sentence

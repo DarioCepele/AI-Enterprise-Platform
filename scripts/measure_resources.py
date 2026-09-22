@@ -65,8 +65,10 @@ def _measure_this_process_windows(pid: int) -> dict[str, float]:
         "@{N='PrivateMB';E={[math]::Round($_.PrivateMemorySize64/1MB,1)}} "
         "| ConvertTo-Json"
     )
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", ps_command],
+    # Safe: executable and arguments are hardcoded here, the only interpolated
+    # value is this process's own PID (an int from os.getpid()) -- no external input.
+    result = subprocess.run(  # noqa: S603
+        ["powershell", "-NoProfile", "-Command", ps_command],  # noqa: S607
         capture_output=True,
         text=True,
         check=True,
@@ -88,7 +90,9 @@ def main() -> None:
     synthesize(WARMUP_SENTENCE)
 
     pid = os.getpid()
-    print(f"All three models loaded in process pid={pid}. Measuring via Get-Process ...")
+    print(
+        f"All three models loaded in process pid={pid}. Measuring via Get-Process ..."
+    )
     stats = _measure_this_process_windows(pid)
     print(json.dumps(stats, indent=2))
 

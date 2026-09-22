@@ -12,6 +12,7 @@ that is the next contract's job.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
 import numpy as np
 import torch
@@ -20,7 +21,7 @@ SAMPLE_RATE = 16_000
 
 
 @lru_cache(maxsize=1)
-def _model():
+def _model() -> Any:
     """Loads the Silero VAD model once and reuses it for the process lifetime."""
     from silero_vad import load_silero_vad
 

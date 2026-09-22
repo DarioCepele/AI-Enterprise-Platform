@@ -62,3 +62,20 @@ def test_vad_detects_no_speech_in_quiet_noise():
 def test_transcribe_recovers_the_known_phrase():
     text = transcribe(SPEECH_FIXTURE, language="en")
     assert EXPECTED_PHRASE in text.lower()
+
+
+def test_transcribe_returns_nothing_for_silence(tmp_path):
+    # Regression test for a real bug: Whisper was trained on subtitled audio,
+    # so plain silence (e.g. a screen recording with no narration) made it
+    # hallucinate repeated filler words instead of recognizing there is
+    # nothing said. `vad_filter` is what fixes this -- see stt.py.
+    import wave
+
+    silence_path = tmp_path / "silence.wav"
+    with wave.open(str(silence_path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16_000)
+        wav_file.writeframes(b"\x00\x00" * 16_000 * 3)  # 3s of digital silence
+
+    assert transcribe(silence_path) == ""

@@ -35,8 +35,10 @@ non-empty, plausibly-timed audio, never exact bytes.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 SAMPLE_RATE = 24_000
 """Kokoro's native output rate (mono). Not resampled -- see module docstring."""
@@ -51,7 +53,7 @@ LANG_CODE = "a"
 
 
 @lru_cache(maxsize=1)
-def _pipeline():
+def _pipeline() -> Any:
     """Loads the Kokoro pipeline once and reuses it for the process lifetime.
 
     Downloads `hexgrad/Kokoro-82M`'s weights from Hugging Face on first use
@@ -82,7 +84,7 @@ def synthesize(text: str, *, voice: str = VOICE) -> bytes:
     if not text.strip():
         return b""
 
-    segments: list[np.ndarray] = []
+    segments: list[npt.NDArray[np.float32]] = []
     for _graphemes, _phonemes, audio in _pipeline()(text, voice=voice):
         segments.append(np.asarray(audio, dtype=np.float32))
 
