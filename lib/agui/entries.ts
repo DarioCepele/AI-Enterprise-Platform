@@ -14,6 +14,13 @@ export type Artifact =
       documents: string[];
       summary: string;
     }
+  | {
+      component: "video-analysis";
+      id: string;
+      video_url: string;
+      transcript: string;
+      description: string;
+    }
   | { component: "unknown"; id: string; raw: unknown };
 
 export type Entry =
@@ -100,6 +107,21 @@ export function parseArtifact(content: unknown): Artifact | null {
       question: typeof shape.question === "string" ? shape.question : "",
       documents: shape.documents,
       summary: shape.summary,
+    };
+  }
+
+  if (
+    shape.component === "video-analysis" &&
+    typeof shape.video_url === "string" &&
+    typeof shape.transcript === "string" &&
+    typeof shape.description === "string"
+  ) {
+    return {
+      component: "video-analysis",
+      id,
+      video_url: shape.video_url,
+      transcript: shape.transcript,
+      description: shape.description,
     };
   }
 

@@ -1,8 +1,10 @@
 import type { Artifact } from "@/lib/agui/entries";
 import { Briefing } from "./Briefing";
+import { VideoAnalysis } from "./VideoAnalysis";
 
 export function UiTable({ artifact }: { artifact: Artifact }) {
   if (artifact.component === "briefing") return <Briefing artifact={artifact} />;
+  if (artifact.component === "video-analysis") return <VideoAnalysis artifact={artifact} />;
 
   if (artifact.component !== "ui-table") {
     return (

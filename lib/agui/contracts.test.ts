@@ -20,8 +20,18 @@ describe("contracts with the master agent", () => {
     expect(parseArtifact(JSON.stringify(payload))).toEqual(payload);
   });
 
+  it("turns the video-analysis tool result into the artifact the timeline renders", () => {
+    const payload = contractSample("agui/tool-result-video-analysis");
+
+    expect(parseArtifact(JSON.stringify(payload))).toEqual(payload);
+  });
+
   it("does not fall back to unknown on any declared tool result", () => {
-    for (const name of ["agui/tool-result-briefing", "agui/tool-result-ui-table"]) {
+    for (const name of [
+      "agui/tool-result-briefing",
+      "agui/tool-result-ui-table",
+      "agui/tool-result-video-analysis",
+    ]) {
       const artifact = parseArtifact(JSON.stringify(contractSample(name)));
       expect(artifact?.component, name).not.toBe("unknown");
     }
