@@ -1,0 +1,94 @@
+@import "tailwindcss";
+@source "../node_modules/streamdown/dist/*.js";
+
+/*
+ * Two accents, two jobs — not decoration:
+ *   --signal (amber)  = something is happening right now (a live stream, a
+ *                        step in progress, the microphone armed). An
+ *                        instrument's own glow, not a brand color.
+ *   --wire   (steel)  = this is a control: selected, focusable, a link.
+ * A color only ever means one of those two things, everywhere in the app.
+ */
+:root {
+  color-scheme: light;
+  --background: #f2efe6;
+  --foreground: #1d2420;
+  --surface: #e8e3d5;
+  --surface-accent: #ded6c2;
+  --border: #cfc6b2;
+  --muted: #6b6656;
+  --signal: #a15a00;
+  --wire: #2b5f76;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--surface);
+  --color-muted-foreground: var(--muted);
+  --color-border: var(--border);
+  --color-primary: var(--signal);
+  --color-primary-foreground: var(--background);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #0a0d12;
+    --foreground: #e7ebee;
+    --surface: #10141b;
+    --surface-accent: #161d27;
+    --border: #232b36;
+    --muted: #7d8996;
+    --signal: #e2a23d;
+    --wire: #6ea3c2;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), sans-serif;
+}
+
+button {
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease, transform 100ms ease;
+}
+button:disabled { cursor: wait; }
+button:not(:disabled):active { transform: scale(0.97); }
+:focus-visible { outline: 2px solid var(--wire); outline-offset: 3px; }
+::selection { background: var(--surface-accent); }
+.lab-shell { height: 100dvh; }
+.lab-grid { display: grid; grid-template-columns: minmax(0, 1fr) 420px; }
+.lab-aside > section:first-child { max-height: 42%; overflow-y: auto; flex-shrink: 0; }
+.inspector-tabs { border-bottom: 1px solid var(--border); }
+.inspector-tabs button { padding-bottom: 10px; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 500; }
+.inspector-tabs button:hover { color: var(--foreground); }
+.inspector-tabs button[aria-pressed="true"] { color: var(--foreground); border-bottom-color: var(--wire); }
+.inspector summary { padding: 4px 0; overflow-wrap: anywhere; }
+.inspector summary:hover { color: var(--wire); }
+.timeline-entry { position: relative; padding: 0 0 1.4rem 1.5rem; border-left: 1px solid var(--border); }
+.timeline-entry::before {
+  content: ""; position: absolute; left: -4px; top: 7px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted); box-shadow: 0 0 0 4px var(--background);
+}
+.timeline-entry[data-kind="user"]::before { background: var(--wire); }
+.timeline-entry[data-kind="subagent"]::before { background: var(--wire); }
+.timeline-entry:last-child { border-color: transparent; padding-bottom: 0; }
+.timeline-entry { overflow-wrap: anywhere; }
+.subagent[data-stato="in corso"] { border-color: var(--signal); }
+.subagent[data-stato="errore"] { border-color: #c0554f; }
+@media (prefers-color-scheme: dark) {
+  .lab-shell .text-red-600 { color: #fb9393; }
+  .lab-shell .text-emerald-600 { color: #86d8ab; }
+}
+@media (max-width: 800px) {
+  .lab-shell { height: auto; min-height: 100dvh; }
+  .lab-grid { grid-template-columns: minmax(0, 1fr); }
+  .lab-grid > main { height: 65dvh; min-height: 380px; border-right: 0; }
+  .lab-aside { height: 65dvh; min-height: 380px; border-top: 1px solid var(--border); }
+}
