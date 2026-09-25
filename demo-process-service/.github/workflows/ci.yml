@@ -1,0 +1,75 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # The tests run against a real Postgres, because an instance is a row
+      # that has to outlive the process that wrote it: a fake in memory would
+      # prove nothing about that, and this is the repository where that claim
+      # is the whole point.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: processi
+          POSTGRES_PASSWORD: processi
+          POSTGRES_DB: processi
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U processi"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The contracts are the only copy, and they live in demo-infra: without
+      # this checkout the contract tests fail instead of passing quietly, which
+      # is the whole point of them.
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/demo-infra
+          path: .contracts
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run pytest -q
+        env:
+          AGUI_LAB_CONTRACTS: ${{ github.workspace }}/.contracts/contracts
+          # The suite derives its own database from this one and creates it:
+          # what it leaves behind never touches the database a service uses.
+          PROCESS_POSTGRES_DSN: postgresql://processi:processi@127.0.0.1:5432/processi
+
+      # The definitions are data, and a broken one has to stop the boot rather
+      # than surface in front of whoever is using the process. Loading the
+      # catalogue here is the cheapest place to find out.
+      - name: the shipped definitions load
+        run: uv run python -c "from process_service.catalog import load_catalog; print(len(load_catalog('processes').all()), 'definitions')"
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: process-service:ci
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: process-service:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true

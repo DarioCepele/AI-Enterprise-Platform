@@ -1,0 +1,64 @@
+[project]
+name = "demo-process-service"
+version = "0.1.0"
+description = "Durable business processes: versioned definitions, instances that survive restarts"
+requires-python = ">=3.12"
+dependencies = [
+    "a2a-sdk[http-server]>=1.1.2",
+    "agent-framework-openai>=1.14.2",
+    "agent-framework-orchestrations==1.1.1",
+    "dbos>=2.31.1",
+    "fastapi>=0.139.2",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-httpx>=0.65b0",
+    "opentelemetry-sdk>=1.44.0",
+    "psycopg[binary,pool]>=3.2.10",
+    "pydantic>=2.12.0",
+    "pydantic-settings>=2.15.0",
+    "python-dotenv>=1.2.3",
+    "pyyaml>=6.0.2",
+    "uvicorn>=0.52.4",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.3.1",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "ruff>=0.16.8",
+    "types-protobuf>=7.35.1.20260906",
+    "types-pyyaml>=6.0.12.20260906",
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "UP", "B", "I", "S", "C4", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]
+
+[tool.mypy]
+# src is fully annotated already, so strict costs nothing here: the whole suite
+# reported four real findings, and stubs covered the untyped imports.
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# DBOS keeps a thread pool bound to the loop it launched on: a fresh loop per
+# test would leave it shut down from the second test onwards.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+markers = ["integration: needs a real Postgres"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/process_service"]

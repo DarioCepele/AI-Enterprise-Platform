@@ -1,0 +1,59 @@
+# An example, not a domain. It exists to exercise every kind of step once, and
+# it is the first thing to delete when this template becomes a product.
+#
+# Shape: something is requested, an agent looks into it, a rule decides whether
+# a person has to say yes, then the work is applied with an effect that must not
+# happen twice, and someone is told.
+id: example-approval
+version: 1
+name: Example approval
+description: >
+  A request that is checked, possibly approved by a person, then applied.
+  Replace it with your own: this file is data, not code.
+
+steps:
+  - id: collect
+    type: tool
+    tool: collect_request
+
+  - id: check
+    type: agent
+    owner: knowledge
+    depends_on: [collect]
+    input:
+      question: What should be known before deciding on this request?
+    # Nobody waits forever for an agent either: when the time is up the step is
+    # handed to the people who can decide without it.
+    timeout_seconds: 120
+    on_timeout: approval
+
+  - id: decide
+    type: decision
+    depends_on: [check]
+    branches:
+      # First match wins, so the specific condition goes above the catch-all.
+      - when: "amount > 10000"
+        goto: approval
+      - when: "true"
+        goto: apply
+
+  - id: approval
+    type: approval
+    approvers: [reviewer]
+    # A step reached through a branch says itself where it goes next: `apply`
+    # cannot wait for it with depends_on, or the other branch would never run.
+    goto: apply
+    # Nobody is at their desk forever: after this, the escalation in the README.
+    timeout_seconds: 172800
+
+  - id: apply
+    type: tool
+    tool: apply_request
+    # The same request applied twice is the failure this key exists to prevent.
+    idempotency_key: request_id
+    compensate_with: revert_request
+
+  - id: notify
+    type: tool
+    tool: notify_requester
+    depends_on: [apply]
