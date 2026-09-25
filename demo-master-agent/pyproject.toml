@@ -1,0 +1,71 @@
+[project]
+name = "demo-master-agent"
+version = "0.1.0"
+description = "Master agent del laboratorio AG-UI: AG-UI su SSE + tool nativi"
+requires-python = ">=3.12"
+dependencies = [
+    "a2a-sdk[http-server]",
+    "agent-framework-ag-ui>=1.2.2",
+    "agent-framework-core==1.17.0",
+    "agent-framework-openai>=1.14.2",
+    "av>=18.1.0",
+    "fastapi>=0.139.2",
+    # The version agent_framework_core's own "all" extra pins for
+    # MCPStreamableHTTPTool -- added directly rather than pulling that
+    # extra's few dozen unrelated provider packages in with it.
+    "mcp>=1.24.0,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-httpx>=0.65b0",
+    "opentelemetry-sdk>=1.44.0",
+    "pillow>=12.3.0",
+    "psycopg[binary,pool]>=3.3.5",
+    "pydantic-settings>=2.15.0",
+    "python-dotenv>=1.2.3",
+    "uvicorn>=0.52.4",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.8",
+    "types-protobuf>=7.35.1.20260906",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.12"
+# Not `strict`: it would also demand annotations and typed calls inside
+# `logging_bridge.py`, `resilience.py` and the video tools, which a separate
+# piece of work owns right now. These are the checks that find real bugs.
+check_untyped_defs = true
+disallow_incomplete_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_equality = true
+no_implicit_reexport = true
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "UP", "B", "I", "S", "C4", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/demo"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/demo/skills" = "demo/skills"

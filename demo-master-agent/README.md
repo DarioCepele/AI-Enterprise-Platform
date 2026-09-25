@@ -1,0 +1,382 @@
+# Master agent del laboratorio AG-UI
+
+Backend Python con Microsoft Agent Framework e FastAPI. Espone il master agent su `POST /agui` tramite `add_agent_framework_fastapi_endpoint`: lo stream SSE contiene gli eventi AG-UI per chat, piano e inspector. I log operativi usano un secondo canale HTTP, `GET /logs`. `GET /health` restituisce lo stato del servizio.
+
+## Avvio e configurazione
+
+Servono Python 3.12 e `uv`. Dalla radice di questo repository:
+
+```powershell
+uv sync --locked
+uv run python -m demo
+```
+
+Il server locale ascolta su `http://127.0.0.1:8000`. Per avviare anche il frontend con Docker Compose, seguire il [README di demo-infra](../demo-infra/README.md).
+
+La configurazione viene letta dall'ambiente; in locale viene caricato anche il file `.env`, non versionato. Le variabili sono:
+
+| Variabile | Uso |
+| --- | --- |
+| `OPENAI_BASE_URL` | Endpoint del provider compatibile con Chat Completions. |
+| `OPENAI_API_KEY` | Credenziale del provider. |
+| `OPENAI_CHAT_COMPLETION_MODEL` | Identificativo del modello. |
+| `DEMO_FAKE_CLIENT` | Attiva il client deterministico per verifiche locali senza LLM. |
+| `DEMO_ALLOWED_ORIGINS` | Origini CORS del frontend, separate da virgole. |
+
+Il flusso del piano richiede un modello che esegua davvero le chiamate ai tool. Il client finto serve ai test del protocollo, non riproduce l'intero flusso del modello reale.
+
+## Gruppi di tool
+
+| Gruppo | Tool | Contratto |
+| --- | --- | --- |
+| Piano | `todo_write`, `todo_set_status` | Scrivono e aggiornano `state.plan`. |
+| Skill | `load_skill` | Restituisce al modello le istruzioni Markdown della skill richiesta. |
+| Artefatti UI | `ui_table` | Produce il payload della tabella e aggiorna `state.artifacts`. |
+| Memoria | `cerca_nei_ricordi` | Cerca per significato nelle conversazioni passate. Esiste solo se il servizio di memoria e' configurato. |
+
+`todo_write(steps)` sostituisce il piano precedente. Ogni passo ha un `id` intero, `title`, `detail` e `source`; parte da `pending`. `todo_set_status(step_id, status, note)` accetta `pending`, `in_progress`, `completed` e `failed`. Per `failed` la nota deve essere non vuota. Gli aggiornamenti includono i tempi di inizio e fine e riemettono il piano intero. L'agente deve aggiornare i passi mentre lavora, per rendere visibile l'avanzamento.
+
+Il piano **appartiene al thread, non al processo**. A ogni run viene idratato dallo snapshot del thread e messo in una `ContextVar`; i tool leggono quello. Il processo non ne conserva copia, quindi due repliche non si contraddicono e due schede del browser hanno piani distinti.
+
+Verificato dal vivo: piano scritto, `docker compose restart master-agent`, e il turno successivo segna il primo passo come completato sul piano di prima.
+
+Lo si è scoperto proprio riavviando: idratare dallo stato della *richiesta* non basta, perché lo stato salvato viene fuso dal framework **dopo** quel punto. Il piano si legge dallo snapshot store, che è la fonte autorevole.
+
+`ui_table(title, columns, rows)` restituisce un artefatto `ui-table` con un `id` numerato per processo, usato per collegare il risultato del tool al riepilogo nello stato. L'id non è stabile fra riavvii. Il risultato AG-UI contiene una stringa JSON con titolo, colonne e righe; `state.artifacts` contiene il riepilogo della tabella corrente. `plan` e `artifacts` sono chiavi separate: gli aggiornamenti sostituiscono le chiavi di primo livello, quindi ogni gruppo scrive solo la propria.
+
+## Aggiungere una skill
+
+Le skill sono cartelle sotto `src/demo/skills/`, ciascuna con un file `SKILL.md`. Esempio:
+
+```markdown
+---
+name: comparison
+description: Confronta elementi lungo dimensioni comuni e produce una tabella.
+---
+
+# Confronto strutturato
+
+Individua le dimensioni del confronto, chiama ui_table e sintetizza le differenze.
+```
+
+Il frontmatter deve iniziare alla prima riga ed essere delimitato da `---`; `name` e `description` sono obbligatori. Il parser attuale supporta solo righe scalari `chiave: valore`, non YAML annidato o multilinea. Il corpo successivo è Markdown.
+
+Per aggiungere una skill, creare `src/demo/skills/<nome>/SKILL.md` con un nome univoco e riavviare l'agente; se si usa Docker, ricostruire l'immagine. Non serve registrarla nel codice: il catalogo viene letto alla costruzione dei tool e incluso nella descrizione di `load_skill`. Un file malformato interrompe la costruzione del catalogo. Una richiesta a `load_skill` con nome sconosciuto restituisce invece un messaggio con i nomi disponibili, senza interrompere la run. Le skill sono incluse anche nel pacchetto Python.
+
+## Log operativi
+
+`GET /logs?cursor=0` legge le righe disponibili. Il client passa poi il `cursor` ricevuto per ottenere solo righe con `seq` maggiore:
+
+```json
+{
+  "entries": [
+    {
+      "seq": 1,
+      "ts": "2026-09-08T10:00:00.000+00:00",
+      "level": "INFO",
+      "source": "tools.plan_tools",
+      "message": "Piano scritto: 3 passi."
+    }
+  ],
+  "cursor": 1,
+  "dropped": 0
+}
+```
+
+Il buffer circolare conserva le ultime **500 righe** in memoria per processo. `cursor` è la sequenza dell'ultima riga restituita; senza nuove righe resta invariato. `dropped` conta le righe successive al cursore richiesto già uscite dal buffer. I cursori ripartono al riavvio del processo e non identificano una singola run.
+
+Il collettore riceve i log da `demo` e dai suoi discendenti `demo.*`, da livello `INFO` in su; `source` omette il prefisso `demo.`. Registra scrittura e avanzamento del piano, caricamento delle skill e produzione delle tabelle. I logger delle librerie sono esclusi perché possono contenere URL e header con credenziali. Non è una redazione automatica dei messaggi applicativi: chi aggiunge log a `demo.*` deve evitare credenziali e dati sensibili. L'handler viene rimosso allo shutdown dell'app.
+
+Nell'integrazione AG-UI adottata, gli eventi `CUSTOM` sono riservati al framework e non c'è una factory applicativa per emetterli arbitrariamente. Per questo il tab LOG legge `/logs`: il principio delle tre viste dello stesso stream vale per chat, piano e inspector, mentre i log hanno un canale separato.
+
+## Test offline
+
+```powershell
+uv run pytest
+```
+
+I test usano client finti e dipendenze esplicite: non fanno chiamate a un LLM reale e non richiedono un `.env` o credenziali del provider. Coprono tool, skill, stato condiviso, protocollo AG-UI, raccolta dei log, cursori e CORS. Le verifiche con un modello reale restano separate dai test automatici.
+
+## Memoria della conversazione
+
+La storia del thread la possiede il server. Il client AG-UI manda solo il turno
+nuovo; l'adattatore ricompone la conversazione dallo snapshot del thread e la
+passa al modello. Senza questo, ogni run ripartiva da zero: stesso `threadId`,
+seconda domanda, e il modello rispondeva "non me l'hai ancora chiesto".
+
+Lo store e' `InMemoryAGUIThreadSnapshotStore`: un solo snapshot per
+`(scope, thread_id)`, in memoria di processo, niente durata oltre il riavvio.
+In produzione si sostituisce con uno store durevole senza toccare l'agente --
+la firma da implementare e' il protocollo `AGUIThreadSnapshotStore`
+(`save`, `get`, `delete`, `clear`).
+
+**Lo scope e' un confine di autorizzazione, non un identificativo.** Il
+framework rifiuta uno snapshot store senza `snapshot_scope_resolver`, e la
+ragione e' che un thread id identifica un thread ma non autorizza a leggerlo.
+Qui il laboratorio gira senza autenticazione e lo scope e' dichiarato uno solo
+per tutto il processo (`SINGLE_TENANT_SCOPE` in `server/app.py`). In produzione
+quella funzione restituisce l'identita' verificata della richiesta, presa da una
+dependency di autenticazione sull'endpoint, mai da un header scelto dal client.
+
+Conseguenza da tenere d'occhio: la storia ora cresce a ogni turno e nessuno la
+pota. E' il prossimo passo -- tetto di contesto, compattazione dei tool result
+e riassunto dei turni vecchi.
+
+## Telemetria del contesto
+
+Un middleware di chat registra la dimensione del contesto **a ogni chiamata al
+modello**, non a ogni run: e' dentro la singola run, fra un tool e l'altro, che
+il contesto si gonfia. Le righe finiscono su `demo.telemetry`, quindi nel tab
+LOG del frontend:
+
+```
+Contesto: 1 messaggi, 58 caratteri (0 dai tool); 1167 token in, 1788 out.
+Contesto: 3 messaggi, 1252 caratteri (659 dai tool); 1554 token in, 100 out.
+Contesto: 9 messaggi, 2640 caratteri (801 dai tool); 2181 token in, 123 out.
+```
+
+I caratteri sono un proxy grossolano dei token, disponibile anche quando il
+provider non riporta l'uso; la quota "dai tool" e' contata a parte perche' e' la
+prima da svuotare quando serve fare spazio. Le righe contengono **solo
+conteggi**: la conversazione non e' materiale da diagnostica, e questi log sono
+leggibili dal frontend.
+
+I client finti dei test ereditano da `ChatMiddlewareLayer` come il client
+OpenAI vero. Senza quel livello il middleware non verrebbe eseguito nei test, e
+la telemetria risulterebbe verde in laboratorio e assente in produzione.
+
+## Dove vive la memoria dei thread
+
+Con `DEMO_MEMORY_SERVICE_URL` impostata, gli snapshot dei thread stanno nel
+[servizio di memoria](../demo-memory-service/README.md): la conversazione
+sopravvive al riavvio dell'agente. Senza quella variabile si torna allo store
+in memoria di processo, e il laboratorio resta avviabile senza database.
+Quale dei due sia attivo si legge nel tab LOG all'avvio — la differenza si
+noterebbe altrimenti solo quando è troppo tardi.
+
+Il contesto che torna dalla memoria e' **potato** dal servizio: fuori il
+ragionamento dei turni passati, svuotati i risultati di tool piu' vecchi. Il
+conto di cio' che manca arriva insieme allo snapshot e finisce nel tab LOG
+(`Contesto dalla memoria: 28 messaggi (12 ragionamenti tolti, ...)`), perche'
+una potatura silenziosa e' indistinguibile da una perdita di memoria.
+
+L'agente non conosce Postgres: implementa il protocollo
+`AGUIThreadSnapshotStore` chiamando il servizio in HTTP, e lo scope del
+resolver diventa l'header `X-Memory-Scope` della chiamata.
+
+**Politica di guasto, dichiarata perché non è ovvia.** Un servizio di memoria
+irraggiungibile non fa fallire la conversazione: in lettura si degrada a
+«thread sconosciuto» e la run riparte senza storia, in scrittura si registra
+l'errore — sollevare a run conclusa romperebbe una risposta già consegnata. In
+entrambi i casi la riga finisce su `demo.*`, quindi sotto gli occhi nel tab
+LOG: un'amnesia silenziosa è il difetto peggiore che questo pezzo possa avere.
+
+## Cercare nei ricordi
+
+Con il servizio di memoria configurato, l'agente ha un quarto gruppo di tool:
+`cerca_nei_ricordi(domanda)` interroga `POST /search` del servizio e riceve i
+frammenti di conversazioni passate più vicini per significato.
+
+È un tool e non un'iniezione automatica nel contesto: infilare a ogni run i
+ricordi «probabilmente pertinenti» li paga sempre e li azzecca a volte, mentre
+più roba c'è nel contesto meno il modello ne recupera con precisione. Così la
+memoria si raggiunge quando serve, e a decidere se serve è il modello, che la
+domanda ce l'ha davanti.
+
+Senza `DEMO_MEMORY_SERVICE_URL` il tool **non esiste**, invece di esistere e
+fallire: un tool che risponde sempre «non raggiungibile» insegna al modello a
+non chiamarlo più. Quando la memoria è configurata ma irraggiungibile, l'errore
+torna al modello come testo e la run continua.
+
+Verificato dal vivo: informazione detta in una conversazione, poi in un thread
+nuovo la domanda «quale alternativa avevamo scartato per il deploy?» → l'agente
+chiama `cerca_nei_ricordi` e risponde «ECS», che nel contesto non c'era.
+
+## Interrogare il sottoagente
+
+Con `DEMO_KNOWLEDGE_AGENT_URL` impostata, l'agente ha `interroga_knowledge`:
+gira una domanda al [knowledge agent](../demo-knowledge-agent/README.md) via
+**A2A**, non come tool locale ma come agente remoto.
+
+La card viene scaricata da `/.well-known/agent-card.json` e passata come
+`agent_card`: con il solo `url` il client A2A degrada a non-streaming senza
+dirlo. La card si scarica **una volta** e si riusa; se non dichiara `streaming`,
+il tool lo scrive nei log invece di far finta di niente.
+
+Le istruzioni chiedono al modello di fare le due interrogazioni **nello stesso
+turno**: MAF esegue le tool call di un turno con `asyncio.gather`, quindi
+partono insieme. Misurato su una run vera: 158 aggiornamenti in 11,67 s e 166
+in 14,25 s, terminate a 0,9 s di distanza — in serie sarebbero stati ~26 s.
+
+Sottoagente irraggiungibile: l'errore torna al modello come testo, che risponde
+con quello che sa dichiarando che quella parte non è verificata. La run non
+muore per un sottoagente giù.
+
+## Eventi dei sottoagenti sullo stream
+
+Il protocollo AG-UI ha `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` /
+`SUBAGENT_ERROR`, ma **l'adattatore non li emette**: zero occorrenze di
+`SUBAGENT` in `agent_framework_ag_ui`. La spec del laboratorio dava per scontato
+il contrario.
+
+Si iniettano estendendo `AgentFrameworkAgent`, il cui `run()` è un async
+generator di eventi: `SubagentEventRelay` fa girare quel generator in un task
+che pubblica su una coda, e intanto drena la stessa coda dove i tool scrivono i
+propri eventi. La coda viaggia in una `ContextVar`, e funziona perché MAF crea
+ogni tool call con `contextvars.copy_context()`.
+
+Il tool si limita a `async with subagent_run("knowledge", domanda):` — fuori da
+una run quel gestore non fa nulla, quindi il tool resta usabile e testabile da
+solo.
+
+Su una run vera lo stream porta due `SUBAGENT_STARTED` di fila e poi due
+`SUBAGENT_FINISHED`: è la firma delle invocazioni parallele descritta nella
+spec. Un sottoagente che fallisce produce `SUBAGENT_ERROR` **prima** che
+l'errore risalga, così il difetto si vede nell'inspector e non solo nei log.
+
+## Il client A2A: il task, non solo il testo
+
+Il tool non usa più `A2AAgent` della colla Microsoft ma un client nostro
+(`demo/a2a/client.py`) scritto contro `a2a-sdk`, che è **stabile** mentre
+`agent-framework-a2a` è ancora beta. Il motivo non è solo la maturità: `A2AAgent`
+appiattisce tutto in testo, e con lui il ciclo di vita del task si perde.
+
+Ora ogni interrogazione riporta lo stato reale del task remoto:
+
+```
+task 582aa21b, stati accettato -> al lavoro -> concluso, 205 artefatti in 31.39s
+```
+
+Una scoperta utile: **il testo arriva come artifact update, non come messaggio**.
+L'executor MAF del sottoagente spedisce ogni chunk con `add_artifact()`, senza
+nome. Chi accumula solo i messaggi di stato riceve una risposta vuota — è quello
+che sarebbe successo al primo collegamento se non avessi guardato gli eventi
+grezzi.
+
+Il client espone anche ciò che serve ai passi successivi: il `task_id` per
+riprendere un task, e `attende_risposta` quando il sottoagente si ferma in
+`TASK_STATE_INPUT_REQUIRED`.
+
+La scheda del sottoagente arriva in timeline come **artefatto**, con le fonti
+che ha letto — non come testo indistinguibile dal resto della risposta. Nessuno
+dei due repository dipende più da `agent-framework-a2a`: client ed executor
+stanno sull'SDK stabile.
+
+## Lavori lunghi: il push invece del socket aperto
+
+Il master non aspetta un sottoagente all'infinito. Dopo
+`DEMO_SUBAGENT_WAIT_SECONDS` smette di ascoltare e lo dice al modello, che
+risponde con quello che ha; il risultato arriva dopo, come **notifica push**, e
+finisce nella memoria del thread — quindi al turno successivo è nel contesto.
+
+Tre decisioni che meritano una riga.
+
+**La correlazione sta nell'URL.** Il webhook è
+`/a2a/push/{scope}/{thread_id}`: chi riceve sa già a quale conversazione
+appartiene la notifica. L'alternativa — una tabella da task a thread — sarebbe
+stato di processo, cioè sbagliata con due repliche.
+
+**Il token firma il thread, non il task.** Il webhook si registra *prima* che il
+task esista, quindi un token sul task id non si potrebbe calcolare in anticipo.
+È un HMAC del thread con un segreto d'ambiente: verificarlo non richiede
+memoria, così due repliche accettano gli stessi token. Senza token valido si
+risponde 403 — un webhook aperto è un modo per far scrivere a chiunque nella
+memoria di una conversazione.
+
+**La notifica dice "ho finito", non cosa ha prodotto.** Il sottoagente notifica
+*ogni* evento del task: scrivere in memoria a ogni avanzamento riempirebbe la
+conversazione di rumore. Si ignorano gli avanzamenti, e sullo stato terminale si
+va a **rileggere il task** per prenderne gli artefatti. Accumulare le notifiche
+sarebbe di nuovo stato di processo.
+
+Verificato dal vivo con l'attesa a 8 secondi: il tool si stacca, l'agente
+risponde «l'esito arriverà come notifica», e poco dopo nei log compare
+`Il sottoagente ha concluso il task 3f236f2f (TASK_STATE_COMPLETED)` con 916
+caratteri scritti nella memoria del thread.
+
+## Human-in-the-loop attraverso gli agenti
+
+Il sottoagente può fermarsi e chiedere. Quando lo fa, il task va in
+`INPUT_REQUIRED` e resta **aperto**: `interroga_knowledge` non inventa una
+risposta, riferisce la domanda al modello e scrive nello stato del thread chi
+sta aspettando.
+
+```json
+{"subagent_pending": {"task_id": "39f05819", "agente": "knowledge",
+                      "domanda": "Di quale linguaggio parli: Go, Python o Rust?",
+                      "richiesta": "come funziona la concorrenza?"}}
+```
+
+Al turno dopo, quando l'utente risponde, `rispondi_al_sottoagente` legge quello
+stato e manda la risposta con lo **stesso** `task_id`: il sottoagente riprende
+da dove si era fermato, con la sua domanda ancora in contesto, invece di
+ricominciare da un task nuovo che avrebbe perso tutto.
+
+**Perché nello stato del thread e non in un dizionario del processo.** Il turno
+in cui il sottoagente chiede e quello in cui l'utente risponde sono due
+richieste HTTP distinte, che con più repliche finiscono su processi distinti.
+Lo stato del thread è già condiviso e già durevole: metterci il pending non
+costa nulla e toglie l'unico posto in cui la memoria sarebbe stata locale.
+
+Il tool legge il pending da una `ContextVar` popolata a inizio run da
+`LabRunner`, che a sua volta lo prende dallo snapshot store — non dallo stato
+della richiesta, perché il framework fonde lo stato salvato *dopo* quel punto e
+un riavvio avrebbe perso l'aggancio.
+
+Verificato dal vivo: «come funziona la concorrenza?» → il sottoagente chiede il
+linguaggio → il master gira la domanda → «Rust» →
+`Task 39f05819 ripreso: 1200 caratteri`, stesso task.
+
+## Due note operative
+
+**Il container era muto.** Uvicorn configura solo i propri logger: senza un
+`basicConfig`, `demo.*` finisce nell'handler di ultima istanza di Python, che
+stampa solo dai WARNING in su. Il tab LOG del frontend li vedeva (ci arriva per
+un'altra strada, `LogCollector`), `docker compose logs` no — cioè proprio dove
+si guarda quando qualcosa non va.
+
+**Le notifiche push erano 196 per due domande.** Il default dell'SDK notifica
+ogni evento della coda; il filtro sta ora dalla parte di chi le manda
+(`NotificheEssenziali` nel knowledge agent), non solo di chi le scarta. Stesso
+ciclo, 2 POST.
+
+## Chiedere la card estesa, e farci qualcosa
+
+Il master chiede la vista estesa del knowledge agent con
+`get_extended_agent_card`, passando il token di servizio come parametro della
+chiamata. Se la ottiene, il catalogo dei documenti finisce nella **descrizione
+del tool**:
+
+```
+Interroga l'agente di knowledge base su un argomento.
+…
+Elenca i documenti indicizzati e permette di citarli per nome: go, python, rust
+```
+
+È la differenza fra chiedere alla cieca e sapere cosa c'è da chiedere — e il
+modello ce l'ha solo perché il master si è autenticato.
+
+La descrizione si aggiorna al primo uso del tool, quando la card viene
+caricata: dal turno successivo il modello vede il catalogo. Anticiparlo
+all'avvio significherebbe fare rete nel costruttore dell'agente, e un
+sottoagente non ancora pronto renderebbe il master non avviabile.
+
+Se la card estesa viene negata non succede niente di grave: si prosegue con
+quella pubblica e la descrizione resta generica. Non poter vedere la vista
+estesa non è un motivo per non interrogare l'agente.
+
+## Contratti fra i repo
+
+I campioni di ciò che questo repo mette sul filo — o legge da un altro — stanno
+in `demo-infra/contracts`, versionati e in copia unica. I test di contratto li
+caricano da lì: se manca la cartella **falliscono**, invece di saltarsi da soli.
+Un test di contratto silenzioso quando la controparte non c'è è esattamente il
+silenzio che i contratti tolgono.
+
+```bash
+# i quattro repo come cloni fratelli: nessuna configurazione
+# altrove: AGUI_LAB_CONTRACTS=/percorso/a/demo-infra/contracts
+```
+
+Quando un campione cambia, cambia insieme in tutti i repo elencati nel suo
+`produced_by` e `consumed_by`. Il messaggio di fallimento dice quali sono.
