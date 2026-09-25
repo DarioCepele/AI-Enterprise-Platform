@@ -1,0 +1,25 @@
+{
+  "contract": "a2a/briefing",
+  "version": 2,
+  "produced_by": [
+    "demo-knowledge-agent"
+  ],
+  "consumed_by": [
+    "demo-master-agent",
+    "demo-process-service"
+  ],
+  "description": "The data part of the A2A artifact the knowledge agent attaches when it completes a task. The text part carries the same answer as prose; this is what a consumer reads to render it structured. `usage` says what the answer cost -- model calls and tokens -- which is what makes 'two agents in parallel' and 'one agent doing both' comparable.",
+  "sample": {
+    "component": "briefing",
+    "question": "How does Go do typing?",
+    "documents": [
+      "go"
+    ],
+    "summary": "Static typing checked by the compiler; local inference with :=.",
+    "usage": {
+      "rounds": 2,
+      "input_tokens": 1840,
+      "output_tokens": 260
+    }
+  }
+}

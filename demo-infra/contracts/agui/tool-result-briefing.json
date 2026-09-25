@@ -1,0 +1,15 @@
+{
+  "contract": "agui/tool-result-briefing",
+  "version": 1,
+  "produced_by": ["demo-master-agent"],
+  "consumed_by": ["demo-frontend"],
+  "description": "The tool_result payload of ask_knowledge. It reaches the browser as the JSON string content of TOOL_CALL_RESULT, and the frontend turns it into a timeline artifact.",
+  "sample": {
+    "component": "briefing",
+    "id": "kb_4bcf45a1",
+    "agent": "knowledge",
+    "question": "How does Go do typing?",
+    "documents": ["go"],
+    "summary": "Static typing checked by the compiler; local inference with :=."
+  }
+}

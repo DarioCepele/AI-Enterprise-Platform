@@ -1,0 +1,14 @@
+{
+  "contract": "agui/tool-result-ui-table",
+  "version": 1,
+  "produced_by": ["demo-master-agent"],
+  "consumed_by": ["demo-frontend"],
+  "description": "The tool_result payload of ui_table, rendered as a real table in the timeline.",
+  "sample": {
+    "component": "ui-table",
+    "id": "art_9f31c0a2",
+    "title": "Go vs Rust",
+    "columns": ["Topic", "Go", "Rust"],
+    "rows": [["Concurrency", "goroutines", "threads and async"]]
+  }
+}

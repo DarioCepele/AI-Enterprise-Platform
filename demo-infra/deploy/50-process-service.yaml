@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: process-service
+  labels:
+    app.kubernetes.io/name: process-service
+    app.kubernetes.io/part-of: agui-lab
+spec:
+  # Two on purpose, like the master agent: an instance that survives its own
+  # process is the claim this service makes, and two replicas are what turns it
+  # into something a cluster can contradict. What holds them together is
+  # Postgres -- the ledger, the waiting steps and the messages that wake them
+  # all live there, so either replica can pick up what the other left.
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: process-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: process-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # Numerico, non un nome: kubelet verifica che l'utente non sia root
+        # prima di avviare il container, e da un `USER service` non lo sa dire.
+        # Un manifest con solo runAsNonRoot non parte proprio.
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: process-service
+          image: ghcr.io/your-org/demo-process-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8300
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 1
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8300
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8300
+            periodSeconds: 5
+            failureThreshold: 3
+          env:
+            # Where a remote agent sends its notifications back. It is the
+            # Service and not a pod: whichever replica receives it, the message
+            # goes through Postgres to the step that is waiting.
+            - name: PROCESS_PUBLIC_URL
+              value: http://process-service:8300
+            - name: PROCESS_JSON_LOGS
+              value: "true"
+            # Da quali pagine un browser puo' leggere questa API. In produzione
+            # e' l'origine dell'interfaccia, non `localhost`.
+            - name: PROCESS_ALLOWED_ORIGINS
+              value: https://lab.example
+          envFrom:
+            - secretRef:
+                name: agui-lab
+            - configMapRef:
+                name: agui-lab
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: process-service
+spec:
+  selector:
+    app.kubernetes.io/name: process-service
+  ports:
+    - port: 8300
+      targetPort: 8300

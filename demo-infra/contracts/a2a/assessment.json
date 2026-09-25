@@ -1,0 +1,42 @@
+{
+  "contract": "a2a/assessment",
+  "version": 2,
+  "produced_by": [
+    "demo-analysis-agent"
+  ],
+  "consumed_by": [
+    "demo-master-agent",
+    "demo-process-service"
+  ],
+  "description": "The data part of the A2A artifact the analysis agent attaches when it completes a task. The text part carries the same answer as prose; this is what a consumer reads to show which numbers the answer was computed from. `usage` says what the answer cost -- model calls and tokens -- which is what makes 'two agents in parallel' and 'one agent doing both' comparable.",
+  "sample": {
+    "component": "assessment",
+    "question": "Quale opzione conviene, a parita' di costo?",
+    "measurements": [
+      {
+        "tool": "measure",
+        "arguments": {
+          "values": "[12, 15, 11, 14, 98]"
+        },
+        "result": {
+          "count": 5,
+          "min": 11,
+          "max": 98,
+          "mean": 30.0,
+          "median": 14,
+          "spread": 33.7047,
+          "outliers": [
+            98
+          ],
+          "thin": false
+        }
+      }
+    ],
+    "summary": "La serie e' dominata da un valore isolato: senza quello, i valori stanno fra 11 e 15.",
+    "usage": {
+      "rounds": 2,
+      "input_tokens": 1840,
+      "output_tokens": 260
+    }
+  }
+}

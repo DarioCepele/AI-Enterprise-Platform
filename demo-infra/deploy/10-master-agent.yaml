@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: master-agent
+  labels:
+    app.kubernetes.io/name: master-agent
+    app.kubernetes.io/part-of: agui-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: master-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: master-agent
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # Numerico, non un nome: kubelet verifica che l'utente non sia root
+        # prima di avviare il container, e da un `USER service` non lo sa dire.
+        # Un manifest con solo runAsNonRoot non parte proprio.
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: master-agent
+          image: ghcr.io/your-org/demo-master-agent:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 1
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: DEMO_PUBLIC_URL
+              value: http://master-agent:8000
+            - name: DEMO_MEMORY_SERVICE_URL
+              value: http://memory-service:8100
+            - name: DEMO_PROCESS_SERVICE_URL
+              value: http://process-service:8300
+            # The two subagents by name. The tokens of their extended cards
+            # come from the Secret, so they are not written here: a subagent
+            # without a token still answers, it just serves the public card.
+            - name: DEMO_SUBAGENTS
+              value: |
+                [{"name": "knowledge", "url": "http://knowledge-agent:8200/"},
+                 {"name": "analysis", "url": "http://analysis-agent:8400/"}]
+            - name: DEMO_JSON_LOGS
+              value: "true"
+          envFrom:
+            - secretRef:
+                name: agui-lab
+            - configMapRef:
+                name: agui-lab
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: master-agent
+spec:
+  selector:
+    app.kubernetes.io/name: master-agent
+  ports:
+    - port: 8000
+      targetPort: 8000

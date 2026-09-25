@@ -1,0 +1,43 @@
+{
+  "contract": "agui/shared-state",
+  "version": 2,
+  "produced_by": [
+    "demo-master-agent"
+  ],
+  "consumed_by": [
+    "demo-frontend",
+    "demo-memory-service"
+  ],
+  "description": "The shared state carried by STATE_SNAPSHOT and stored with the thread. Top-level keys are replaced and not deep-merged, so each one belongs to a single writer: plan to the plan tools, artifacts to the UI tools, subagent_pending to the subagent tools. `subagent_pending.context_id` is the conversation the waiting task belongs to: an answer sent without it opens a new conversation, and the agent refuses it.",
+  "sample": {
+    "plan": {
+      "status": "in_progress",
+      "steps": [
+        {
+          "id": 1,
+          "title": "Ask the knowledge base",
+          "detail": "",
+          "source": "ask_knowledge",
+          "status": "completed",
+          "started_at": "2026-09-08T19:30:00+00:00",
+          "ended_at": "2026-09-08T19:30:12+00:00",
+          "note": null
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "id": "kb_4bcf45a1",
+        "component": "briefing",
+        "title": "knowledge: how does Go do typing?"
+      }
+    ],
+    "subagent_pending": {
+      "task_id": "4bcf45a1-6a1f-4c2e-9a55-1b0d4f2c77aa",
+      "context_id": "9f4b0f0c-2c41-4a4a-9b06-6a24f0a6f3d1",
+      "agent": "knowledge",
+      "question": "Which language are you asking about: Go, Python or Rust?",
+      "request": "how does concurrency work?"
+    }
+  }
+}

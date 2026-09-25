@@ -1,0 +1,12 @@
+{
+  "contract": "memory/write-results",
+  "version": 1,
+  "produced_by": ["demo-memory-service"],
+  "consumed_by": ["demo-master-agent"],
+  "description": "The counters returned by the writing endpoints: PUT /threads/{id}/snapshot, DELETE /threads/{id}, DELETE /scope. Each is a separate response; they are grouped here because they are read by the same client for the same reason -- to log what actually happened.",
+  "sample": {
+    "save_snapshot": { "new_turns": 6 },
+    "forget_thread": { "buckets_removed": 2 },
+    "forget_scope": { "threads_removed": 3 }
+  }
+}

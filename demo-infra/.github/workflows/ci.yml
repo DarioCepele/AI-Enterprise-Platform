@@ -1,0 +1,69 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # This repository holds the only copy of the contracts: a sample that is
+      # not valid JSON, or that loses the fields the failure message needs,
+      # breaks every other repository's tests without breaking its own.
+      - name: every contract is readable and declares who reads it
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+
+          problems = []
+          for path in sorted(pathlib.Path("contracts").rglob("*.json")):
+              contract = json.loads(path.read_text(encoding="utf-8"))
+              for field in ("contract", "version", "produced_by", "consumed_by", "sample"):
+                  if field not in contract:
+                      problems.append(f"{path}: missing '{field}'")
+              if contract.get("contract") != str(path.with_suffix("")).replace("contracts/", "").replace("\\", "/"):
+                  problems.append(f"{path}: the name does not match the path")
+          print("\n".join(problems) or "contracts ok")
+          sys.exit(1 if problems else 0)
+          PY
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: the compose file is valid with the example environment
+        run: |
+          cp .env.example .env
+          sed -i 's/^\(DEMO_PUSH_SECRET\)=.*/\1=ci/' .env
+          sed -i 's/^\(KNOWLEDGE_SERVICE_TOKEN\)=.*/\1=ci/' .env
+          sed -i 's/^\(ANALYSIS_SERVICE_TOKEN\)=.*/\1=ci/' .env
+          sed -i 's/^\(POSTGRES_PASSWORD\)=.*/\1=ci/' .env
+          docker compose config > /dev/null
+
+  env-table:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: demo-infra
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/demo-master-agent
+          path: demo-master-agent
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/demo-memory-service
+          path: demo-memory-service
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/demo-process-service
+          path: demo-process-service
+      - uses: astral-sh/setup-uv@v7
+
+      # The table is generated from the fields that read the environment: if it
+      # drifts, the README is documenting a configuration that no longer exists.
+      - run: uv run --project ../demo-master-agent python tools/env_table.py --check
+        working-directory: demo-infra

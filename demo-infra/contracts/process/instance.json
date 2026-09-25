@@ -1,0 +1,32 @@
+{
+  "contract": "process/instance",
+  "version": 1,
+  "produced_by": ["demo-process-service"],
+  "consumed_by": ["demo-frontend"],
+  "description": "An instance as the process service serves it on GET /instances and GET /instances/{id}. `status` and each step's `status` are what an interface renders; `question` says what a waiting step is waiting for, and `output` is opaque -- it belongs to whoever wrote the step.",
+  "sample": {
+    "id": "006c3ee6-9816-4f13-a169-718cb107864b",
+    "scope": "local-laboratory",
+    "process_id": "example-approval",
+    "process_version": 1,
+    "status": "waiting_approval",
+    "note": "failed: notify; undone: apply",
+    "input": { "amount": 25000, "request_id": "r-1" },
+    "context": {},
+    "created_at": "2026-09-09T20:58:28.080649Z",
+    "updated_at": "2026-09-09T20:59:43.779616Z",
+    "steps": [
+      {
+        "step_id": "approval",
+        "status": "waiting_approval",
+        "owner": "reviewer",
+        "task_id": "40b88cef-6a1f-4c2e-9a55-1b0d4f2c77aa",
+        "question": "waiting for a decision by reviewer",
+        "output": { "decision": "approved", "by": "reviewer", "note": null },
+        "note": "no answer within 120s, escalated to 'by_hand'",
+        "started_at": "2026-09-09T20:59:32.606621Z",
+        "ended_at": "2026-09-09T20:59:43.676279Z"
+      }
+    ]
+  }
+}

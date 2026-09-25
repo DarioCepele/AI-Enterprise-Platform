@@ -1,0 +1,23 @@
+{
+  "contract": "agui/logs-page",
+  "version": 1,
+  "produced_by": ["demo-master-agent"],
+  "consumed_by": ["demo-frontend"],
+  "description": "GET /logs?cursor=<opaque>. The operational logs the LOG tab polls. The cursor is opaque and belongs to whoever produced it: with a shared table it carries a sequence number from the database, without one it carries a sequence number local to the replica. A client hands back what it received and does not read inside it. `dropped` counts the lines that left the buffer between two reads, so a hole is not read as continuity.",
+  "opaque_fields": {
+    "cursor": "produced by the log sink; the client only echoes it back"
+  },
+  "sample": {
+    "entries": [
+      {
+        "seq": 41,
+        "ts": "2026-09-09T08:12:04.517+00:00",
+        "level": "INFO",
+        "source": "tools.subagent_tools",
+        "message": "Task 4bcf45a1 resumed: 1258 characters."
+      }
+    ],
+    "cursor": "1757404324517-0|41",
+    "dropped": 0
+  }
+}
