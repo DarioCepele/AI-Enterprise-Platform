@@ -1,0 +1,57 @@
+name: images
+
+on:
+  push:
+    paths:
+      - "demo-*/Dockerfile"
+      - "demo-*/src/**"
+      - "demo-*/pyproject.toml"
+      - "demo-*/uv.lock"
+      - "demo-*/package*.json"
+      - ".github/workflows/images.yml"
+  pull_request:
+    paths:
+      - "demo-*/Dockerfile"
+      - "demo-*/src/**"
+      - "demo-*/pyproject.toml"
+      - "demo-*/uv.lock"
+      - "demo-*/package*.json"
+      - ".github/workflows/images.yml"
+
+jobs:
+  # Ogni immagine si costruisce e si fa scansionare. Fallisce su HIGH e
+  # CRITICAL, ignorando quelle senza correzione disponibile: un avviso che
+  # nessuno puo' risolvere non e' un cancello, e' rumore.
+  build-and-scan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # demo-voice-service resta fuori: la sua immagine porta dentro torch e
+        # i modelli di riconoscimento e sintesi, e sfiora i 20GB -- oltre lo
+        # spazio libero di un runner standard. Va costruita a mano, o su un
+        # runner piu' capiente, finche' l'immagine non viene alleggerita.
+        project:
+          - demo-master-agent
+          - demo-frontend
+          - demo-memory-service
+          - demo-process-service
+          - demo-knowledge-agent
+          - demo-analysis-agent
+          - demo-scraping-mcp
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.project }}
+          push: false
+          load: true
+          tags: ${{ matrix.project }}:ci
+
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ matrix.project }}:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true

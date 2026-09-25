@@ -103,6 +103,7 @@ e' una tabella che mente al secondo cambiamento.
 | `OPENAI_BASE_URL` | `https://openrouter.ai/api/v1` | Where the model lives. Any OpenAI-compatible endpoint. |
 | `OPENAI_API_KEY` | *(empty)* | Credential for that endpoint. Required unless the fake client is on. |
 | `OPENAI_CHAT_COMPLETION_MODEL` | `anthropic/claude-sonnet-5` | Model the master agent talks to. |
+| `DEMO_VISION_MODEL` | `qwen/qwen3.8-27b` | Model the analyze_video tool talks to for frame description, kept separate from the conversation's own model since it must accept images natively. |
 | `DEMO_FAKE_CLIENT` | `False` | Deterministic answers without a model. For tests and offline work. |
 | `DEMO_ALLOWED_ORIGINS` | `http://localhost:3000, http://127.0.0.1:3000, http://localhost:3001, http://127.0.0.1:3001` | Comma-separated origins allowed by CORS. |
 | `DEMO_PRODUCT_NAME` | `AG-UI Lab` | What the agent calls itself in its own instructions. |
@@ -117,7 +118,12 @@ e' una tabella che mente al secondo cambiamento.
 | `DEMO_SUBAGENTS` | *(empty)* | Subagents as JSON: [{"name":"x","url":"http://...","token":""}]. |
 | `DEMO_PUBLIC_URL` | *(empty)* | How a subagent reaches this agent back, for push notifications. |
 | `DEMO_PROCESS_SERVICE_URL` | *(empty)* | Where durable processes live. Empty: the agent cannot start one. |
+| `DEMO_VOICE_SERVICE_URL` | *(empty)* | demo-voice-service, for its POST /transcribe. Empty: the video-analysis tool is not shown. |
 | `DEMO_SUBAGENT_WAIT_SECONDS` | `60.0` | How long a turn waits before letting the outcome arrive by notification. |
+| `DEMO_UPLOAD_DIR` | *(empty)* | Folder for ephemeral video uploads. Empty: the OS temp folder. |
+| `DEMO_UPLOAD_MAX_BYTES` | `209715200` | Largest accepted upload for /uploads. Bigger is refused. |
+| `DEMO_UPLOAD_TTL_SECONDS` | `3600.0` | How long an uploaded file stays fetchable before it is swept away. |
+| `DEMO_MCP_SERVERS` | *(empty)* | External MCP servers as JSON: [{"name":"x","url":"http://...","token":"","allowed_tools":[]}]. Each server's tools are added to the agent's own, connected lazily on first use. |
 
 ### memory service
 

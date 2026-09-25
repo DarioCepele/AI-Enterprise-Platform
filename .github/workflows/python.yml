@@ -1,0 +1,112 @@
+name: python
+
+# I contratti condivisi stanno fra i percorsi che fanno scattare questi test:
+# cambiarne uno rompe i consumatori, non chi lo pubblica, ed e' esattamente il
+# guasto che i test di contratto esistono per rendere rumoroso.
+on:
+  push:
+    paths:
+      - "demo-master-agent/**"
+      - "demo-memory-service/**"
+      - "demo-process-service/**"
+      - "demo-knowledge-agent/**"
+      - "demo-analysis-agent/**"
+      - "demo-scraping-mcp/**"
+      - "demo-infra/contracts/**"
+      - ".github/workflows/python.yml"
+  pull_request:
+    paths:
+      - "demo-master-agent/**"
+      - "demo-memory-service/**"
+      - "demo-process-service/**"
+      - "demo-knowledge-agent/**"
+      - "demo-analysis-agent/**"
+      - "demo-scraping-mcp/**"
+      - "demo-infra/contracts/**"
+      - ".github/workflows/python.yml"
+
+jobs:
+  # I servizi che non hanno uno stato proprio: nessun database da tirare su.
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - demo-knowledge-agent
+          - demo-analysis-agent
+          - demo-scraping-mcp
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Nessun secondo checkout: i contratti stanno in demo-infra/contracts, e
+      # sia i test Python (`parents[2]/demo-infra/contracts`) sia il frontend
+      # li cercano come percorso fratello -- che in un monorepo e' gia' quello
+      # giusto. Prima servivano un checkout separato e AGUI_LAB_CONTRACTS per
+      # ricostruire a mano questa struttura.
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run pytest -q
+
+  # I servizi che possiedono dati. Una sola immagine per tutti e tre: pgvector
+  # e' Postgres 17 con l'estensione in piu', quindi copre anche chi non la usa
+  # e tiene la matrice a una dimensione sola.
+  tests-with-database:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: demo-master-agent
+            database: agente
+          - project: demo-memory-service
+            database: memoria
+          - project: demo-process-service
+            database: processi
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: ${{ matrix.database }}
+          POSTGRES_PASSWORD: ${{ matrix.database }}
+          POSTGRES_DB: ${{ matrix.database }}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run pytest -q
+        env:
+          # Ogni servizio legge solo la propria variabile: impostarle tutte e
+          # tre costa nulla ed evita di dover comporre il nome di una chiave da
+          # un valore della matrice, cosa che GitHub Actions non permette.
+          # La suite si deriva il proprio database e se lo crea: quello che
+          # lascia dietro non tocca il database di un servizio.
+          DEMO_POSTGRES_DSN: postgresql://${{ matrix.database }}:${{ matrix.database }}@127.0.0.1:5432/${{ matrix.database }}
+          MEMORY_POSTGRES_DSN: postgresql://${{ matrix.database }}:${{ matrix.database }}@127.0.0.1:5432/${{ matrix.database }}
+          PROCESS_POSTGRES_DSN: postgresql://${{ matrix.database }}:${{ matrix.database }}@127.0.0.1:5432/${{ matrix.database }}
+          DEMO_FAKE_CLIENT: "true"

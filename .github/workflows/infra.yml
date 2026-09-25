@@ -1,18 +1,27 @@
-name: ci
+name: infra
 
 on:
   push:
+    paths:
+      - "demo-infra/**"
+      - ".github/workflows/infra.yml"
   pull_request:
+    paths:
+      - "demo-infra/**"
+      - ".github/workflows/infra.yml"
 
 jobs:
   contracts:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: demo-infra
     steps:
       - uses: actions/checkout@v5
 
-      # This repository holds the only copy of the contracts: a sample that is
-      # not valid JSON, or that loses the fields the failure message needs,
-      # breaks every other repository's tests without breaking its own.
+      # Qui sta l'unica copia dei contratti: un sample che non e' JSON valido,
+      # o che perde i campi di cui il messaggio d'errore ha bisogno, rompe i
+      # test di tutti gli altri senza rompere i propri.
       - name: every contract is readable and declares who reads it
         run: |
           python - <<'PY'
@@ -32,6 +41,9 @@ jobs:
 
   compose:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: demo-infra
     steps:
       - uses: actions/checkout@v5
       - name: the compose file is valid with the example environment
@@ -45,25 +57,16 @@ jobs:
 
   env-table:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: demo-infra
     steps:
+      # Un checkout solo: prima ne servivano quattro, perche' la tabella si
+      # genera leggendo i Settings di tre servizi diversi e quei servizi
+      # stavano in repository separati.
       - uses: actions/checkout@v5
-        with:
-          path: demo-infra
-      - uses: actions/checkout@v5
-        with:
-          repository: ${{ github.repository_owner }}/demo-master-agent
-          path: demo-master-agent
-      - uses: actions/checkout@v5
-        with:
-          repository: ${{ github.repository_owner }}/demo-memory-service
-          path: demo-memory-service
-      - uses: actions/checkout@v5
-        with:
-          repository: ${{ github.repository_owner }}/demo-process-service
-          path: demo-process-service
       - uses: astral-sh/setup-uv@v7
 
-      # The table is generated from the fields that read the environment: if it
-      # drifts, the README is documenting a configuration that no longer exists.
+      # La tabella e' generata dai campi che leggono l'ambiente: se divergono,
+      # il README sta documentando una configurazione che non esiste piu'.
       - run: uv run --project ../demo-master-agent python tools/env_table.py --check
-        working-directory: demo-infra
