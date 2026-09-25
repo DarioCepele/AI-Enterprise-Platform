@@ -19,6 +19,9 @@ export const product = {
   get disclaimer() {
     return runtimeConfig().product.disclaimer;
   },
+  get aiDisclosure() {
+    return runtimeConfig().product.aiDisclosure;
+  },
   get locale() {
     return runtimeConfig().product.locale;
   },

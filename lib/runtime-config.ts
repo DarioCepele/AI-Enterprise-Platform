@@ -20,6 +20,10 @@ export interface RuntimeConfig {
     tagline: string;
     description: string;
     disclaimer: string;
+    /** Art. 50 EU AI Act: an explicit, unambiguous statement that the user is
+     * talking to an AI system, not a human — distinct from `disclaimer`,
+     * which is a quality caveat, not a transparency obligation. */
+    aiDisclosure: string;
     locale: string;
     monogram: string;
     badges: string[];
@@ -43,6 +47,7 @@ const DEFAULTS: RuntimeConfig = {
     tagline: "an agent at work",
     description: "Chat, work plan, events and logs of a running agent.",
     disclaimer: "The agent can be wrong. Follow the plan and inspect the events.",
+    aiDisclosure: "You are interacting with an artificial intelligence system, not a human.",
     locale: "en",
     monogram: "a/",
     badges: ["AG-UI", "MAF 1.17", "Next.js"],
@@ -82,6 +87,9 @@ export function configFromEnvironment(
       disclaimer:
         pick(env.PRODUCT_DISCLAIMER, env.NEXT_PUBLIC_PRODUCT_DISCLAIMER) ??
         DEFAULTS.product.disclaimer,
+      aiDisclosure:
+        pick(env.PRODUCT_AI_DISCLOSURE, env.NEXT_PUBLIC_PRODUCT_AI_DISCLOSURE) ??
+        DEFAULTS.product.aiDisclosure,
       locale: pick(env.PRODUCT_LOCALE, env.NEXT_PUBLIC_PRODUCT_LOCALE) ?? DEFAULTS.product.locale,
       monogram:
         pick(env.PRODUCT_MONOGRAM, env.NEXT_PUBLIC_PRODUCT_MONOGRAM) ?? DEFAULTS.product.monogram,

@@ -133,6 +133,27 @@ describe("Chat — attaching a video", () => {
   });
 });
 
+describe("Chat — AI disclosure", () => {
+  it("shows an explicit AI-interaction disclosure before any message is sent", () => {
+    render(
+      <Chat
+        entries={[]}
+        running={false}
+        error={null}
+        onSend={vi.fn()}
+        voiceAvailable={false}
+        voiceActive={false}
+        voiceError={null}
+        onToggleVoice={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("You are interacting with an artificial intelligence system, not a human."),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("Chat — talking to the agent", () => {
   it("has no mic when no voice service is configured", () => {
     render(

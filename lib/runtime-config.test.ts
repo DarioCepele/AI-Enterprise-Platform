@@ -47,6 +47,23 @@ describe("runtime configuration", () => {
     expect(bare.product.name).toBe("AG-UI Lab");
   });
 
+  it("defaults to an explicit AI-interaction disclosure, distinct from the quality disclaimer", () => {
+    const bare = configFromEnvironment({});
+
+    expect(bare.product.aiDisclosure).toBe(
+      "You are interacting with an artificial intelligence system, not a human.",
+    );
+    expect(bare.product.aiDisclosure).not.toBe(bare.product.disclaimer);
+  });
+
+  it("reads the AI disclosure from the environment without needing the NEXT_PUBLIC prefix", () => {
+    const config = configFromEnvironment({
+      PRODUCT_AI_DISCLOSURE: "This is a custom AI notice.",
+    });
+
+    expect(config.product.aiDisclosure).toBe("This is a custom AI notice.");
+  });
+
   it("the browser reads what the page carried, not what the bundle knew", () => {
     inject({
       aguiUrl: "http://from-the-page/agui",

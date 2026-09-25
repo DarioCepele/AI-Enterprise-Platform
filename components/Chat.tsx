@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Entry } from "@/lib/agui/entries";
 import type { MessagePart } from "@/lib/agui/types";
 import { uploadVideo } from "@/lib/agui/client";
-import { emptyState } from "@/lib/config";
+import { emptyState, product } from "@/lib/config";
 import { EntryView } from "./entries";
 
 interface Props {
@@ -111,6 +111,12 @@ export function Chat({
       >
         {entries.length === 0 && (
           <div className="mx-auto flex min-h-[60vh] max-w-lg flex-col justify-center">
+            <p
+              role="note"
+              className="mb-4 rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+            >
+              {product.aiDisclosure}
+            </p>
             <p className="mb-3 text-sm text-[var(--muted)]">{emptyState.eyebrow}</p>
             <h2 className="text-3xl font-medium leading-tight tracking-tight text-balance">{emptyState.headline}<br />{emptyState.subhead}</h2>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-[var(--muted)]">{emptyState.body}</p>
