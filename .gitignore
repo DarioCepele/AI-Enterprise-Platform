@@ -17,3 +17,7 @@ __pycache__/
 
 # I piani di lavoro restano locali, fuori dal repository pubblicato.
 piani/
+
+# Le vecchie repo indipendenti, conservate come rollback dopo il passaggio
+# a monorepo: contengono la storia pre-riscrittura, non va ripubblicata.
+.git.bak/
