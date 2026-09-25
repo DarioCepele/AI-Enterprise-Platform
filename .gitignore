@@ -1,0 +1,19 @@
+# Dipendenze installate e cache: si ricreano, non si versionano.
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.next/
+
+# Credenziali: ogni servizio legge il proprio .env, che resta locale.
+.env
+
+# Stato locale di strumenti di sviluppo.
+.claude/
+.playwright-mcp/
+
+# I piani di lavoro restano locali, fuori dal repository pubblicato.
+piani/
