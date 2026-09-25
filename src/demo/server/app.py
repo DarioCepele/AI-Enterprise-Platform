@@ -65,11 +65,6 @@ def _default_snapshot_store() -> AGUIThreadSnapshotStore:
     return MemoryServiceSnapshotStore(url)
 
 
-def _where(dsn: str) -> str:
-    """L'indirizzo senza le credenziali: un log non e' il posto per una password."""
-    return dsn.split("@")[-1] or "the configured database"
-
-
 def _shared_pool() -> AsyncConnectionPool | None:
     """The little state this agent shares between its replicas, or nothing.
 

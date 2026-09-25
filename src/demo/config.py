@@ -311,6 +311,167 @@ FIELD_NOTES = {
 }
 
 
+NOT_CONFIGURED = "not configured by this deployment"
+
+# Never read for their value, only named: a report that reads the running
+# configuration has every credential within reach, so the ones that are
+# credentials are listed once, here, and skipped wherever fields are iterated.
+CREDENTIAL_FIELDS = frozenset({"api_key", "knowledge_service_token", "postgres_dsn"})
+
+# What this deployment discloses about itself, and under which heading. An
+# allowlist rather than a list of exclusions: a field added to Settings
+# tomorrow stays out of the report until someone decides it may be shown, which
+# is the safe direction to fail in when the next field is a token.
+DISCLOSED_FIELDS = {
+    "product_name": "identity",
+    "product_language": "identity",
+    "model": "models",
+    "vision_model": "models",
+    "use_fake_client": "models",
+    "base_url": "providers",
+    "voice_service_url": "providers",
+    "process_service_url": "providers",
+    "memory_service_url": "data",
+    "default_scope": "boundaries",
+    "scope_header": "boundaries",
+}
+
+
+def host_of_dsn(dsn: str) -> str:
+    """L'indirizzo senza le credenziali: un log non e' il posto per una password.
+
+    Nemmeno un report di trasparenza lo e': la stessa regola serve i log di
+    avvio e `transparency_report()`, e vive qui per essere una sola.
+    """
+    return dsn.split("@")[-1] or "the configured database"
+
+
+def _alias(name: str) -> str:
+    """The environment variable that sets a field, as the field declares it."""
+    field = Settings.model_fields[name]
+    if isinstance(field.validation_alias, AliasChoices):
+        return str(next(iter(field.validation_alias.choices)))
+    return name.upper()
+
+
+def _disclosed(value: object) -> object:
+    """A configured value as the report shows it; what is empty says so."""
+    if isinstance(value, tuple):
+        return [str(item) for item in value]
+    if value is None or value == "":
+        return NOT_CONFIGURED
+    return value
+
+
+def _retention(settings: Settings) -> list[dict[str, object]]:
+    """How long data stays, said only where the configuration actually says it.
+
+    The upload TTL is the one window this deployment really has. For the
+    conversation and the operational logs nothing is configured, and the report
+    says exactly that: a number written here would be publishing a retention
+    policy this code has no authority to decide.
+    """
+    memory = settings.memory_service_url
+    return [
+        {
+            "subject": "uploaded video files",
+            "window": f"{settings.upload_ttl_seconds:g} seconds, then swept away",
+            "size_limit": f"{settings.upload_max_bytes} bytes",
+            "set_by": _alias("upload_ttl_seconds"),
+        },
+        {
+            "subject": "conversation history",
+            "window": (
+                f"kept by the memory service at {memory}; an expiry is {NOT_CONFIGURED}"
+                if memory
+                else "in this process only: lost when it restarts"
+            ),
+            "set_by": _alias("memory_service_url"),
+        },
+        {
+            "subject": "operational logs",
+            "window": (
+                f"kept in the shared database; an expiry is {NOT_CONFIGURED}"
+                if settings.postgres_dsn
+                else "in this process only: lost when it restarts"
+            ),
+            "set_by": _alias("postgres_dsn"),
+        },
+    ]
+
+
+def transparency_report(settings: Settings | None = None) -> dict[str, object]:
+    """What this deployment is actually running, for AI Act art. 50 disclosure.
+
+    Sibling of `env_table()` and deliberately not the same thing. That one
+    documents the *schema*: it prints `field.get_default(...)` for every
+    variable and never looks at an instance, which is why it is safe to publish
+    as is -- a default is public by definition. This one reports the values
+    this process was *configured* with: which model is answering here, through
+    which endpoint, where the conversation is kept. Article 50 asks what is
+    happening, not what would happen if nobody had configured anything, so a
+    report built from defaults would be true of the repository and false of the
+    deployment.
+
+    Reading real values puts credentials in reach, so disclosure is an
+    allowlist (`DISCLOSED_FIELDS`) and never `CREDENTIAL_FIELDS`; the tokens
+    inside `subagents` and `mcp_servers` are not read either, and
+    `postgres_dsn` appears only as the host `host_of_dsn()` already logs.
+    """
+    settings = settings or get_settings()
+    sections: dict[str, list[dict[str, object]]] = {}
+    for name in Settings.model_fields:
+        section = DISCLOSED_FIELDS.get(name)
+        if section is None or name in CREDENTIAL_FIELDS:
+            continue
+        sections.setdefault(section, []).append(
+            {
+                "variable": _alias(name),
+                "value": _disclosed(getattr(settings, name)),
+                "what_it_decides": FIELD_NOTES.get(name, ""),
+            }
+        )
+    sections.setdefault("data", []).append(
+        {
+            "variable": _alias("postgres_dsn"),
+            # The host, never the DSN: it carries the password.
+            "value": (
+                host_of_dsn(settings.postgres_dsn)
+                if settings.postgres_dsn
+                else NOT_CONFIGURED
+            ),
+            "what_it_decides": FIELD_NOTES.get("postgres_dsn", ""),
+        }
+    )
+    return {
+        "notice": (
+            "Transparency about the AI system serving this endpoint, generated "
+            "from the configuration this process is running with."
+        ),
+        "configuration": sections,
+        "subagents": [
+            {"name": agent.name, "url": agent.url} for agent in settings.subagents
+        ],
+        "mcp_servers": [
+            {
+                "name": server.name,
+                "url": server.url,
+                "allowed_tools": list(server.allowed_tools),
+            }
+            for server in settings.mcp_servers
+        ],
+        "retention": _retention(settings),
+        "withheld": {
+            "variables": sorted(_alias(name) for name in CREDENTIAL_FIELDS),
+            "note": (
+                "Also withheld: the token of every entry in "
+                f"{_alias('subagents')} and {_alias('mcp_servers')}. Credentials "
+                "are named here, never valued."
+            ),
+        },
+    }
+
+
 def env_table() -> str:
     """The environment table, generated from the fields themselves."""
     rows = ["| Variable | Default | What it decides |", "|---|---|---|"]

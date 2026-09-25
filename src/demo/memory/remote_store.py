@@ -64,7 +64,9 @@ class MemoryServiceSnapshotStore:
         snapshot: AGUIThreadSnapshot,
     ) -> None:
         body: dict[str, Any] = {
-            "messages": snapshot.messages,
+            "messages": [
+                {k: v for k, v in m.items() if k != "role"} for m in snapshot.messages
+            ],
             "state": snapshot.state,
             "interrupt": snapshot.interrupt,
             "session_state": snapshot.session_state,
