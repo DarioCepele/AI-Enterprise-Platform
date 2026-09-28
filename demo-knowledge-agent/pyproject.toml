@@ -5,7 +5,7 @@ license = "Apache-2.0"
 description = "Sottoagente di knowledge base esposto via A2A"
 requires-python = ">=3.12"
 dependencies = [
-    "agent-framework-core==1.17.0",
+    "agent-framework-core==1.19.0",
     "agent-framework-openai",
     # `postgresql` brings the durable task store: a task a process is waiting
     # on has to survive a restart of the agent that is working on it.
