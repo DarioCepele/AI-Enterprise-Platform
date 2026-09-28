@@ -4,7 +4,6 @@ metadata:
   name: frontend
   labels:
     app.kubernetes.io/name: frontend
-    app.kubernetes.io/part-of: agui-lab
 spec:
   replicas: 2
   selector:
@@ -15,63 +14,53 @@ spec:
       labels:
         app.kubernetes.io/name: frontend
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        # Numerico, non un nome: kubelet verifica che l'utente non sia root
-        # prima di avviare il container, e da un `USER service` non lo sa dire.
-        # Un manifest con solo runAsNonRoot non parte proprio.
         runAsUser: 1000
+        runAsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: ghcr.io/your-org/demo-frontend:latest
+          image: ghcr.io/your-org/frontend:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 3000
+            - name: http
+              containerPort: 3000
           securityContext:
             allowPrivilegeEscalation: false
-            # Next writes its cache under /app/.next: read-only here would
-            # mean mounting a volume for it, which buys nothing.
-            readOnlyRootFilesystem: false
+            # Next writes its cache under /app/.next; everything else stays
+            # read-only through the mount below.
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
-            requests:
-              memory: 128Mi
-              cpu: 100m
-            limits:
-              memory: 256Mi
-              cpu: 500m
+            requests: { memory: 128Mi, cpu: 100m }
+            limits: { memory: 256Mi, cpu: 500m }
           livenessProbe:
-            httpGet:
-              path: /
-              port: 3000
+            httpGet: { path: /, port: http }
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /
-              port: 3000
+            httpGet: { path: /, port: http }
             periodSeconds: 5
             failureThreshold: 3
-          env:
-            - name: AGUI_URL
-              value: http://master-agent:8000/agui
-            # Il browser chiama il servizio dei processi **direttamente**, quindi
-            # questo e' un indirizzo di fuori: dentro il cluster sarebbe un nome
-            # che la macchina di chi guarda non risolve. Va con l'ingress.
-            - name: PROCESS_URL
-              value: https://processi.example
-            # Il server di Next ascolta su `HOSTNAME`, e in un pod quella
-            # variabile e' il nome del pod: si legherebbe al proprio indirizzo e
-            # basta. Il Service funzionerebbe lo stesso, un `port-forward` no --
-            # e chi debugga si troverebbe una connessione rifiutata senza
-            # capire perche'.
-            - name: HOSTNAME
-              value: "0.0.0.0"
+          # AGUI_URL, PROCESS_URL, VOICE_URL, PRODUCT_NAME: read at request
+          # time from the ConfigMap, so the same image serves any environment.
+          # They are the browser's addresses, public names behind the ingress.
           envFrom:
-            - configMapRef:
-                name: agui-lab
+            - configMapRef: { name: agent-platform }
+          env:
+            # Next's server binds to HOSTNAME, which in a pod is the pod name.
+            - { name: HOSTNAME, value: "0.0.0.0" }
+          volumeMounts:
+            - { name: next-cache, mountPath: /app/.next/cache }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: next-cache
+          emptyDir: { sizeLimit: 256Mi }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -81,5 +70,14 @@ spec:
   selector:
     app.kubernetes.io/name: frontend
   ports:
-    - port: 3000
-      targetPort: 3000
+    - { name: http, port: 3000, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend

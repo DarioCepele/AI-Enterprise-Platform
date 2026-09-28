@@ -4,8 +4,9 @@ metadata:
   name: knowledge-agent
   labels:
     app.kubernetes.io/name: knowledge-agent
-    app.kubernetes.io/part-of: agui-lab
 spec:
+  # Tasks and webhooks live in Postgres (AGENTS_POSTGRES_DSN): a restart does
+  # not lose a task a process is waiting on, and more replicas are possible.
   replicas: 1
   selector:
     matchLabels:
@@ -15,53 +16,59 @@ spec:
       labels:
         app.kubernetes.io/name: knowledge-agent
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        # Numerico, non un nome: kubelet verifica che l'utente non sia root
-        # prima di avviare il container, e da un `USER service` non lo sa dire.
-        # Un manifest con solo runAsNonRoot non parte proprio.
         runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: knowledge-agent
-          image: ghcr.io/your-org/demo-knowledge-agent:latest
+          image: ghcr.io/your-org/knowledge-agent:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8200
+            - name: http
+              containerPort: 8200
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
-            requests:
-              memory: 256Mi
-              cpu: 100m
-            limits:
-              memory: 512Mi
-              cpu: 1
+            requests: { memory: 256Mi, cpu: 100m }
+            limits: { memory: 512Mi, cpu: "1" }
           livenessProbe:
-            httpGet:
-              path: /health/live
-              port: 8200
+            httpGet: { path: /health/live, port: http }
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /health/ready
-              port: 8200
+            httpGet: { path: /health/ready, port: http }
             periodSeconds: 5
             failureThreshold: 3
           env:
-            - name: KNOWLEDGE_BASE_URL
-              value: http://knowledge-agent:8200/
-            - name: KNOWLEDGE_JSON_LOGS
-              value: "true"
-          envFrom:
-            - secretRef:
-                name: agui-lab
-            - configMapRef:
-                name: agui-lab
+            - { name: KNOWLEDGE_BASE_URL, value: "http://knowledge-agent:8200/" }
+            - { name: KNOWLEDGE_JSON_LOGS, value: "true" }
+            - name: KNOWLEDGE_MCP_SERVERS
+              value: '[{"name": "scraping", "url": "http://scraping-mcp:8600/mcp"}]'
+            - name: KNOWLEDGE_PUSH_ALLOWED_URLS
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: PUSH_ALLOWED_URLS } }
+            - name: KNOWLEDGE_LANGUAGE
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: MASTER_PRODUCT_LANGUAGE } }
+            - name: OPENAI_BASE_URL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: OPENAI_BASE_URL } }
+            - name: OPENAI_CHAT_COMPLETION_MODEL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: OPENAI_CHAT_COMPLETION_MODEL } }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: agent-platform, key: OPENAI_API_KEY } }
+            - name: KNOWLEDGE_SERVICE_TOKEN
+              valueFrom: { secretKeyRef: { name: agent-platform, key: KNOWLEDGE_SERVICE_TOKEN } }
+            - name: KNOWLEDGE_TASK_STORE_DSN
+              valueFrom: { secretKeyRef: { name: agent-platform, key: AGENTS_POSTGRES_DSN } }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -71,5 +78,4 @@ spec:
   selector:
     app.kubernetes.io/name: knowledge-agent
   ports:
-    - port: 8200
-      targetPort: 8200
+    - { name: http, port: 8200, targetPort: http }

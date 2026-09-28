@@ -1,0 +1,65 @@
+# The four addresses the browser uses, on one standard Ingress.
+#
+# No controller-specific annotations: the class is the cluster's default one,
+# and TLS uses the secret `agent-platform-tls` (created by cert-manager or by
+# hand). Four hosts instead of path rewrites, because rewriting paths is the
+# part every controller does differently. Replace example.com with your
+# domain, here and in 00-configmap.yaml.
+#
+# Nothing here authenticates: put your identity-aware proxy or your
+# controller's authentication in front, as the README describes.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-platform
+spec:
+  tls:
+    - hosts:
+        - app.example.com
+        - agent.example.com
+        - processes.example.com
+        - voice.example.com
+      secretName: agent-platform-tls
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: frontend, port: { name: http } }
+    - host: agent.example.com
+      http:
+        paths:
+          # The AG-UI stream, uploads and logs. Not the webhook path: the
+          # subagents reach it inside the cluster.
+          - path: /agui
+            pathType: Prefix
+            backend:
+              service: { name: master-agent, port: { name: http } }
+          - path: /uploads
+            pathType: Prefix
+            backend:
+              service: { name: master-agent, port: { name: http } }
+          - path: /logs
+            pathType: Exact
+            backend:
+              service: { name: master-agent, port: { name: http } }
+          - path: /transparency
+            pathType: Exact
+            backend:
+              service: { name: master-agent, port: { name: http } }
+    - host: processes.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: process-service, port: { name: http } }
+    - host: voice.example.com
+      http:
+        paths:
+          - path: /ws/voice
+            pathType: Exact
+            backend:
+              service: { name: voice-service, port: { name: http } }

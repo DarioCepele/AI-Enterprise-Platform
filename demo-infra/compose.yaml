@@ -1,122 +1,247 @@
+# The whole platform on one machine: `docker compose up -d` from this folder.
+#
+# Defaults are the safe ones. Ports are published on the loopback only (set
+# BIND_ADDRESS=0.0.0.0 to reach the platform from another machine, knowing it
+# has no authentication of its own); every service connects to Postgres as its
+# own role; the scraper sits on a network of its own, from which the other
+# services cannot be reached; Python services run on a read-only filesystem
+# with no Linux capabilities.
+name: agent-platform
+
+x-hardened: &hardened
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+x-local-models: &local-models
+  # An OpenAI-compatible server on the host (LM Studio, Ollama, vLLM) is
+  # reachable as host.docker.internal.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
 services:
-  master-agent:
+  postgres:
+    # Postgres with pgvector: semantic search sits next to the transcripts it is
+    # rebuilt from, instead of in a second datastore.
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     deploy:
       resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
-    build: ../demo-master-agent
+        limits: { memory: 512M, cpus: "1.0" }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  postgres-init:
+    # One role and one database per service, on every `up` (see provision.sh).
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    entrypoint: ["sh", "/provision/provision.sh"]
+    restart: "no"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MASTER_DB_PASSWORD: ${MASTER_DB_PASSWORD:?set MASTER_DB_PASSWORD in .env}
+      MEMORY_DB_PASSWORD: ${MEMORY_DB_PASSWORD:?set MEMORY_DB_PASSWORD in .env}
+      PROCESS_DB_PASSWORD: ${PROCESS_DB_PASSWORD:?set PROCESS_DB_PASSWORD in .env}
+      AGENTS_DB_PASSWORD: ${AGENTS_DB_PASSWORD:?set AGENTS_DB_PASSWORD in .env}
+    volumes:
+      - ./postgres:/provision:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  master-agent:
+    <<: [*hardened, *local-models]
+    build:
+      context: ../demo-master-agent
+      additional_contexts:
+        platform-core: ../packages/platform-core
     ports:
-      - "8000:8000"
+      - "${BIND_ADDRESS:-127.0.0.1}:8000:8000"
     environment:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_CHAT_COMPLETION_MODEL: ${OPENAI_CHAT_COMPLETION_MODEL}
-      DEMO_FAKE_CLIENT: ${DEMO_FAKE_CLIENT:-false}
-      DEMO_ALLOWED_ORIGINS: ${DEMO_ALLOWED_ORIGINS:-}
-      DEMO_MEMORY_SERVICE_URL: http://memory-service:8100
-      DEMO_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/agente
-      DEMO_JSON_LOGS: ${JSON_LOGS:-false}
+      MASTER_FAKE_CLIENT: ${FAKE_MODEL:-false}
+      MASTER_ALLOWED_ORIGINS: ${MASTER_ALLOWED_ORIGINS:-}
+      MASTER_PRODUCT_NAME: ${PRODUCT_NAME:-Agent Platform}
+      MASTER_PRODUCT_LANGUAGE: ${PRODUCT_LANGUAGE:-}
+      MASTER_MEMORY_SERVICE_URL: http://memory-service:8100
+      MASTER_POSTGRES_DSN: postgresql://master_svc:${MASTER_DB_PASSWORD}@postgres:5432/master
+      MASTER_JSON_LOGS: ${JSON_LOGS:-false}
+      MASTER_LOGS_ENDPOINT: ${LOGS_ENDPOINT:-true}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      DEMO_SUBAGENTS: >-
-        [{"name": "knowledge", "url": "http://knowledge-agent:8200/",
-          "token": "${KNOWLEDGE_SERVICE_TOKEN}"},
-         {"name": "analysis", "url": "http://analysis-agent:8400/",
-          "token": "${ANALYSIS_SERVICE_TOKEN}"}]
-      DEMO_PROCESS_SERVICE_URL: http://process-service:8300
-      # voice-service dipende da master-agent (deve chiamarlo per il turno
-      # AG-UI), quindi qui non possiamo aggiungere un depends_on inverso
-      # senza creare un ciclo: analyze_video viene chiamato solo a runtime,
-      # non allo startup, quindi va bene che manchi l'ordinamento.
-      DEMO_VOICE_SERVICE_URL: http://voice-service:8500
-      DEMO_VISION_MODEL: ${DEMO_VISION_MODEL:-qwen/qwen3.8-27b}
-      DEMO_PUBLIC_URL: http://master-agent:8000
-      DEMO_PUSH_SECRET: ${DEMO_PUSH_SECRET:?required in .env}
-      DEMO_KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?required in .env}
-      DEMO_SUBAGENT_WAIT_SECONDS: ${DEMO_SUBAGENT_WAIT_SECONDS:-60}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      # Which subagents exist is configuration; their tokens are secrets, one
+      # variable each.
+      MASTER_SUBAGENTS: >-
+        [{"name": "knowledge", "url": "http://knowledge-agent:8200/"},
+         {"name": "analysis", "url": "http://analysis-agent:8400/"}]
+      MASTER_SUBAGENT_TOKEN_KNOWLEDGE: ${KNOWLEDGE_SERVICE_TOKEN:?set KNOWLEDGE_SERVICE_TOKEN in .env}
+      MASTER_SUBAGENT_TOKEN_ANALYSIS: ${ANALYSIS_SERVICE_TOKEN:?set ANALYSIS_SERVICE_TOKEN in .env}
+      MASTER_PROCESS_SERVICE_URL: http://process-service:8300
+      # voice-service depends on master-agent (it calls it for each turn), so
+      # there is no depends_on the other way: analyze_video reaches it only at
+      # run time, never at startup.
+      MASTER_VOICE_SERVICE_URL: http://voice-service:8500
+      MASTER_VISION_MODEL: ${VISION_MODEL:-qwen/qwen3.8-27b}
+      MASTER_PUBLIC_URL: http://master-agent:8000
+      MASTER_PUSH_SECRET: ${PUSH_SECRET:?set PUSH_SECRET in .env}
+      MASTER_SUBAGENT_WAIT_SECONDS: ${SUBAGENT_WAIT_SECONDS:-60}
+      MASTER_TOOLS_REQUIRING_APPROVAL: ${TOOLS_REQUIRING_APPROVAL:-start_process}
     depends_on:
+      postgres-init:
+        condition: service_completed_successfully
       memory-service:
         condition: service_healthy
       knowledge-agent:
         condition: service_healthy
       analysis-agent:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
+    deploy:
+      resources:
+        limits: { memory: 1G, cpus: "1.0" }
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
       interval: 10s
       timeout: 3s
       retries: 5
 
   memory-service:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
-    build: ../demo-memory-service
+    <<: [*hardened, *local-models]
+    build:
+      context: ../demo-memory-service
+      additional_contexts:
+        platform-core: ../packages/platform-core
     environment:
-      MEMORY_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/memoria
+      MEMORY_POSTGRES_DSN: postgresql://memory_svc:${MEMORY_DB_PASSWORD}@postgres:5432/memory
       MEMORY_SUMMARY_BASE_URL: ${OPENAI_BASE_URL}
       MEMORY_SUMMARY_API_KEY: ${OPENAI_API_KEY}
       MEMORY_SUMMARY_MODEL: ${MEMORY_SUMMARY_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
+      MEMORY_SUMMARY_LANGUAGE: ${PRODUCT_LANGUAGE:-}
       MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-}
       MEMORY_RETENTION_DAYS: ${MEMORY_RETENTION_DAYS:-0}
       MEMORY_JSON_LOGS: ${JSON_LOGS:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits: { memory: 512M, cpus: "1.0" }
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health/ready')"]
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health/ready')"]
       interval: 10s
       timeout: 3s
       retries: 5
 
   knowledge-agent:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
-    build: ../demo-knowledge-agent
+    <<: [*hardened, *local-models]
+    build:
+      context: ../demo-knowledge-agent
+      additional_contexts:
+        platform-core: ../packages/platform-core
+    networks: [default, scraping]
     ports:
-      # On the loopback only: published so that a measurement -- or a service
-      # started outside compose -- can reach the agent the way another
-      # container does.
+      # Loopback only: published so a measurement -- or a service started
+      # outside compose -- can reach the agent the way another container does.
       - "127.0.0.1:8200:8200"
     environment:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_CHAT_COMPLETION_MODEL: ${KNOWLEDGE_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
       KNOWLEDGE_BASE_URL: http://knowledge-agent:8200/
-      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?required in .env}
-      # Empty by default: a fork with nothing configured here gets no MCP
-      # tools, not a startup error (build_mcp_tools' own reasoning, same as
-      # every other optional dependency in this platform).
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN}
+      KNOWLEDGE_FAKE_CLIENT: ${FAKE_MODEL:-false}
+      KNOWLEDGE_LANGUAGE: ${PRODUCT_LANGUAGE:-}
+      KNOWLEDGE_JSON_LOGS: ${JSON_LOGS:-false}
+      # Push notifications go only to the platform's own receivers: whoever
+      # sends a task chooses the webhook, so the agent must not post anywhere.
+      KNOWLEDGE_PUSH_ALLOWED_URLS: http://master-agent:8000/a2a/push/,http://process-service:8300/a2a/push/
+      KNOWLEDGE_TASK_STORE_DSN: postgresql://agents_svc:${AGENTS_DB_PASSWORD}@postgres:5432/agents
+      # Empty to turn MCP tools off; the scraper is the example server.
       KNOWLEDGE_MCP_SERVERS: >-
         ${KNOWLEDGE_MCP_SERVERS:-[{"name": "scraping", "url": "http://scraping-mcp:8600/mcp"}]}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits: { memory: 512M, cpus: "1.0" }
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8200/health/ready')"]
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8200/health/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  analysis-agent:
+    <<: [*hardened, *local-models]
+    build:
+      context: ../demo-analysis-agent
+      additional_contexts:
+        platform-core: ../packages/platform-core
+    ports:
+      - "127.0.0.1:8400:8400"
+    environment:
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_COMPLETION_MODEL: ${ANALYSIS_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
+      ANALYSIS_BASE_URL: http://analysis-agent:8400/
+      ANALYSIS_SERVICE_TOKEN: ${ANALYSIS_SERVICE_TOKEN}
+      ANALYSIS_FAKE_CLIENT: ${FAKE_MODEL:-false}
+      ANALYSIS_LANGUAGE: ${PRODUCT_LANGUAGE:-}
+      ANALYSIS_JSON_LOGS: ${JSON_LOGS:-false}
+      ANALYSIS_PUSH_ALLOWED_URLS: http://master-agent:8000/a2a/push/,http://process-service:8300/a2a/push/
+      ANALYSIS_TASK_STORE_DSN: postgresql://agents_svc:${AGENTS_DB_PASSWORD}@postgres:5432/agents
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits: { memory: 512M, cpus: "1.0" }
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8400/health/ready')"]
       interval: 10s
       timeout: 3s
       retries: 5
 
   scraping-mcp:
+    # A browser that renders pages chosen by strangers: on its own network,
+    # shared only with the agent that uses it, so a page it loads cannot reach
+    # the database or the other services. Outbound internet still works.
+    restart: unless-stopped
+    build:
+      context: ../demo-scraping-mcp
+      additional_contexts:
+        platform-core: ../packages/platform-core
+    networks: [scraping]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 256m
+    environment:
+      SCRAPING_PORT: "8600"
+      SCRAPING_JSON_LOGS: ${JSON_LOGS:-false}
     deploy:
       resources:
-        limits:
-          # Headless Chromium is the heavy part; Crawl4AI itself is light.
-          memory: 1.5G
-          cpus: "1.0"
-    build: ../demo-scraping-mcp
-    environment:
-      PORT: "8600"
+        # Headless Chromium is the heavy part; Crawl4AI itself is light.
+        limits: { memory: 1536M, cpus: "1.0" }
     healthcheck:
       test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('localhost', 8600), timeout=3)"]
       interval: 10s
@@ -124,146 +249,114 @@ services:
       retries: 5
       start_period: 20s
 
-  analysis-agent:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
-    build: ../demo-analysis-agent
-    ports:
-      # On the loopback only: published so that a measurement -- or a service
-      # started outside compose -- can reach the agent the way another
-      # container does.
-      - "127.0.0.1:8400:8400"
-    environment:
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_CHAT_COMPLETION_MODEL: ${ANALYSIS_MODEL:-${OPENAI_CHAT_COMPLETION_MODEL}}
-      ANALYSIS_BASE_URL: http://analysis-agent:8400/
-      ANALYSIS_SERVICE_TOKEN: ${ANALYSIS_SERVICE_TOKEN:?required in .env}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8400/health/ready')"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  frontend:
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: "0.5"
-    build: ../demo-frontend
-    environment:
-      AGUI_URL: ${AGUI_URL:-http://localhost:8000/agui}
-      # Il browser parla col servizio dei processi direttamente: e' pubblicato
-      # sul loopback, e la pagina gira sulla macchina di chi guarda.
-      PROCESS_URL: ${PROCESS_URL:-http://localhost:8300}
-      # Stesso principio: il microfono nel browser parla col servizio voce
-      # direttamente via WebSocket, non attraverso il server Next.js.
-      VOICE_URL: ${VOICE_URL:-ws://localhost:8500/ws/voice}
-      PRODUCT_NAME: ${PRODUCT_NAME:-AG-UI Lab}
-    ports:
-      - "3000:3000"
-    depends_on:
-      master-agent:
-        condition: service_healthy
-
-  voice-service:
-    deploy:
-      resources:
-        limits:
-          # VAD (Silero) + STT (faster-whisper small) + TTS (Kokoro-82M)
-          # caricati insieme misurano ~1,5GB di working set reale (vedi
-          # demo-voice-service/README.md); il limite resta piu' alto per
-          # margine, non perche' serva davvero cosi' tanto.
-          memory: 3G
-          cpus: "2.0"
-    build: ../demo-voice-service
-    environment:
-      VOICE_MASTER_AGENT_URL: http://master-agent:8000
-    ports:
-      # Il browser parla con questo servizio direttamente via WebSocket,
-      # come process-service: pubblicato sul loopback per essere raggiunto
-      # dalla macchina di chi guarda la pagina, non solo dagli altri
-      # container.
-      - "127.0.0.1:${VOICE_HOST_PORT:-8500}:8500"
-    depends_on:
-      master-agent:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8500/health/live')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-
   process-service:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
-    build: ../demo-process-service
+    <<: [*hardened, *local-models]
+    build:
+      context: ../demo-process-service
+      additional_contexts:
+        platform-core: ../packages/platform-core
+    ports:
+      # The browser talks to this service directly (the Instances panel).
+      - "${BIND_ADDRESS:-127.0.0.1}:${PROCESS_HOST_PORT:-8300}:8300"
     environment:
-      # The model here is the manager of an `open_goal` step, and nothing else:
-      # every other kind of step decides with rules, not with a model.
+      # The model here is the manager of an `open_goal` step, and nothing else.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_CHAT_COMPLETION_MODEL: ${OPENAI_CHAT_COMPLETION_MODEL}
-      PROCESS_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PROCESS_POSTGRES_DSN: postgresql://process_svc:${PROCESS_DB_PASSWORD}@postgres:5432/processes
       PROCESS_JSON_LOGS: ${JSON_LOGS:-false}
       PROCESS_PUBLIC_URL: http://process-service:8300
-      PROCESS_PUSH_SECRET: ${DEMO_PUSH_SECRET:?required in .env}
+      PROCESS_PUSH_SECRET: ${PUSH_SECRET}
+      # DBOS recovers only workflows started under the same version: a stable
+      # tag lets a rebuilt image resume instances that are waiting.
+      PROCESS_APP_VERSION: ${PROCESS_APP_VERSION:-1}
       PROCESS_AGENTS: >-
         {"knowledge": "http://knowledge-agent:8200/",
          "analysis": "http://analysis-agent:8400/"}
+      PROCESS_ALLOWED_ORIGINS: ${PROCESS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-    ports:
-      - "127.0.0.1:${PROCESS_HOST_PORT:-8300}:8300"
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
       knowledge-agent:
         condition: service_healthy
       analysis-agent:
         condition: service_healthy
+    deploy:
+      resources:
+        limits: { memory: 512M, cpus: "1.0" }
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8300/health/ready')"]
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8300/health/ready')"]
       interval: 10s
       timeout: 3s
       retries: 5
 
-  postgres:
+  voice-service:
+    <<: *hardened
+    build:
+      context: ../demo-voice-service
+      additional_contexts:
+        platform-core: ../packages/platform-core
+    ports:
+      # The browser's microphone talks to this service directly, over WebSocket.
+      - "${BIND_ADDRESS:-127.0.0.1}:${VOICE_HOST_PORT:-8500}:8500"
+    environment:
+      VOICE_MASTER_AGENT_URL: http://master-agent:8000
+      VOICE_ALLOWED_ORIGINS: ${VOICE_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      VOICE_JSON_LOGS: ${JSON_LOGS:-false}
+      VOICE_STT_MODEL: ${VOICE_STT_MODEL:-small}
+      VOICE_STT_LANGUAGE: ${VOICE_STT_LANGUAGE:-}
+      VOICE_TTS_LANG_CODE: ${VOICE_TTS_LANG_CODE:-a}
+      VOICE_TTS_VOICE: ${VOICE_TTS_VOICE:-af_heart}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    volumes:
+      # The speech models, downloaded on first use and kept across restarts.
+      - voice-models:/models
+    depends_on:
+      master-agent:
+        condition: service_healthy
     deploy:
       resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
-    # Postgres con pgvector: la ricerca semantica sta accanto ai trascritti da
-    # cui si ricostruisce, invece che in un secondo datastore.
-    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:?serve in .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?serve in .env}
-      POSTGRES_DB: ${POSTGRES_DB:?serve in .env}
-    ports:
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      # Crea il database della memoria alla prima inizializzazione: due
-      # database sullo stesso server, uno per servizio.
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+        # VAD + STT (faster-whisper small) + TTS (Kokoro-82M) measure ~1.5 GB of
+        # working set together; the limit leaves margin.
+        limits: { memory: 3G, cpus: "2.0" }
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8500/health/live')"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
 
+  frontend:
+    restart: unless-stopped
+    build: ../demo-frontend
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:3000:3000"
+    environment:
+      # Addresses the *browser* uses: they must resolve on the machine of
+      # whoever opens the page, not inside the compose network.
+      AGUI_URL: ${AGUI_URL:-http://localhost:8000/agui}
+      PROCESS_URL: ${PROCESS_URL:-http://localhost:8300}
+      VOICE_URL: ${VOICE_URL:-ws://localhost:8500/ws/voice}
+      PRODUCT_NAME: ${PRODUCT_NAME:-Agent Platform}
+      PRODUCT_LOCALE: ${PRODUCT_LOCALE:-en}
+    depends_on:
+      master-agent:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits: { memory: 256M, cpus: "0.5" }
+
+networks:
+  default: {}
+  scraping: {}
+
 volumes:
   postgres-data:
+    # Set POSTGRES_VOLUME to keep using a volume created under another project
+    # name (for example `demo-infra_postgres-data`, before the rename).
+    name: ${POSTGRES_VOLUME:-agent-platform_postgres-data}
+  voice-models: {}

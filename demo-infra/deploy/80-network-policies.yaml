@@ -1,0 +1,155 @@
+# Who may talk to whom, as the platform actually works -- and nothing else.
+#
+# Standard NetworkPolicy objects: enforced by any CNI that implements them
+# (Calico, Cilium, Antrea, ...), silently ignored by one that does not. Check
+# yours before relying on them.
+#
+# Ingress is denied by default and opened per service. The browser-facing
+# services (frontend, master agent, process service, voice) accept traffic
+# from any namespace, because the ingress controller lives in one this file
+# cannot name; restrict `namespaceSelector` to your controller's namespace in
+# an overlay. Egress is restricted where it matters most: the scraper, which
+# renders pages chosen by strangers, reaches the public internet and DNS, and
+# nothing inside the cluster or the private ranges around it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: frontend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - { port: 3000 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: master-agent
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: master-agent }
+  policyTypes: [Ingress]
+  ingress:
+    # The browser, through the ingress; the voice service for each turn; the
+    # subagents calling back on their webhooks.
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - { port: 8000 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: memory-service
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: memory-service }
+  policyTypes: [Ingress]
+  ingress:
+    # Internal only: the master agent is its one client.
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: master-agent }
+      ports:
+        - { port: 8100 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: subagents
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [knowledge-agent, analysis-agent]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: master-agent }
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: process-service }
+      ports:
+        - { port: 8200 }
+        - { port: 8400 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: process-service
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: process-service }
+  policyTypes: [Ingress]
+  ingress:
+    # The browser (Instances panel), the master agent's tools, and the
+    # subagents calling back on their webhooks.
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - { port: 8300 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: voice-service
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: voice-service }
+  policyTypes: [Ingress]
+  ingress:
+    # The browser's microphone (WebSocket) and the master agent's /transcribe.
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - { port: 8500 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scraping-mcp
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: scraping-mcp }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: knowledge-agent }
+      ports:
+        - { port: 8600 }
+  egress:
+    # DNS, wherever the cluster runs it.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    # The public internet, and not the private ranges -- the cluster, the
+    # nodes, the cloud metadata endpoint -- a page might point the browser at.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - { port: 80 }
+        - { port: 443 }

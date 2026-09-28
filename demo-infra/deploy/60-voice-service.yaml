@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voice-service
+  labels:
+    app.kubernetes.io/name: voice-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: voice-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: voice-service
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: voice-service
+          image: ghcr.io/your-org/voice-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8500
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            # VAD + STT (faster-whisper small) + TTS (Kokoro-82M) measure ~1.5 GB
+            # of working set together.
+            requests: { memory: 1536Mi, cpu: 500m }
+            limits: { memory: 3Gi, cpu: "2" }
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 5
+          env:
+            - { name: VOICE_MASTER_AGENT_URL, value: "http://master-agent:8000" }
+            - { name: VOICE_JSON_LOGS, value: "true" }
+            - name: VOICE_ALLOWED_ORIGINS
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: VOICE_ALLOWED_ORIGINS } }
+          volumeMounts:
+            # Models downloaded on first use. An emptyDir re-downloads them
+            # after a reschedule; a PersistentVolumeClaim keeps them.
+            - { name: models, mountPath: /models }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: models
+          emptyDir: { sizeLimit: 4Gi }
+        - name: tmp
+          emptyDir: { sizeLimit: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voice-service
+spec:
+  selector:
+    app.kubernetes.io/name: voice-service
+  ports:
+    - { name: http, port: 8500, targetPort: http }

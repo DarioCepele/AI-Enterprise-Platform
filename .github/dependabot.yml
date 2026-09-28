@@ -1,0 +1,53 @@
+# Dependency updates, grouped so that they arrive as a few reviewable pull
+# requests a week instead of one per package. Security updates are not
+# grouped by this file: GitHub opens those as soon as an advisory lands.
+version: 2
+updates:
+  # The actions are pinned by commit: Dependabot moves the pin and the
+  # version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+
+  - package-ecosystem: uv
+    directories:
+      - /packages/platform-core
+      - /demo-master-agent
+      - /demo-memory-service
+      - /demo-process-service
+      - /demo-knowledge-agent
+      - /demo-analysis-agent
+      - /demo-scraping-mcp
+      - /demo-voice-service
+    schedule: { interval: weekly }
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /demo-frontend
+    schedule: { interval: weekly }
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Base images are pinned by digest: this keeps the digests fresh.
+  - package-ecosystem: docker
+    directories:
+      - /demo-master-agent
+      - /demo-memory-service
+      - /demo-process-service
+      - /demo-knowledge-agent
+      - /demo-analysis-agent
+      - /demo-scraping-mcp
+      - /demo-voice-service
+      - /demo-frontend
+    schedule: { interval: weekly }
+    groups:
+      base-images: { patterns: ["*"] }
+
+  - package-ecosystem: docker-compose
+    directory: /demo-infra
+    schedule: { interval: weekly }

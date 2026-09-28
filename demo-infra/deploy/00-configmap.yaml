@@ -1,18 +1,43 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: agui-lab
+  name: agent-platform
 data:
-  # What is not a secret. Addresses of the managed databases and the API keys
-  # live in the Secret of the same name, which this repository does not carry.
+  # What is not a secret. Credentials and database addresses live in the Secret
+  # of the same name (see secret.example.yaml), which this repository does not
+  # carry; each workload reads only the keys it needs from it.
   OPENAI_BASE_URL: https://openrouter.ai/api/v1
   OPENAI_CHAT_COMPLETION_MODEL: anthropic/claude-sonnet-5
-  DEMO_PRODUCT_NAME: AG-UI Lab
-  DEMO_PRODUCT_LANGUAGE: Italian
-  DEMO_SUBAGENT_WAIT_SECONDS: "60"
-  PRODUCT_NAME: AG-UI Lab
+  MASTER_VISION_MODEL: qwen/qwen3.8-27b
+  MASTER_PRODUCT_NAME: Agent Platform
+  # Empty: the agent answers in the language the user writes in.
+  MASTER_PRODUCT_LANGUAGE: ""
+  MASTER_SUBAGENT_WAIT_SECONDS: "60"
+  MASTER_TOOLS_REQUIRING_APPROVAL: start_process
+  MEMORY_EMBEDDING_MODEL: openai/text-embedding-3-small
   MEMORY_RETENTION_DAYS: "0"
-  # Which agents exist, by the names the model and the definitions use. The
-  # tokens of the extended cards are in the Secret, so this list carries none.
+  PRODUCT_NAME: Agent Platform
+  # Which agents exist, by the names the model and the process definitions use.
+  # Their tokens are secrets and come from the Secret, one key each.
+  MASTER_SUBAGENTS: |
+    [{"name": "knowledge", "url": "http://knowledge-agent:8200/"},
+     {"name": "analysis", "url": "http://analysis-agent:8400/"}]
+  # The version tag of the process workflows. DBOS recovers only workflows
+  # started under the same version: keep it while workflow code stays
+  # compatible, so an upgrade resumes instances waiting on an approval; raise it
+  # only with a change that cannot replay old histories (and drain first).
+  PROCESS_APP_VERSION: "1"
   PROCESS_AGENTS: |
     {"knowledge": "http://knowledge-agent:8200/", "analysis": "http://analysis-agent:8400/"}
+  # Where a subagent may send push notifications: the platform's own receivers.
+  PUSH_ALLOWED_URLS: http://master-agent:8000/a2a/push/,http://process-service:8300/a2a/push/
+  # Addresses the *browser* uses: they must resolve on the machine of whoever
+  # opens the page, so they are public names behind the ingress (90-ingress.yaml),
+  # never in-cluster service names. Replace example.com with your domain.
+  AGUI_URL: https://agent.example.com/agui
+  PROCESS_URL: https://processes.example.com
+  VOICE_URL: wss://voice.example.com/ws/voice
+  # The page's origin, allowed by the three services the browser talks to.
+  MASTER_ALLOWED_ORIGINS: https://app.example.com
+  PROCESS_ALLOWED_ORIGINS: https://app.example.com
+  VOICE_ALLOWED_ORIGINS: https://app.example.com

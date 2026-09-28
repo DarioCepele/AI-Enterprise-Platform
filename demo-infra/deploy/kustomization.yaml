@@ -1,10 +1,16 @@
-# The manifests as they ship: images from a registry, databases outside.
+# The manifests as they ship: images from a registry, the database outside.
 #
-# `kubectl apply -k deploy/` applies exactly what is in this folder. The k3s
-# overlay next to it points the images at what a laptop has just built, and
-# nothing else: what gets verified locally is these manifests, not a copy.
+# `kubectl apply -k deploy/` applies exactly what is in this folder, after the
+# Secret `agent-platform` exists (see secret.example.yaml, not applied here).
+# The k3s overlay next to it points the images at what a laptop has just built
+# and nothing else: what gets verified locally is these manifests, not a copy.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: agent-platform
+    includeSelectors: false
 
 resources:
   - 00-configmap.yaml
@@ -14,3 +20,7 @@ resources:
   - 35-analysis-agent.yaml
   - 40-frontend.yaml
   - 50-process-service.yaml
+  - 60-voice-service.yaml
+  - 65-scraping-mcp.yaml
+  - 80-network-policies.yaml
+  - 90-ingress.yaml

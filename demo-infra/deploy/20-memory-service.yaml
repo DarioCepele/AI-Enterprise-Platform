@@ -4,8 +4,9 @@ metadata:
   name: memory-service
   labels:
     app.kubernetes.io/name: memory-service
-    app.kubernetes.io/part-of: agui-lab
 spec:
+  # Two: compaction takes an advisory lock in Postgres, not in RAM, and two
+  # replicas are what proves it.
   replicas: 2
   selector:
     matchLabels:
@@ -15,51 +16,58 @@ spec:
       labels:
         app.kubernetes.io/name: memory-service
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        # Numerico, non un nome: kubelet verifica che l'utente non sia root
-        # prima di avviare il container, e da un `USER service` non lo sa dire.
-        # Un manifest con solo runAsNonRoot non parte proprio.
         runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: memory-service
-          image: ghcr.io/your-org/demo-memory-service:latest
+          image: ghcr.io/your-org/memory-service:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8100
+            - name: http
+              containerPort: 8100
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
-            requests:
-              memory: 256Mi
-              cpu: 100m
-            limits:
-              memory: 512Mi
-              cpu: 1
+            requests: { memory: 256Mi, cpu: 100m }
+            limits: { memory: 512Mi, cpu: "1" }
           livenessProbe:
-            httpGet:
-              path: /health/live
-              port: 8100
+            httpGet: { path: /health/live, port: http }
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /health/ready
-              port: 8100
+            httpGet: { path: /health/ready, port: http }
             periodSeconds: 5
             failureThreshold: 3
           env:
-            - name: MEMORY_JSON_LOGS
-              value: "true"
-          envFrom:
-            - secretRef:
-                name: agui-lab
-            - configMapRef:
-                name: agui-lab
+            - { name: MEMORY_JSON_LOGS, value: "true" }
+            - name: MEMORY_POSTGRES_DSN
+              valueFrom: { secretKeyRef: { name: agent-platform, key: MEMORY_POSTGRES_DSN } }
+            - name: MEMORY_SUMMARY_API_KEY
+              valueFrom: { secretKeyRef: { name: agent-platform, key: OPENAI_API_KEY } }
+            - name: MEMORY_SUMMARY_BASE_URL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: OPENAI_BASE_URL } }
+            # Summaries and durable facts use the chat model; the language
+            # follows the agent's.
+            - name: MEMORY_SUMMARY_MODEL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: OPENAI_CHAT_COMPLETION_MODEL } }
+            - name: MEMORY_SUMMARY_LANGUAGE
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: MASTER_PRODUCT_LANGUAGE } }
+            - name: MEMORY_EMBEDDING_MODEL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: MEMORY_EMBEDDING_MODEL } }
+            - name: MEMORY_RETENTION_DAYS
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: MEMORY_RETENTION_DAYS } }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -69,5 +77,14 @@ spec:
   selector:
     app.kubernetes.io/name: memory-service
   ports:
-    - port: 8100
-      targetPort: 8100
+    - { name: http, port: 8100, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: memory-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-service

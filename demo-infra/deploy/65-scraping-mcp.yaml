@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scraping-mcp
+  labels:
+    app.kubernetes.io/name: scraping-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scraping-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: scraping-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # pwuser, the unprivileged user of the Playwright base image.
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: scraping-mcp
+          image: ghcr.io/your-org/scraping-mcp:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8600
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Chromium writes its profile and caches under the home directory.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { memory: 512Mi, cpu: 200m }
+            limits: { memory: 1536Mi, cpu: "1" }
+          livenessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          env:
+            - { name: SCRAPING_PORT, value: "8600" }
+            - { name: SCRAPING_JSON_LOGS, value: "true" }
+          volumeMounts:
+            # Chromium needs more shared memory than a container's default.
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scraping-mcp
+spec:
+  selector:
+    app.kubernetes.io/name: scraping-mcp
+  ports:
+    - { name: http, port: 8600, targetPort: http }

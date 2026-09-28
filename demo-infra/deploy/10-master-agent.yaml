@@ -4,8 +4,18 @@ metadata:
   name: master-agent
   labels:
     app.kubernetes.io/name: master-agent
-    app.kubernetes.io/part-of: agui-lab
 spec:
+  # Two on purpose: the claim is that no state lives in the process, and two
+  # replicas are what lets a cluster contradict it -- logs seen by halves, a
+  # plan lost between turns, an upload on the other pod.
+  #
+  # One exception, by the framework's design: an action waiting for a
+  # person's approval is held by the replica that asked (Microsoft Agent
+  # Framework keeps approval state in process memory). An answer that reaches
+  # the other replica fails closed -- nothing runs, the interface asks to
+  # repeat the request. To keep approvals working with more than one replica,
+  # route each conversation to one replica at the gateway: see "Approvals and
+  # replicas" in deploy/README.md. Or run one replica.
   replicas: 2
   selector:
     matchLabels:
@@ -15,64 +25,68 @@ spec:
       labels:
         app.kubernetes.io/name: master-agent
     spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
-        # Numerico, non un nome: kubelet verifica che l'utente non sia root
-        # prima di avviare il container, e da un `USER service` non lo sa dire.
-        # Un manifest con solo runAsNonRoot non parte proprio.
+        # Numeric, not a name: kubelet cannot tell whether `USER service` is
+        # root, and refuses to start a runAsNonRoot container it cannot check.
         runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: master-agent
-          image: ghcr.io/your-org/demo-master-agent:latest
+          image: ghcr.io/your-org/master-agent:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
-            requests:
-              memory: 256Mi
-              cpu: 100m
-            limits:
-              memory: 512Mi
-              cpu: 1
+            requests: { memory: 384Mi, cpu: 100m }
+            limits: { memory: 1Gi, cpu: "1" }
           livenessProbe:
-            httpGet:
-              path: /health/live
-              port: 8000
+            httpGet: { path: /health/live, port: http }
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /health/ready
-              port: 8000
+            httpGet: { path: /health/ready, port: http }
             periodSeconds: 5
             failureThreshold: 3
-          env:
-            - name: DEMO_PUBLIC_URL
-              value: http://master-agent:8000
-            - name: DEMO_MEMORY_SERVICE_URL
-              value: http://memory-service:8100
-            - name: DEMO_PROCESS_SERVICE_URL
-              value: http://process-service:8300
-            # The two subagents by name. The tokens of their extended cards
-            # come from the Secret, so they are not written here: a subagent
-            # without a token still answers, it just serves the public card.
-            - name: DEMO_SUBAGENTS
-              value: |
-                [{"name": "knowledge", "url": "http://knowledge-agent:8200/"},
-                 {"name": "analysis", "url": "http://analysis-agent:8400/"}]
-            - name: DEMO_JSON_LOGS
-              value: "true"
+          lifecycle:
+            # Leave the Service's endpoints before the process stops, so no new
+            # stream starts on a pod that is going away.
+            preStop:
+              exec: { command: ["sleep", "5"] }
           envFrom:
-            - secretRef:
-                name: agui-lab
-            - configMapRef:
-                name: agui-lab
+            - configMapRef: { name: agent-platform }
+          env:
+            - { name: MASTER_PUBLIC_URL, value: "http://master-agent:8000" }
+            - { name: MASTER_MEMORY_SERVICE_URL, value: "http://memory-service:8100" }
+            - { name: MASTER_PROCESS_SERVICE_URL, value: "http://process-service:8300" }
+            - { name: MASTER_VOICE_SERVICE_URL, value: "http://voice-service:8500" }
+            - { name: MASTER_JSON_LOGS, value: "true" }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: agent-platform, key: OPENAI_API_KEY } }
+            - name: MASTER_PUSH_SECRET
+              valueFrom: { secretKeyRef: { name: agent-platform, key: PUSH_SECRET } }
+            - name: MASTER_POSTGRES_DSN
+              valueFrom: { secretKeyRef: { name: agent-platform, key: MASTER_POSTGRES_DSN } }
+            - name: MASTER_SUBAGENT_TOKEN_KNOWLEDGE
+              valueFrom: { secretKeyRef: { name: agent-platform, key: KNOWLEDGE_SERVICE_TOKEN } }
+            - name: MASTER_SUBAGENT_TOKEN_ANALYSIS
+              valueFrom: { secretKeyRef: { name: agent-platform, key: ANALYSIS_SERVICE_TOKEN } }
+          volumeMounts:
+            # The root filesystem is read-only: temporary video files land here.
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 1Gi }
 ---
 apiVersion: v1
 kind: Service
@@ -82,5 +96,14 @@ spec:
   selector:
     app.kubernetes.io/name: master-agent
   ports:
-    - port: 8000
-      targetPort: 8000
+    - { name: http, port: 8000, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: master-agent
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: master-agent

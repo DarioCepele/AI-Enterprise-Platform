@@ -2,13 +2,27 @@ name: infra
 
 on:
   push:
+    branches: [main]
     paths:
       - "demo-infra/**"
+      - "demo-*/src/*/config.py"
+      - "packages/platform-core/src/platform_core/settings.py"
+      - "demo-frontend/lib/runtime-config.ts"
       - ".github/workflows/infra.yml"
   pull_request:
     paths:
       - "demo-infra/**"
+      - "demo-*/src/*/config.py"
+      - "packages/platform-core/src/platform_core/settings.py"
+      - "demo-frontend/lib/runtime-config.ts"
       - ".github/workflows/infra.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   contracts:
@@ -17,11 +31,13 @@ jobs:
       run:
         working-directory: demo-infra
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # Qui sta l'unica copia dei contratti: un sample che non e' JSON valido,
-      # o che perde i campi di cui il messaggio d'errore ha bisogno, rompe i
-      # test di tutti gli altri senza rompere i propri.
+      # The only copy of the contracts lives here: a sample that is not valid
+      # JSON, or that loses the fields its error message needs, breaks the
+      # tests of everybody else without breaking its own.
       - name: every contract is readable and declares who reads it
         run: |
           python - <<'PY'
@@ -45,15 +61,45 @@ jobs:
       run:
         working-directory: demo-infra
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The example environment, with placeholders where it asks for secrets:
+      # a required variable the example forgot fails here, not on a laptop.
       - name: the compose file is valid with the example environment
         run: |
-          cp .env.example .env
-          sed -i 's/^\(DEMO_PUSH_SECRET\)=.*/\1=ci/' .env
-          sed -i 's/^\(KNOWLEDGE_SERVICE_TOKEN\)=.*/\1=ci/' .env
-          sed -i 's/^\(ANALYSIS_SERVICE_TOKEN\)=.*/\1=ci/' .env
-          sed -i 's/^\(POSTGRES_PASSWORD\)=.*/\1=ci/' .env
-          docker compose config > /dev/null
+          tools/ci-env.sh > .env
+          docker compose config --quiet
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the shell scripts pass shellcheck
+        run: shellcheck demo-infra/postgres/provision.sh demo-infra/tools/*.sh
+
+  manifests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: demo-infra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # What `kubectl apply -k` would send, checked against the Kubernetes
+      # schemas: the shipped base and the local overlay, strict (an unknown
+      # field is an error, not something the API server silently drops).
+      - name: the manifests render and validate
+        run: |
+          for target in deploy k3s; do
+            echo "== ${target}"
+            kubectl kustomize "${target}" | docker run --rm -i \
+              ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
+              -strict -summary -kubernetes-version 1.31.0 -
+          done
 
   env-table:
     runs-on: ubuntu-latest
@@ -61,12 +107,14 @@ jobs:
       run:
         working-directory: demo-infra
     steps:
-      # Un checkout solo: prima ne servivano quattro, perche' la tabella si
-      # genera leggendo i Settings di tre servizi diversi e quei servizi
-      # stavano in repository separati.
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
 
-      # La tabella e' generata dai campi che leggono l'ambiente: se divergono,
-      # il README sta documentando una configurazione che non esiste piu'.
-      - run: uv run --project ../demo-master-agent python tools/env_table.py --check
+      # The tables are generated from the fields that read the environment: if
+      # they diverge, the README documents a configuration that no longer exists.
+      - run: python tools/env_table.py --check

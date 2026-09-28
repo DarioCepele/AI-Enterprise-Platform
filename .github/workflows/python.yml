@@ -1,87 +1,109 @@
 name: python
 
-# I contratti condivisi stanno fra i percorsi che fanno scattare questi test:
-# cambiarne uno rompe i consumatori, non chi lo pubblica, ed e' esattamente il
-# guasto che i test di contratto esistono per rendere rumoroso.
+# The shared contracts are among the paths that trigger these tests: changing
+# one breaks the consumers, not who publishes it, which is exactly the failure
+# contract tests exist to make loud. platform-core is code every service runs:
+# a change there runs every suite.
 on:
   push:
+    branches: [main]
     paths:
+      - "packages/**"
       - "demo-master-agent/**"
       - "demo-memory-service/**"
       - "demo-process-service/**"
       - "demo-knowledge-agent/**"
       - "demo-analysis-agent/**"
       - "demo-scraping-mcp/**"
+      - "demo-voice-service/**"
       - "demo-infra/contracts/**"
       - ".github/workflows/python.yml"
   pull_request:
     paths:
+      - "packages/**"
       - "demo-master-agent/**"
       - "demo-memory-service/**"
       - "demo-process-service/**"
       - "demo-knowledge-agent/**"
       - "demo-analysis-agent/**"
       - "demo-scraping-mcp/**"
+      - "demo-voice-service/**"
       - "demo-infra/contracts/**"
       - ".github/workflows/python.yml"
 
+# Read-only token: these jobs read the code and nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # I servizi che non hanno uno stato proprio: nessun database da tirare su.
+  # The services with no state of their own: no database to bring up.
   tests:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        project:
-          - demo-knowledge-agent
-          - demo-analysis-agent
-          - demo-scraping-mcp
+        include:
+          - project: demo-knowledge-agent
+          - project: demo-analysis-agent
+          - project: demo-scraping-mcp
+          # Only the tests that need no downloaded model and no running agent:
+          # the others fetch speech models of several hundred MB each, and run
+          # where those models are (see the service's README).
+          - project: demo-voice-service
+            tests: tests/test_approvals.py tests/test_boundaries.py tests/test_health.py
     defaults:
       run:
         working-directory: ${{ matrix.project }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # Nessun secondo checkout: i contratti stanno in demo-infra/contracts, e
-      # sia i test Python (`parents[2]/demo-infra/contracts`) sia il frontend
-      # li cercano come percorso fratello -- che in un monorepo e' gia' quello
-      # giusto. Prima servivano un checkout separato e AGUI_LAB_CONTRACTS per
-      # ricostruire a mano questa struttura.
-      - uses: astral-sh/setup-uv@v7
+      # The contracts sit in demo-infra/contracts, which the tests find as a
+      # sibling path: in the monorepo it already is one.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
+          cache-dependency-glob: ${{ matrix.project }}/uv.lock
 
-      - run: uv sync --frozen
+      # --locked, not --frozen: a lock that no longer matches pyproject.toml
+      # fails here instead of being quietly re-resolved on somebody else's machine.
+      - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run mypy src
-      - run: uv run pytest -q
+      - run: uv run pytest -q ${{ matrix.tests }}
+        env:
+          OPENAI_API_KEY: ""
 
-  # I servizi che possiedono dati. Una sola immagine per tutti e tre: pgvector
-  # e' Postgres 17 con l'estensione in piu', quindi copre anche chi non la usa
-  # e tiene la matrice a una dimensione sola.
+  # The code that owns data, and the shared migration runner. One image for
+  # all: pgvector is Postgres 17 with the extension added, so it covers the
+  # suites that do not use it and keeps the matrix one-dimensional.
   tests-with-database:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - project: demo-master-agent
-            database: agente
-          - project: demo-memory-service
-            database: memoria
-          - project: demo-process-service
-            database: processi
+        project:
+          - packages/platform-core
+          - demo-master-agent
+          - demo-memory-service
+          - demo-process-service
     defaults:
       run:
         working-directory: ${{ matrix.project }}
 
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        # The digest the compose file runs, so CI tests what ships.
+        image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
         env:
-          POSTGRES_USER: ${{ matrix.database }}
-          POSTGRES_PASSWORD: ${{ matrix.database }}
-          POSTGRES_DB: ${{ matrix.database }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready
@@ -90,23 +112,29 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
+          cache-dependency-glob: ${{ matrix.project }}/uv.lock
 
-      - run: uv sync --frozen
+      # --locked, not --frozen: a lock that no longer matches pyproject.toml
+      # fails here instead of being quietly re-resolved on somebody else's machine.
+      - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run mypy src
       - run: uv run pytest -q
         env:
-          # Ogni servizio legge solo la propria variabile: impostarle tutte e
-          # tre costa nulla ed evita di dover comporre il nome di una chiave da
-          # un valore della matrice, cosa che GitHub Actions non permette.
-          # La suite si deriva il proprio database e se lo crea: quello che
-          # lascia dietro non tocca il database di un servizio.
-          DEMO_POSTGRES_DSN: postgresql://${{ matrix.database }}:${{ matrix.database }}@127.0.0.1:5432/${{ matrix.database }}
-          MEMORY_POSTGRES_DSN: postgresql://${{ matrix.database }}:${{ matrix.database }}@127.0.0.1:5432/${{ matrix.database }}
-          PROCESS_POSTGRES_DSN: postgresql://${{ matrix.database }}:${{ matrix.database }}@127.0.0.1:5432/${{ matrix.database }}
-          DEMO_FAKE_CLIENT: "true"
+          # Each suite reads only its own variable: setting all of them costs
+          # nothing and avoids composing a key name from a matrix value, which
+          # GitHub Actions does not allow. Every suite derives a database of
+          # its own (`<name>_test`) and creates it.
+          MASTER_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/master
+          MEMORY_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/memory
+          PROCESS_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/processes
+          PLATFORM_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          MASTER_FAKE_CLIENT: "true"
+          OPENAI_API_KEY: ""

@@ -2,12 +2,14 @@ name: images
 
 on:
   push:
+    branches: [main]
     paths:
       - "demo-*/Dockerfile"
       - "demo-*/src/**"
       - "demo-*/pyproject.toml"
       - "demo-*/uv.lock"
       - "demo-*/package*.json"
+      - "packages/**"
       - ".github/workflows/images.yml"
   pull_request:
     paths:
@@ -16,21 +18,25 @@ on:
       - "demo-*/pyproject.toml"
       - "demo-*/uv.lock"
       - "demo-*/package*.json"
+      - "packages/**"
       - ".github/workflows/images.yml"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # Ogni immagine si costruisce e si fa scansionare. Fallisce su HIGH e
-  # CRITICAL, ignorando quelle senza correzione disponibile: un avviso che
-  # nessuno puo' risolvere non e' un cancello, e' rumore.
+  # Every image is built and scanned. It fails on HIGH and CRITICAL, ignoring
+  # those with no fix available: a warning nobody can act on is not a gate,
+  # it is noise.
   build-and-scan:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # demo-voice-service resta fuori: la sua immagine porta dentro torch e
-        # i modelli di riconoscimento e sintesi, e sfiora i 20GB -- oltre lo
-        # spazio libero di un runner standard. Va costruita a mano, o su un
-        # runner piu' capiente, finche' l'immagine non viene alleggerita.
         project:
           - demo-master-agent
           - demo-frontend
@@ -39,17 +45,26 @@ jobs:
           - demo-knowledge-agent
           - demo-analysis-agent
           - demo-scraping-mcp
+          # CPU-only torch keeps it around 6 GB: it fits a standard runner.
+          - demo-voice-service
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # The Python images build the shared package from its own named
+      # context, as compose does: without it the Dockerfiles cannot find it.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./${{ matrix.project }}
+          build-contexts: platform-core=./packages/platform-core
           push: false
           load: true
           tags: ${{ matrix.project }}:ci
 
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ matrix.project }}:ci
           severity: HIGH,CRITICAL

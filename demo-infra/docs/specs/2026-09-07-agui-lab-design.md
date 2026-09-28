@@ -1,5 +1,10 @@
 # Laboratorio AG-UI — design
 
+> **Documento storico.** È il design da cui il progetto è partito, conservato
+> per le decisioni e le misure che contiene. Nomi, struttura e perimetro sono
+> cambiati da allora (monorepo, `platform-core`, approvazioni, tenancy, CI): lo
+> stato attuale lo descrivono i README.
+
 **Data:** 2026-09-07
 **Stato:** tappe 1-3 completate e verificate nel browser
 **Scopo:** ricostruire in locale, a fini di studio, un'interfaccia agentica equivalente a quella del "Laboratorio AG-UI" (Mind-X): chat a sinistra, piano di lavoro ed event inspector a destra, con agente multi-step e sottoagenti invocati in parallelo.

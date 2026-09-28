@@ -1,17 +1,19 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: process-service
   labels:
     app.kubernetes.io/name: process-service
-    app.kubernetes.io/part-of: agui-lab
 spec:
-  # Two on purpose, like the master agent: an instance that survives its own
-  # process is the claim this service makes, and two replicas are what turns it
-  # into something a cluster can contradict. What holds them together is
-  # Postgres -- the ledger, the waiting steps and the messages that wake them
-  # all live there, so either replica can pick up what the other left.
+  # A StatefulSet, not for storage -- the state is in Postgres -- but for a
+  # stable identity. DBOS recovers, on each replica, the workflows tagged with
+  # that replica's executor id; with a Deployment every restart would bring a
+  # new name and leave the previous pod's workflows unrecovered, and with a
+  # shared default id every replica would recover everybody's. process-service-0
+  # comes back as process-service-0, and resumes its own.
+  serviceName: process-service-headless
   replicas: 2
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app.kubernetes.io/name: process-service
@@ -20,60 +22,77 @@ spec:
       labels:
         app.kubernetes.io/name: process-service
     spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
-        # Numerico, non un nome: kubelet verifica che l'utente non sia root
-        # prima di avviare il container, e da un `USER service` non lo sa dire.
-        # Un manifest con solo runAsNonRoot non parte proprio.
         runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: process-service
-          image: ghcr.io/your-org/demo-process-service:latest
+          image: ghcr.io/your-org/process-service:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8300
+            - name: http
+              containerPort: 8300
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
-            requests:
-              memory: 256Mi
-              cpu: 100m
-            limits:
-              memory: 512Mi
-              cpu: 1
+            requests: { memory: 256Mi, cpu: 100m }
+            limits: { memory: 512Mi, cpu: "1" }
           livenessProbe:
-            httpGet:
-              path: /health/live
-              port: 8300
+            httpGet: { path: /health/live, port: http }
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /health/ready
-              port: 8300
+            httpGet: { path: /health/ready, port: http }
             periodSeconds: 5
             failureThreshold: 3
           env:
-            # Where a remote agent sends its notifications back. It is the
-            # Service and not a pod: whichever replica receives it, the message
-            # goes through Postgres to the step that is waiting.
-            - name: PROCESS_PUBLIC_URL
-              value: http://process-service:8300
-            - name: PROCESS_JSON_LOGS
-              value: "true"
-            # Da quali pagine un browser puo' leggere questa API. In produzione
-            # e' l'origine dell'interfaccia, non `localhost`.
+            - name: PROCESS_EXECUTOR_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            # Where a remote agent sends its notifications back: the Service,
+            # not a pod. Whichever replica receives it, the message goes
+            # through Postgres to the step that is waiting.
+            - { name: PROCESS_PUBLIC_URL, value: "http://process-service:8300" }
+            - { name: PROCESS_JSON_LOGS, value: "true" }
+            - name: PROCESS_APP_VERSION
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: PROCESS_APP_VERSION } }
+            - name: PROCESS_AGENTS
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: PROCESS_AGENTS } }
             - name: PROCESS_ALLOWED_ORIGINS
-              value: https://lab.example
-          envFrom:
-            - secretRef:
-                name: agui-lab
-            - configMapRef:
-                name: agui-lab
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: PROCESS_ALLOWED_ORIGINS } }
+            - name: OPENAI_BASE_URL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: OPENAI_BASE_URL } }
+            - name: OPENAI_CHAT_COMPLETION_MODEL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: OPENAI_CHAT_COMPLETION_MODEL } }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: agent-platform, key: OPENAI_API_KEY } }
+            - name: PROCESS_POSTGRES_DSN
+              valueFrom: { secretKeyRef: { name: agent-platform, key: PROCESS_POSTGRES_DSN } }
+            - name: PROCESS_PUSH_SECRET
+              valueFrom: { secretKeyRef: { name: agent-platform, key: PUSH_SECRET } }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+# The stable network identity the StatefulSet requires.
+apiVersion: v1
+kind: Service
+metadata:
+  name: process-service-headless
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: process-service
+  ports:
+    - { name: http, port: 8300, targetPort: http }
 ---
 apiVersion: v1
 kind: Service
@@ -83,5 +102,14 @@ spec:
   selector:
     app.kubernetes.io/name: process-service
   ports:
-    - port: 8300
-      targetPort: 8300
+    - { name: http, port: 8300, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: process-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: process-service

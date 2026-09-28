@@ -1,0 +1,39 @@
+name: smoke
+
+# The whole core, started the way compose starts it, with the fake model:
+# what the unit suites cannot see -- an image that does not boot, a variable
+# the example forgot, a service that waits for one that never gets healthy.
+on:
+  pull_request:
+    paths:
+      - "demo-*/Dockerfile"
+      - "demo-*/src/**"
+      - "demo-*/pyproject.toml"
+      - "demo-*/uv.lock"
+      - "demo-*/package*.json"
+      - "packages/**"
+      - "demo-infra/compose.yaml"
+      - "demo-infra/.env.example"
+      - "demo-infra/postgres/**"
+      - "demo-infra/tools/**"
+      - ".github/workflows/smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: the core starts and answers
+        run: demo-infra/tools/smoke.sh

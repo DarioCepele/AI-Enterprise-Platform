@@ -4,7 +4,6 @@ metadata:
   name: analysis-agent
   labels:
     app.kubernetes.io/name: analysis-agent
-    app.kubernetes.io/part-of: agui-lab
 spec:
   replicas: 1
   selector:
@@ -15,53 +14,57 @@ spec:
       labels:
         app.kubernetes.io/name: analysis-agent
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        # Numerico, non un nome: kubelet verifica che l'utente non sia root
-        # prima di avviare il container, e da un `USER service` non lo sa dire.
-        # Un manifest con solo runAsNonRoot non parte proprio.
         runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: analysis-agent
-          image: ghcr.io/your-org/demo-analysis-agent:latest
+          image: ghcr.io/your-org/analysis-agent:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8400
+            - name: http
+              containerPort: 8400
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
-            requests:
-              memory: 256Mi
-              cpu: 100m
-            limits:
-              memory: 512Mi
-              cpu: 1
+            requests: { memory: 256Mi, cpu: 100m }
+            limits: { memory: 512Mi, cpu: "1" }
           livenessProbe:
-            httpGet:
-              path: /health/live
-              port: 8400
+            httpGet: { path: /health/live, port: http }
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /health/ready
-              port: 8400
+            httpGet: { path: /health/ready, port: http }
             periodSeconds: 5
             failureThreshold: 3
           env:
-            - name: ANALYSIS_BASE_URL
-              value: http://analysis-agent:8400/
-            - name: ANALYSIS_JSON_LOGS
-              value: "true"
-          envFrom:
-            - secretRef:
-                name: agui-lab
-            - configMapRef:
-                name: agui-lab
+            - { name: ANALYSIS_BASE_URL, value: "http://analysis-agent:8400/" }
+            - { name: ANALYSIS_JSON_LOGS, value: "true" }
+            - name: ANALYSIS_PUSH_ALLOWED_URLS
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: PUSH_ALLOWED_URLS } }
+            - name: ANALYSIS_LANGUAGE
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: MASTER_PRODUCT_LANGUAGE } }
+            - name: OPENAI_BASE_URL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: OPENAI_BASE_URL } }
+            - name: OPENAI_CHAT_COMPLETION_MODEL
+              valueFrom: { configMapKeyRef: { name: agent-platform, key: OPENAI_CHAT_COMPLETION_MODEL } }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: agent-platform, key: OPENAI_API_KEY } }
+            - name: ANALYSIS_SERVICE_TOKEN
+              valueFrom: { secretKeyRef: { name: agent-platform, key: ANALYSIS_SERVICE_TOKEN } }
+            - name: ANALYSIS_TASK_STORE_DSN
+              valueFrom: { secretKeyRef: { name: agent-platform, key: AGENTS_POSTGRES_DSN } }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -71,5 +74,4 @@ spec:
   selector:
     app.kubernetes.io/name: analysis-agent
   ports:
-    - port: 8400
-      targetPort: 8400
+    - { name: http, port: 8400, targetPort: http }
