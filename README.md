@@ -1,116 +1,129 @@
 # AI Enterprise Platform
 
-Una piattaforma agentica che funziona, da cui partire per costruire la propria.
-Non un esempio "hello world" e non un framework: nove servizi che girano insieme
-con `docker compose up`, dove un agente conversa in streaming, delega a
-sottoagenti remoti, ricorda le conversazioni passate, ascolta e risponde a voce,
-guarda i video che gli carichi e usa strumenti esterni via MCP.
+Nove servizi che partono con un comando e ti danno un agente con cui parlare
+a voce, che delega il lavoro ad altri agenti, ricorda le conversazioni di
+settimana scorsa e guarda i video che gli carichi.
 
-È pensata per essere **forkata**. Si clona, si cambiano delle variabili, si
-scrivono i propri agenti — e l'ossatura (protocolli, contratti, migrazioni,
-sonde di salute) resta quella.
+Serve per non ricominciare da zero. Si clona, si cambiano delle variabili, si
+scrivono i propri agenti.
 
-## Cosa ci trovi dentro
+## Cosa puoi fare appena parte
 
-| Cartella | Cosa fa |
+Apri `localhost:3000` e scrivi. La risposta arriva in streaming, e accanto
+vedi due cose che normalmente restano nascoste: il piano di lavoro che
+l'agente si è dato, che si aggiorna mentre procede, e l'elenco degli eventi
+grezzi che sta emettendo mentre li emette.
+
+C'è un microfono, e funziona come ti aspetti: parli, risponde con la voce, e
+se lo interrompi a metà di una frase smette invece di finire il discorso da
+solo. Questa parte è work in progress: funziona, ma il modello che genera la
+risposta parlata sta per cambiare (vedi sotto).
+
+Un video caricato viene trascritto e descritto scena per scena. Le domande
+successive su quel video trovano risposta senza rianalizzarlo.
+
+Fagli una domanda fuori dal suo dominio e la gira a un sottoagente. Se la
+domanda è ambigua quel sottoagente si ferma e chiede un chiarimento, che
+risale fino a te, invece di tirare a indovinare.
+
+Un indirizzo web lo apre in un browser vero, con JavaScript eseguito, per
+leggerti la pagina.
+
+Poi spegni tutto, riaccendi, e la conversazione è dove l'avevi lasciata.
+
+## Com'è fatto
+
+| Cartella | |
 |---|---|
-| `demo-master-agent` | L'agente principale. Python, Microsoft Agent Framework, FastAPI. Espone `POST /agui`: uno stream SSE in protocollo AG-UI che porta testo, ragionamento, chiamate a tool e stato. |
-| `demo-frontend` | Next.js. Chat, piano di lavoro ed event inspector, tutti e tre alimentati da quell'unico stream. |
-| `demo-knowledge-agent` | Un sottoagente d'esempio, raggiunto via **A2A**: risponde su un corpus locale e sa fermarsi a chiedere chiarimenti invece di indovinare. |
-| `demo-analysis-agent` | Il secondo sottoagente: misura e confronta numeri, e dice anche cosa quei numeri *non* dicono. |
-| `demo-memory-service` | La memoria delle conversazioni: transcript, riassunti, ricerca semantica su pgvector. Sopravvive ai riavvii. |
-| `demo-process-service` | Processi durevoli. Le definizioni sono dati versionati, le istanze riprendono da dove erano rimaste. |
-| `demo-voice-service` | Voce in tempo reale, tutta auto-ospitata: Silero per capire quando parli, faster-whisper per trascrivere, Kokoro per rispondere. Con barge-in: se lo interrompi, smette. |
-| `demo-scraping-mcp` | Un server MCP che apre una pagina in un browser vero e la restituisce in Markdown. Serve anche da esempio di come si collega un server MCP a un agente. |
-| `demo-infra` | Il `compose.yaml` che tiene su tutto, e i contratti condivisi in `contracts/`: i payload che passano da un servizio all'altro, con scritto chi li produce e chi li consuma. |
+| `demo-master-agent` | L'agente principale. Espone uno stream SSE in protocollo AG-UI: testo, ragionamento, chiamate a tool e stato passano tutti da lì. |
+| `demo-frontend` | Next.js. Chat, piano di lavoro ed event inspector sono tre letture dello stesso stream, non tre integrazioni. |
+| `demo-knowledge-agent` | Sottoagente d'esempio raggiunto via A2A: risponde su un corpus locale e sa fermarsi a chiedere. |
+| `demo-analysis-agent` | Il secondo sottoagente: misura e confronta numeri, e dice anche cosa quei numeri non dicono. |
+| `demo-memory-service` | Transcript, riassunti e ricerca semantica su pgvector. |
+| `demo-process-service` | Processi durevoli: le definizioni sono dati versionati, le istanze riprendono da dove erano rimaste. |
+| `demo-voice-service` | Voce in tempo reale, interamente auto-ospitata: Silero per capire quando parli, faster-whisper per trascrivere, Kokoro per rispondere. Work in progress. |
+| `demo-scraping-mcp` | Un server MCP che apre le pagine in un browser headless. Serve anche da esempio di come si collega un server MCP a un agente. |
+| `demo-infra` | Il `compose.yaml` che tiene su tutto, i manifest Kubernetes, e i contratti condivisi fra i servizi. |
+| `packages/platform-core` | Il codice che i servizi Python condividono: osservabilità, migrazioni, controllo degli URL, notifiche push, store A2A, MCP, CORS, il modello finto. |
 
-Ogni cartella ha il suo README con i dettagli e le scelte che la riguardano.
+Ogni cartella ha il suo README con i dettagli. [SECURITY.md](SECURITY.md) dice
+cosa il template protegge e cosa lascia a chi lo adotta,
+[CHANGELOG.md](CHANGELOG.md) cosa cambia fra una versione e l'altra. Licenza:
+[Apache-2.0](LICENSE).
 
-## Come sta insieme
-
-Il punto di tutto è **un solo stream**. La chat, il piano di lavoro e l'event
-inspector non sono tre integrazioni: sono tre letture degli stessi eventi AG-UI.
-Aggiungere una quarta vista significa consumare lo stesso stream, non ricablare
-il backend — ed è esattamente così che è stata aggiunta la voce.
-
-Da lì in fuori l'agente ha tre modi diversi di allargarsi, e la differenza conta:
-
-- **Tool nativi**, scritti in Python dentro il master agent. Per quello che è
-  logica tua.
-- **Sottoagenti via A2A**, processi separati con la propria vita. Per quando
-  serve un altro agente, non un'altra funzione.
-- **Server MCP**, esterni e intercambiabili. Per quello che qualcun altro ha
-  già scritto meglio di te.
-
-I contratti in `demo-infra/contracts/` sono JSON con un campo `consumed_by`.
-Servono a rendere rumoroso quello che altrimenti sarebbe silenzioso: se cambi
-la forma di un payload, i test di contratto dell'altro lato si accorgono prima
-che se ne accorga un utente.
+L'agente ha tre modi di allargarsi, e la differenza conta quando scrivi il
+tuo: i tool nativi in Python per la logica che è tua, i sottoagenti A2A per
+quando serve un altro agente e non un'altra funzione, i server MCP per
+quello che qualcun altro ha già scritto.
 
 ## Farlo partire
 
-Serve Docker e un file `.env` (parti da `demo-infra/.env.example`). Poi:
+Serve Docker e un `.env`, da copiare da `demo-infra/.env.example` riempiendo i
+segreti che chiede (ognuno con `openssl rand -hex 24`).
 
 ```
 cd demo-infra
 docker compose up -d
 ```
 
-L'interfaccia è su `http://localhost:3000`, l'agente su `http://localhost:8000`.
-Gli altri servizi stanno sul loopback, non esposti: si raggiungono fra loro
-sulla rete di compose.
+L'interfaccia sta su `localhost:3000`, l'agente su `localhost:8000`. Gli
+altri servizi restano sul loopback e si parlano sulla rete di compose.
 
-Per lavorare su un singolo servizio senza tirare su tutto, ogni cartella Python
-usa `uv` (`uv sync && uv run pytest`) e il frontend `npm`.
+Per guardarsi intorno senza una chiave API, `FAKE_MODEL=true` nel `.env`: ogni
+agente risponde con un testo fisso, e tutto il resto -- piano, eventi, processi,
+memoria -- funziona davvero.
 
-## Le scelte che spiegano tutto il resto
+Per lavorare su un servizio senza tirare su il resto: `uv sync && uv run
+pytest` nelle cartelle Python, `npm ci && npm test` nel frontend. Il resto è in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-Tre decisioni, prese controvoglia e per motivi concreti, che condizionano il
-resto del codice più di qualsiasi altra cosa.
+## Perché è fatto così
 
-**Nessun fornitore obbligatorio.** I modelli passano da OpenRouter perché così
-restano sostituibili: il "cervello" dell'agente è una variabile d'ambiente, non
-una dipendenza. È anche il motivo per cui la voce è una pipeline a cascata
-auto-ospitata invece di un servizio vocale hosted: un modello nativo
-speech-to-speech avrebbe risposto più in fretta e con una prosodia migliore, ma
-avrebbe fuso trasporto, riconoscimento e ragionamento dentro un fornitore solo.
-Abbiamo scelto la latenza peggiore e la libertà.
+Il modello è una variabile d'ambiente. Le chiamate passano da OpenRouter, e
+cambiare cervello all'agente significa cambiare una riga di configurazione.
+Lo stesso principio spiega la voce: una pipeline a cascata auto-ospitata
+risponde più lentamente di un modello nativo speech-to-speech, ma quel
+modello nativo avrebbe messo trasporto, riconoscimento e ragionamento dentro
+un fornitore solo.
 
-**Un solo datastore.** Postgres, con più database dentro. Quando è servita la
-ricerca semantica non è arrivato un database vettoriale nuovo: è arrivato
-pgvector nel servizio di memoria che c'era già.
+Il prossimo passo sulla voce mette alla prova quella scelta.
+[PhoneLLM](https://www.cosmonet.info/phonellm-agenti-vocali-open-source-2026/)
+è un modello del team di Pipecat, la stessa libreria che questa pipeline già
+usa, ottimizzato per il tempo che passa prima della prima parola e per le
+chiamate a tool. Sostituisce solo l'LLM dentro la cascata, non il
+riconoscimento né la sintesi, che è precisamente il pezzo che la cascata
+teneva sostituibile. Prima di adottarlo restano da verificare tre cose: è
+alpha, i numeri di latenza dichiarati presuppongono una GPU NVIDIA B200, e
+non è stato provato in italiano.
 
-**La configurazione non mente.** Le tabelle delle variabili d'ambiente nei
-README sono generate dai campi veri del codice, non scritte a mano — perché una
-tabella scritta a mano inizia a mentire alla seconda modifica.
+I dati stanno tutti in Postgres. Quando è servita la ricerca semantica non è
+arrivato un database vettoriale nuovo: è arrivato pgvector nel servizio di
+memoria che c'era già.
 
-## Cosa non c'è, di proposito o non ancora
+Le tabelle delle variabili d'ambiente nei README sono generate dai campi del
+codice e un controllo in CI fallisce se divergono.
 
-Vale la pena essere espliciti, perché una piattaforma "enterprise" senza queste
-cose non è pronta per la produzione e far finta del contrario non aiuta nessuno.
+## Cosa manca
 
-**Non c'è autenticazione.** Esiste il concetto di `scope` per separare i dati, e
-il codice assume che davanti ci sia qualcosa che l'ha verificato — ma quel
-qualcosa non è in questo repository. Niente utenti, niente ruoli, niente SSO.
+L'autenticazione, per scelta. Esiste il concetto di `scope` per separare i
+dati, e il codice assume che davanti ci sia qualcosa che l'ha verificato, ma
+quel qualcosa non sta qui dentro: nessun utente, nessun ruolo, nessun SSO. Dove
+e come attaccarlo è in [SECURITY.md](SECURITY.md).
 
-**Non c'è un backoffice.** Tutto quello che decide il comportamento della
-piattaforma vive in variabili d'ambiente, e tutto quello che ha fatto scorre nei
-log. Non c'è una superficie da cui un amministratore veda le run passate,
-approvi un'azione a rischio o spenga un tool senza toccare il codice.
+Un backoffice, cioè una superficie da cui rivedere le run passate o spegnere un
+tool senza toccare il codice. Le azioni a rischio invece si approvano già: un
+tool configurato per farlo si ferma, e la chat mostra cosa sta per fare.
 
-**Non c'è un registry di agenti e tool** con ricerca semantica: la scoperta
-oggi è una lista in configurazione.
+Un registry di agenti e tool con ricerca semantica: la scoperta oggi è una
+lista in configurazione.
 
-**La CI non gira.** I workflow esistono nelle sottocartelle, ma GitHub Actions
-legge solo `.github/workflows/` alla radice: finché non vengono consolidati lì,
-nessun controllo parte. È il primo lavoro utile per chi vuole contribuire.
+## Una nota sulla storia
 
-## Nota sulla struttura
-
-Questi nove progetti sono nati come repository separati e sono stati uniti in
-uno solo, conservando tutta la storia: i commit radice originali sono ancora
-antenati di `main`. Per vedere la storia di un file *prima* dell'unione serve
-il percorso che aveva allora e `--full-history`:
+Questi nove progetti sono nati come repository separati e sono stati uniti,
+conservando tutta la storia: i commit radice originali sono ancora antenati
+di `main`. Per vedere la storia di un file prima dell'unione serve il
+percorso che aveva allora, con `--full-history`. Il pacchetto del master, per
+esempio, si chiamava `demo`:
 
 ```
 git log --full-history -- src/demo/config.py
