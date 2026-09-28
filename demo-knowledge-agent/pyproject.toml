@@ -14,7 +14,7 @@ dependencies = [
     # The version agent_framework_core's own "all" extra pins for
     # MCPStreamableHTTPTool -- added directly rather than pulling that
     # extra's few dozen unrelated provider packages in with it.
-    "mcp>=1.24.0,<2",
+    "mcp>=1.24.0,<3",
     "platform-core[a2a,maf,otel,runtime]",
     "pydantic-settings>=2.10",
     "uvicorn[standard]>=0.40",
