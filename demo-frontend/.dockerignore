@@ -1,4 +1,7 @@
 node_modules/
 .next/
 .git/
-.env.local
+.git.bak/
+.env
+.env.*
+coverage/

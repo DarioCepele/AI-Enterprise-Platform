@@ -2,8 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { runAgent } from "@/lib/agui/client";
-import type { MessagePart } from "@/lib/agui/types";
-import { initialState, reduce, withUserMessage, withAssistantText, type LabState } from "@/lib/agui/reducer";
+import type { MessagePart, RunInput } from "@/lib/agui/types";
+import {
+  awaitingApproval,
+  initialState,
+  reduce,
+  resumeOf,
+  withAssistantText,
+  withDecisions,
+  withUserMessage,
+  type LabState,
+} from "@/lib/agui/reducer";
 import { VoiceSession, voiceConfigured } from "@/lib/voice/client";
 import { Chat } from "./Chat";
 import { Inspector } from "./Inspector";
@@ -63,26 +72,25 @@ export function Lab() {
     }
   }, [voiceActive, stopVoice]);
 
-  const send = useCallback(
-    async (content: string | MessagePart[], displayText?: string) => {
+  /** One run on this thread: `before` updates the timeline as it starts. */
+  const start = useCallback(
+    async (input: Pick<RunInput, "messages" | "resume">, before: (s: LabState) => LabState) => {
       if (inFlight.current) return;
       inFlight.current = true;
       const controller = new AbortController();
       abort.current = controller;
-      const text = displayText ?? (typeof content === "string" ? content : "");
-      const userMessage = { id: crypto.randomUUID(), role: "user", content };
-      setState((s) => ({ ...withUserMessage(s, userMessage.id, text), running: true }));
+      setState((s) => ({ ...before(s), running: true }));
 
       try {
         await runAgent(
           {
             threadId,
             runId: crypto.randomUUID(),
-            messages: [userMessage],
             state: {},
             tools: [],
             context: [],
             forwardedProps: {},
+            ...input,
           },
           (event) => setState((s) => ({ ...reduce(s, event), running: true })),
           controller.signal,
@@ -102,6 +110,24 @@ export function Lab() {
     [threadId],
   );
 
+  const send = useCallback(
+    (content: string | MessagePart[], displayText?: string) => {
+      const text = displayText ?? (typeof content === "string" ? content : "");
+      const userMessage = { id: crypto.randomUUID(), role: "user", content };
+      return start({ messages: [userMessage] }, (s) => withUserMessage(s, userMessage.id, text));
+    },
+    [start],
+  );
+
+  /** The person's answers: the next run carries them, and nothing else. */
+  const resolve = useCallback(
+    (entryId: string, decisions: Record<string, boolean>) =>
+      start({ messages: [], resume: resumeOf(decisions) }, (s) =>
+        withDecisions(s, entryId, decisions),
+      ),
+    [start],
+  );
+
   return (
     <div className="lab-shell flex flex-col">
       <LabHeader />
@@ -113,6 +139,8 @@ export function Lab() {
           error={state.error}
           onSend={send}
           onStop={stop}
+          onResolve={resolve}
+          awaitingApproval={awaitingApproval(state)}
           voiceAvailable={voiceConfigured()}
           voiceActive={voiceActive}
           voiceError={voiceError}

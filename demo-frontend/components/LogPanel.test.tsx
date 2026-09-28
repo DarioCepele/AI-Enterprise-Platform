@@ -24,7 +24,7 @@ describe("LogPanel", () => {
     render(<LogPanel running={false} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByText("nessun log")).toBeInTheDocument();
+    expect(screen.getByText("no logs yet")).toBeInTheDocument();
   });
 
   it("advances the cursor, collects the tail and then stops", async () => {

@@ -72,7 +72,7 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
           aria-pressed={tab === "events"}
           className="text-sm font-medium"
         >
-          Eventi <span className="font-mono text-xs tabular-nums text-[var(--muted)]">{events.length}</span>
+          Events <span className="font-mono text-xs tabular-nums text-[var(--muted)]">{events.length}</span>
         </button>
         <button
           type="button"
@@ -88,7 +88,7 @@ export function Inspector({ events, running }: { events: AGUIEvent[]; running: b
           aria-pressed={tab === "instances"}
           className="text-sm font-medium"
         >
-          Istanze
+          Instances
         </button>
       </nav>
 

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { loadFixture } from "./fixtures/load";
 import { parseArtifact, parseReasoningDelta } from "./entries";
-import { initialState, reduce, withUserMessage } from "./reducer";
+import {
+  awaitingApproval,
+  initialState,
+  reduce,
+  resumeOf,
+  withDecisions,
+  withUserMessage,
+} from "./reducer";
 import type { AGUIEvent } from "./types";
 
 function run(events: AGUIEvent[]) {
@@ -343,5 +350,126 @@ describe("the subagent's briefing", () => {
 
     const entry = state.entries[0];
     expect(entry.kind === "artifact" && entry.artifact.component).toBe("unknown");
+  });
+});
+
+// The run as the master agent streams it when a tool needs a person's yes
+// (recorded from Microsoft Agent Framework 1.17, trimmed): the tool call, the
+// framework's own legacy `confirm_changes` announcement, and the interrupt.
+const interruptedRun: AGUIEvent[] = [
+  { type: "RUN_STARTED", threadId: "t", runId: "r1" },
+  { type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "start_process" },
+  { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: '{"process_id": "example-approval"}' },
+  { type: "TOOL_CALL_END", toolCallId: "call_1" },
+  { type: "CUSTOM", name: "function_approval_request", value: { id: "i-1" } },
+  { type: "TOOL_CALL_START", toolCallId: "c-legacy", toolCallName: "confirm_changes" },
+  { type: "TOOL_CALL_ARGS", toolCallId: "c-legacy", delta: '{"function_name": "start_process"}' },
+  { type: "TOOL_CALL_END", toolCallId: "c-legacy" },
+  {
+    type: "RUN_FINISHED",
+    threadId: "t",
+    runId: "r1",
+    outcome: {
+      type: "interrupt",
+      interrupts: [
+        { id: "i-1", reason: "tool_call", message: "Approve running start_process?", toolCallId: "call_1" },
+      ],
+    },
+  },
+];
+
+describe("approvals", () => {
+  it("an interrupted run becomes a question naming the action and its arguments", () => {
+    const state = run(interruptedRun);
+
+    expect(state.running).toBe(false);
+    expect(state.entries.at(-1)).toEqual({
+      kind: "approval",
+      id: "approval:i-1",
+      requests: [
+        {
+          interruptId: "i-1",
+          tool: "start_process",
+          args: '{"process_id": "example-approval"}',
+          question: "Approve running start_process?",
+        },
+      ],
+      status: "pending",
+      decisions: {},
+    });
+    expect(awaitingApproval(state)).toBe(true);
+  });
+
+  it("leaves the framework's legacy confirm_changes call out of the timeline", () => {
+    const state = run(interruptedRun);
+
+    expect(state.entries.filter((e) => e.kind === "tool").map((e) => e.id)).toEqual(["call_1"]);
+    expect(state.events.some((e) => e.type === "TOOL_CALL_START" && e.toolCallName === "confirm_changes")).toBe(true);
+  });
+
+  it("a run that simply finishes asks nothing", () => {
+    const state = run([
+      { type: "RUN_STARTED", threadId: "t", runId: "r" },
+      { type: "RUN_FINISHED", threadId: "t", runId: "r", outcome: { type: "success" } },
+    ]);
+
+    expect(state.entries).toEqual([]);
+    expect(awaitingApproval(state)).toBe(false);
+  });
+
+  it("an interrupt with no matching call still asks, without inventing details", () => {
+    const state = run([
+      {
+        type: "RUN_FINISHED",
+        threadId: "t",
+        runId: "r",
+        outcome: { type: "interrupt", interrupts: [{ id: "i-9", reason: "input_required" }] },
+      },
+    ]);
+
+    const entry = state.entries[0];
+    expect(entry.kind === "approval" && entry.requests[0]).toEqual({
+      interruptId: "i-9",
+      tool: "an action",
+      args: "",
+      question: "Approve this action?",
+    });
+  });
+
+  it("answering records the decisions and releases the conversation", () => {
+    const state = withDecisions(run(interruptedRun), "approval:i-1", { "i-1": true });
+
+    expect(state.entries.at(-1)).toMatchObject({ status: "sent", decisions: { "i-1": true } });
+    expect(awaitingApproval(state)).toBe(false);
+  });
+
+  it("the resume answers every question, in the protocol's shape", () => {
+    expect(resumeOf({ "i-1": true, "i-2": false })).toEqual([
+      { interruptId: "i-1", status: "resolved", payload: { approved: true } },
+      { interruptId: "i-2", status: "resolved", payload: { approved: false } },
+    ]);
+  });
+
+  it("an answer the agent cannot apply fails on the card, in words", () => {
+    let state = withDecisions(run(interruptedRun), "approval:i-1", { "i-1": true });
+    state = reduce(state, {
+      type: "RUN_ERROR",
+      message: "No pending approval interrupt found for resume interruptId 'i-1'.",
+      code: "APPROVAL_RESUME_NOT_FOUND",
+    });
+
+    const entry = state.entries.at(-1);
+    expect(entry).toMatchObject({ kind: "approval", status: "failed" });
+    expect(entry?.kind === "approval" && entry.error).toMatch(/Nothing was run/);
+    expect(state.error).toBeNull();
+    expect(state.running).toBe(false);
+  });
+
+  it("an unrelated error stays a run error, not an approval failure", () => {
+    let state = withDecisions(run(interruptedRun), "approval:i-1", { "i-1": true });
+    state = reduce(state, { type: "RUN_ERROR", message: "model unavailable" });
+
+    expect(state.error).toBe("model unavailable");
+    expect(state.entries.at(-1)).toMatchObject({ status: "sent" });
   });
 });

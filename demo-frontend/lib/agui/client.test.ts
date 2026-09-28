@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { forgetRuntimeConfig } from "../runtime-config";
 import { runAgent } from "./client";
 import type { AGUIEvent, RunInput } from "./types";
 
@@ -49,6 +50,7 @@ describe("runAgent", () => {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify(input),
+        credentials: "same-origin",
         signal: undefined,
       },
     );
@@ -63,6 +65,26 @@ describe("runAgent", () => {
     await runAgent(input, () => {}, controller.signal);
 
     expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
+  });
+
+  it("sends cookies only when the deployment asks for it", async () => {
+    const { fetchMock } = mockStream([encoder.encode("")]);
+    await runAgent(input, () => {});
+    expect(fetchMock.mock.calls[0][1].credentials).toBe("same-origin");
+
+    document.body.innerHTML = `<script id="lab-runtime-config" type="application/json">${JSON.stringify({
+      aguiUrl: "http://agent.example/agui",
+      credentials: "include",
+    })}</script>`;
+    forgetRuntimeConfig();
+    try {
+      const again = mockStream([encoder.encode("")]);
+      await runAgent(input, () => {});
+      expect(again.fetchMock.mock.calls[0][1].credentials).toBe("include");
+    } finally {
+      document.body.innerHTML = "";
+      forgetRuntimeConfig();
+    }
   });
 
   it("propagates aborting a run already under way", async () => {
@@ -141,7 +163,7 @@ describe("runAgent", () => {
   it.each([503, 204])("reports HTTP response %i with no valid stream", async (status) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status })));
 
-    await expect(runAgent(input, vi.fn())).rejects.toThrow(`AG-UI ha risposto ${status}`);
+    await expect(runAgent(input, vi.fn())).rejects.toThrow(`AG-UI answered ${status}`);
   });
 
   it.each(["json", "callback"])("cancels the stream and releases the reader when %s fails", async (failure) => {

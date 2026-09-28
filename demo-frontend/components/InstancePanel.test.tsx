@@ -46,7 +46,7 @@ describe("InstancePanel", () => {
     configured("");
     render(<InstancePanel running={false} />);
 
-    expect(screen.getByText(/nessun servizio dei processi/i)).toBeInTheDocument();
+    expect(screen.getByText(/no process service/i)).toBeInTheDocument();
   });
 
   it("lists the instances with the state a person reads", async () => {
@@ -54,7 +54,7 @@ describe("InstancePanel", () => {
     render(<InstancePanel running={false} />);
 
     expect(await screen.findByText("example-approval")).toBeInTheDocument();
-    expect(screen.getByText(/Attende una decisione/)).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for a decision/)).toBeInTheDocument();
   });
 
   it("puts what is waiting for somebody above the list", async () => {
@@ -70,7 +70,7 @@ describe("InstancePanel", () => {
 
     // One of the two is stopped in front of a person: that is the number worth
     // seeing without opening anything.
-    expect(await screen.findByText(/1 in attesa di qualcuno/)).toBeInTheDocument();
+    expect(await screen.findByText(/1 waiting for someone/)).toBeInTheDocument();
   });
 
   it("shows the steps of the instance that is opened", async () => {
@@ -99,8 +99,8 @@ describe("InstancePanel", () => {
 
     render(<InstancePanel running={false} />);
     fireEvent.click(await screen.findByText("example-approval"));
-    fireEvent.change(await screen.findByLabelText("Chi decide"), { target: { value: "reviewer" } });
-    fireEvent.click(screen.getByRole("button", { name: "Approva" }));
+    fireEvent.change(await screen.findByLabelText("Who decides"), { target: { value: "reviewer" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].url).toContain("/steps/approval/decision");
@@ -125,8 +125,8 @@ describe("InstancePanel", () => {
 
     render(<InstancePanel running={false} />);
     fireEvent.click(await screen.findByText("example-approval"));
-    fireEvent.change(await screen.findByLabelText("Chi decide"), { target: { value: "reviewer" } });
-    fireEvent.click(screen.getByRole("button", { name: "Approva" }));
+    fireEvent.change(await screen.findByLabelText("Who decides"), { target: { value: "reviewer" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     // "409" would send whoever reads it to the logs; the reason is already here.
     expect(await screen.findByRole("alert")).toHaveTextContent("it is not waiting");
@@ -136,6 +136,6 @@ describe("InstancePanel", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 502 })));
     render(<InstancePanel running={false} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/irraggiungibili/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/unreachable/);
   });
 });

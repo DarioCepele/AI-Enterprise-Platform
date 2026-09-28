@@ -1,13 +1,19 @@
 import { memo } from "react";
 import type { Entry } from "@/lib/agui/entries";
 import { UiTable } from "../artifacts/UiTable";
+import { ApprovalEntry } from "./ApprovalEntry";
 import { AssistantEntry } from "./AssistantEntry";
 import { ReasoningEntry } from "./ReasoningEntry";
 import { SubagentEntry } from "./SubagentEntry";
 import { ToolEntry } from "./ToolEntry";
 import { UserEntry } from "./UserEntry";
 
-export const EntryView = memo(function EntryView({ entry }: { entry: Entry }) {
+interface Props {
+  entry: Entry;
+  onResolve?: (entryId: string, decisions: Record<string, boolean>) => void;
+}
+
+export const EntryView = memo(function EntryView({ entry, onResolve }: Props) {
   switch (entry.kind) {
     case "user":
       return <UserEntry text={entry.text} />;
@@ -28,6 +34,8 @@ export const EntryView = memo(function EntryView({ entry }: { entry: Entry }) {
       );
     case "artifact":
       return <UiTable artifact={entry.artifact} />;
+    case "approval":
+      return <ApprovalEntry entry={entry} onResolve={onResolve} />;
   }
   const unreachable: never = entry;
   throw new Error(`Unsupported entry variant: ${JSON.stringify(unreachable)}`);

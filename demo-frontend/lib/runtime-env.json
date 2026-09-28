@@ -1,0 +1,98 @@
+[
+  {
+    "variable": "AGUI_URL",
+    "field": "aguiUrl",
+    "default": "http://127.0.0.1:8000/agui",
+    "note": "Where the agent answers. Uploads and logs are derived from it."
+  },
+  {
+    "variable": "PROCESS_URL",
+    "field": "processUrl",
+    "default": "",
+    "note": "The process service. Empty: the Instances panel says there is none."
+  },
+  {
+    "variable": "VOICE_URL",
+    "field": "voiceUrl",
+    "default": "",
+    "note": "The voice WebSocket. Empty: no microphone button."
+  },
+  {
+    "variable": "API_CREDENTIALS",
+    "field": "credentials",
+    "default": "same-origin",
+    "note": "Cookies to the services: `include` behind a cookie-based proxy (single sign-on, load-balancer affinity). Needs the services' `*_CORS_CREDENTIALS`."
+  },
+  {
+    "variable": "PRODUCT_NAME",
+    "field": "product.name",
+    "default": "Agent Platform",
+    "note": "Name in the header and in the tab."
+  },
+  {
+    "variable": "PRODUCT_TAGLINE",
+    "field": "product.tagline",
+    "default": "an agent at work",
+    "note": "Line under the name."
+  },
+  {
+    "variable": "PRODUCT_DESCRIPTION",
+    "field": "product.description",
+    "default": "Chat, work plan, events and logs of a running agent.",
+    "note": "Description of the page."
+  },
+  {
+    "variable": "PRODUCT_DISCLAIMER",
+    "field": "product.disclaimer",
+    "default": "The agent can be wrong. Follow the plan and inspect the events.",
+    "note": "Footer line: a caveat about quality."
+  },
+  {
+    "variable": "PRODUCT_AI_DISCLOSURE",
+    "field": "product.aiDisclosure",
+    "default": "You are interacting with an artificial intelligence system, not a human.",
+    "note": "The statement that the user is talking to an AI system (EU AI Act, art. 50)."
+  },
+  {
+    "variable": "PRODUCT_LOCALE",
+    "field": "product.locale",
+    "default": "en",
+    "note": "`lang` of the page."
+  },
+  {
+    "variable": "PRODUCT_MONOGRAM",
+    "field": "product.monogram",
+    "default": "a/",
+    "note": "The characters in the header's badge."
+  },
+  {
+    "variable": "PRODUCT_BADGES",
+    "field": "product.badges",
+    "default": "",
+    "note": "Comma-separated labels in the header. Empty: none."
+  },
+  {
+    "variable": "EMPTY_EYEBROW",
+    "field": "emptyState.eyebrow",
+    "default": "from the request to the result",
+    "note": "Small line above the empty conversation's headline."
+  },
+  {
+    "variable": "EMPTY_HEADLINE",
+    "field": "emptyState.headline",
+    "default": "An agent at work.",
+    "note": "Headline of the empty conversation."
+  },
+  {
+    "variable": "EMPTY_SUBHEAD",
+    "field": "emptyState.subhead",
+    "default": "Every step, visible.",
+    "note": "Second line of the headline."
+  },
+  {
+    "variable": "EMPTY_BODY",
+    "field": "emptyState.body",
+    "default": "Ask for a comparison: follow the reasoning, the tools and the final table. The plan shows where we are.",
+    "note": "Paragraph under the headline."
+  }
+]

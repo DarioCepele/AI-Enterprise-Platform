@@ -8,7 +8,9 @@ export type VoiceServerMessage =
   | { type: "user_transcript"; text: string }
   | { type: "assistant_text_chunk"; text: string }
   | { type: "assistant_audio_chunk"; encoding: string; sample_rate: number }
-  | { type: "assistant_turn_cancelled" };
+  | { type: "assistant_turn_cancelled" }
+  /** The agent did not answer the turn; the cause stays in the service's logs. */
+  | { type: "assistant_turn_failed" };
 
 /** Parses one text frame; a malformed or unrecognised payload is `null`, not a throw. */
 export function parseVoiceServerMessage(raw: string): VoiceServerMessage | null {

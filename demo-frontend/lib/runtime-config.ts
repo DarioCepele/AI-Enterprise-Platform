@@ -15,6 +15,14 @@ export interface RuntimeConfig {
   processUrl: string;
   /** Empty when this deployment has no voice service: the microphone button says so. */
   voiceUrl: string;
+  /**
+   * Whether the browser sends cookies to the services above, which live on
+   * other origins. The default (`same-origin`) sends none; `include` is what
+   * a cookie-based proxy in front of them needs (single sign-on, or a load
+   * balancer's session cookie), and needs the services to allow credentials
+   * for the page's origin (`MASTER_CORS_CREDENTIALS`, `PROCESS_CORS_CREDENTIALS`).
+   */
+  credentials: RequestCredentials;
   product: {
     name: string;
     tagline: string;
@@ -42,15 +50,18 @@ const DEFAULTS: RuntimeConfig = {
   aguiUrl: "http://127.0.0.1:8000/agui",
   processUrl: "",
   voiceUrl: "",
+  credentials: "same-origin",
   product: {
-    name: "AG-UI Lab",
+    name: "Agent Platform",
     tagline: "an agent at work",
     description: "Chat, work plan, events and logs of a running agent.",
     disclaimer: "The agent can be wrong. Follow the plan and inspect the events.",
     aiDisclosure: "You are interacting with an artificial intelligence system, not a human.",
     locale: "en",
     monogram: "a/",
-    badges: ["AG-UI", "MAF 1.17", "Next.js"],
+    // Nothing by default: a badge naming a framework version is stale on the
+    // next upgrade. A deployment names what it wants its users to see.
+    badges: [],
   },
   emptyState: {
     eyebrow: "from the request to the result",
@@ -62,6 +73,13 @@ const DEFAULTS: RuntimeConfig = {
 
 function pick(...values: (string | undefined)[]): string | undefined {
   return values.find((value) => value !== undefined && value !== "");
+}
+
+const CREDENTIALS: readonly RequestCredentials[] = ["omit", "same-origin", "include"];
+
+function credentialsFrom(value: string | undefined): RequestCredentials {
+  const wanted = value?.trim().toLowerCase();
+  return CREDENTIALS.find((mode) => mode === wanted) ?? DEFAULTS.credentials;
 }
 
 /** Read on the server at request time, so the same image serves any environment. */
@@ -77,6 +95,7 @@ export function configFromEnvironment(
     voiceUrl: (
       pick(env.VOICE_URL, env.NEXT_PUBLIC_VOICE_URL) ?? DEFAULTS.voiceUrl
     ).replace(/\/$/, ""),
+    credentials: credentialsFrom(pick(env.API_CREDENTIALS, env.NEXT_PUBLIC_API_CREDENTIALS)),
     product: {
       name: pick(env.PRODUCT_NAME, env.NEXT_PUBLIC_PRODUCT_NAME) ?? DEFAULTS.product.name,
       tagline:
@@ -127,6 +146,11 @@ export function runtimeConfig(): RuntimeConfig {
   }
   cached = configFromEnvironment();
   return cached;
+}
+
+/** The credentials mode of every request to the services (see `credentials`). */
+export function apiCredentials(): RequestCredentials {
+  return runtimeConfig().credentials ?? DEFAULTS.credentials;
 }
 
 export function forgetRuntimeConfig(): void {

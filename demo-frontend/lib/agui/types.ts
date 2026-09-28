@@ -1,7 +1,34 @@
+/**
+ * A question the agent stopped on, per the AG-UI interrupts spec: the run
+ * ends with `outcome.type === "interrupt"`, and the next run on the thread
+ * must answer every open one in its `resume`. `toolCallId` names the tool
+ * call waiting for a person's approval, when that is the reason.
+ */
+export interface Interrupt {
+  id: string;
+  reason: string;
+  message?: string;
+  toolCallId?: string;
+  responseSchema?: unknown;
+  expiresAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type RunOutcome =
+  | { type: "success" }
+  | { type: "interrupt"; interrupts: Interrupt[] };
+
+/** One answer to an open interrupt, sent in the next run's `resume`. */
+export interface ResumeEntry {
+  interruptId: string;
+  status: "resolved" | "cancelled";
+  payload?: unknown;
+}
+
 export type AGUIEvent =
   | { type: "RUN_STARTED"; threadId: string; runId: string }
-  | { type: "RUN_FINISHED"; threadId: string; runId: string }
-  | { type: "RUN_ERROR"; message: string }
+  | { type: "RUN_FINISHED"; threadId: string; runId: string; outcome?: RunOutcome }
+  | { type: "RUN_ERROR"; message: string; code?: string }
   | { type: "TEXT_MESSAGE_START"; messageId: string; role: string }
   | { type: "TEXT_MESSAGE_CONTENT"; messageId: string; delta: string }
   | { type: "TEXT_MESSAGE_END"; messageId: string }
@@ -64,4 +91,6 @@ export interface RunInput {
   tools: unknown[];
   context: unknown[];
   forwardedProps: Record<string, unknown>;
+  /** Answers to the interrupts the previous run ended on: all of them, at once. */
+  resume?: ResumeEntry[];
 }

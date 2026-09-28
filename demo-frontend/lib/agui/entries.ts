@@ -23,7 +23,30 @@ export type Artifact =
     }
   | { component: "unknown"; id: string; raw: unknown };
 
+/** One action waiting for a person: what would run, with which arguments. */
+export interface ApprovalRequest {
+  interruptId: string;
+  tool: string;
+  args: string;
+  question: string;
+}
+
+/**
+ * The questions one run stopped on, answered together (the protocol takes
+ * every open interrupt in a single resume). `decisions` maps each
+ * interruptId to the answer given, once sent.
+ */
+export interface ApprovalEntryData {
+  kind: "approval";
+  id: string;
+  requests: ApprovalRequest[];
+  status: "pending" | "sent" | "failed";
+  decisions: Record<string, boolean>;
+  error?: string;
+}
+
 export type Entry =
+  | ApprovalEntryData
   | { kind: "user"; id: string; text: string }
   | { kind: "assistant"; id: string; text: string }
   | { kind: "reasoning"; id: string; text: string; done: boolean }

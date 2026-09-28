@@ -48,7 +48,7 @@ describe("PlanPanel", () => {
         ...PLAN.steps[0], id, status,
       })),
     } }} />);
-    for (const name of ["In attesa", "In corso", "Completato", "Fallito"]) {
+    for (const name of ["Pending", "In progress", "Completed", "Failed"]) {
       expect(screen.getByRole("img", { name })).toBeInTheDocument();
     }
     expect(screen.getByText("1/4")).toBeInTheDocument();

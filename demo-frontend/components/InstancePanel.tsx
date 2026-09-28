@@ -47,10 +47,10 @@ const TONE: Record<string, string> = {
 };
 
 const FILTERS = [
-  { key: "", label: "tutte" },
-  { key: "waiting_approval", label: "da decidere" },
-  { key: "waiting_human", label: "da rispondere" },
-  { key: "completed", label: "finite" },
+  { key: "", label: "all" },
+  { key: "waiting_approval", label: "to decide" },
+  { key: "waiting_human", label: "to answer" },
+  { key: "completed", label: "finished" },
 ] as const;
 
 function when(value: string | null): string {
@@ -93,14 +93,14 @@ function WaitingOn({
   if (step.status === "waiting_human") {
     return (
       <div className="mt-2 rounded border border-[var(--border)] p-2">
-        <p className="text-xs">{step.question ?? "L'agente ha chiesto un chiarimento."}</p>
+        <p className="text-xs">{step.question ?? "The agent asked for a clarification."}</p>
         <div className="mt-2 flex gap-2">
           <input
-            aria-label="Risposta"
+            aria-label="Answer"
             value={text}
             disabled={busy}
             onChange={(event) => setText(event.target.value)}
-            placeholder="rispondi all'agente"
+            placeholder="answer the agent"
             className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
           />
           <button
@@ -109,7 +109,7 @@ function WaitingOn({
             onClick={() => act(() => answerStep(instance.id, step.step_id, text.trim()))}
             className="rounded bg-[var(--surface)] px-2 py-1 text-xs disabled:opacity-50"
           >
-            Rispondi
+            Answer
           </button>
         </div>
         {error && <p role="alert" className="pt-1 text-xs text-red-600">{error}</p>}
@@ -119,14 +119,14 @@ function WaitingOn({
 
   return (
     <div className="mt-2 rounded border border-[var(--border)] p-2">
-      <p className="text-xs">{step.question ?? "In attesa di una decisione."}</p>
+      <p className="text-xs">{step.question ?? "Waiting for a decision."}</p>
       <div className="mt-2 flex gap-2">
         <input
-          aria-label="Chi decide"
+          aria-label="Who decides"
           value={by}
           disabled={busy}
           onChange={(event) => setBy(event.target.value)}
-          placeholder="chi decide"
+          placeholder="who decides"
           className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
         />
         <button
@@ -137,7 +137,7 @@ function WaitingOn({
           }
           className="rounded bg-[var(--surface)] px-2 py-1 text-xs disabled:opacity-50"
         >
-          Approva
+          Approve
         </button>
         <button
           type="button"
@@ -147,7 +147,7 @@ function WaitingOn({
           }
           className="rounded bg-[var(--surface)] px-2 py-1 text-xs disabled:opacity-50"
         >
-          Rifiuta
+          Reject
         </button>
       </div>
       {error && <p role="alert" className="pt-1 text-xs text-red-600">{error}</p>}
@@ -157,8 +157,8 @@ function WaitingOn({
 
 function Detail({ instance, onChanged }: { instance: Instance; onChanged: () => void }) {
   return (
-    // Rientrata e con un filo a sinistra: aperta senza, la lista dei passi si
-    // legge come altre istanze invece che come i passi di questa.
+    // Indented, with a rule on the left: without them the list of steps reads
+    // as more instances instead of the steps of this one.
     <div className="mt-2 border-l-2 border-[var(--border)] pl-3">
       {instance.note && <p className="pb-2 text-xs text-[var(--muted)]">{instance.note}</p>}
       <ol className="space-y-2">
@@ -256,7 +256,7 @@ export function InstancePanel({ running }: { running: boolean }) {
   if (!configured) {
     return (
       <p className="py-2 text-xs text-[var(--muted)]">
-        Nessun servizio dei processi configurato.
+        No process service configured.
       </p>
     );
   }
@@ -265,7 +265,7 @@ export function InstancePanel({ running }: { running: boolean }) {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <nav aria-label="Filtro istanze" className="flex gap-3 pb-2">
+      <nav aria-label="Instance filter" className="flex gap-3 pb-2">
         {FILTERS.map((option) => (
           <button
             key={option.key}
@@ -281,18 +281,18 @@ export function InstancePanel({ running }: { running: boolean }) {
 
       {error && (
         <p role="alert" className="py-1 text-xs text-red-600">
-          processi irraggiungibili: {error}
+          processes unreachable: {error}
         </p>
       )}
 
       {waiting.length > 0 && filter === "" && (
         <p role="status" className="pb-2 text-xs text-sky-600">
-          {waiting.length} in attesa di qualcuno
+          {waiting.length} waiting for someone
         </p>
       )}
 
       {instances.length === 0 && !error && (
-        <p className="py-1 text-xs text-[var(--muted)]">nessuna istanza</p>
+        <p className="py-1 text-xs text-[var(--muted)]">no instances</p>
       )}
 
       <ul className="space-y-1">

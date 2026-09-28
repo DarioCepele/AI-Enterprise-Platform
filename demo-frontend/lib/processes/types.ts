@@ -41,21 +41,21 @@ export interface ProcessSummary {
 
 /** The states an instance stops in, and what they mean to a person. */
 export const INSTANCE_LABEL: Record<string, string> = {
-  pending: "Da avviare",
-  running: "In corso",
-  waiting: "In attesa",
-  waiting_human: "Attende una risposta",
-  waiting_approval: "Attende una decisione",
-  completed: "Completata",
-  failed: "Fallita",
-  rejected: "Rifiutata",
-  escalated: "Passata avanti",
-  compensated: "Disfatta",
+  pending: "Not started",
+  running: "Running",
+  waiting: "Waiting",
+  waiting_human: "Waiting for an answer",
+  waiting_approval: "Waiting for a decision",
+  completed: "Completed",
+  failed: "Failed",
+  rejected: "Rejected",
+  escalated: "Escalated",
+  compensated: "Undone",
 };
 
 export const STEP_LABEL: Record<string, string> = {
   ...INSTANCE_LABEL,
-  compensation_failed: "Non si e' potuta disfare",
+  compensation_failed: "Could not be undone",
 };
 
 /** Whether somebody has to do something about it. */

@@ -112,6 +112,55 @@ describe("Lab", () => {
     expect(screen.getByRole("textbox", { name: "Message" })).toBeEnabled();
   });
 
+  it("an action that needs approval waits for the person, and their yes resumes the run", async () => {
+    runMock.mockImplementationOnce(async (input, onEvent) => {
+      onEvent({ type: "RUN_STARTED", threadId: input.threadId, runId: input.runId });
+      onEvent({ type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "start_process" });
+      onEvent({ type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: '{"process_id":"example-approval"}' });
+      onEvent({ type: "TOOL_CALL_END", toolCallId: "call_1" });
+      onEvent({
+        type: "RUN_FINISHED",
+        threadId: input.threadId,
+        runId: input.runId,
+        outcome: {
+          type: "interrupt",
+          interrupts: [{ id: "i-1", reason: "tool_call", message: "Approve running start_process?", toolCallId: "call_1" }],
+        },
+      });
+    });
+    runMock.mockImplementationOnce(async (input, onEvent) => {
+      onEvent({ type: "RUN_STARTED", threadId: input.threadId, runId: input.runId });
+      onEvent({ type: "TOOL_CALL_RESULT", toolCallId: "call_1", content: "I started it." });
+      onEvent({ type: "TEXT_MESSAGE_START", messageId: "a", role: "assistant" });
+      onEvent({ type: "TEXT_MESSAGE_CONTENT", messageId: "a", delta: "Started." });
+      onEvent({ type: "TEXT_MESSAGE_END", messageId: "a" });
+      onEvent({ type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId });
+    });
+    render(<Lab />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "start the approval process" } });
+    fireEvent.click(screen.getByRole("button", { name: "send" }));
+    await act(async () => {});
+
+    expect(screen.getByRole("region", { name: "Approval needed" })).toHaveTextContent("start_process");
+    expect(input).toBeDisabled();
+    expect(input).toHaveAttribute("placeholder", "Answer the approval above to continue…");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    });
+
+    expect(runMock).toHaveBeenCalledTimes(2);
+    const [first, resume] = runMock.mock.calls.map((call) => call[0]);
+    expect(resume.threadId).toBe(first.threadId);
+    expect(resume.messages).toEqual([]);
+    expect(resume.resume).toEqual([{ interruptId: "i-1", status: "resolved", payload: { approved: true } }]);
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+    expect(screen.getByText("Started.")).toBeInTheDocument();
+    expect(input).toBeEnabled();
+  });
+
   it("hides the mic entirely when no voice service is configured", () => {
     voiceConfiguredMock.mockReturnValue(false);
     render(<Lab />);

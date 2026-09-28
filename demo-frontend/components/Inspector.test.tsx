@@ -132,18 +132,18 @@ describe("Inspector", () => {
 
   it("keeps filter and logs while switching between the two views", () => {
     render(<Inspector events={[{ type: "REASONING_START", messageId: "r" }]} running={false} />);
-    const eventButton = screen.getByRole("button", { name: "Eventi 1" });
+    const eventButton = screen.getByRole("button", { name: "Events 1" });
     const logButton = screen.getByRole("button", { name: "Log" });
     expect(eventButton).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("button", { name: "reasoning" }));
     fireEvent.click(logButton);
     expect(logButton).toHaveAttribute("aria-pressed", "true");
     expect(eventButton).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByText("nessun log")).toBeVisible();
+    expect(screen.getByText("no logs yet")).toBeVisible();
     expect(screen.queryByRole("button", { name: "reasoning" })).not.toBeInTheDocument();
     fireEvent.click(eventButton);
     expect(screen.getByRole("button", { name: "reasoning" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("nessun log")).not.toBeVisible();
+    expect(screen.getByText("no logs yet")).not.toBeVisible();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -151,7 +151,7 @@ describe("Inspector", () => {
     vi.useFakeTimers();
     const page = (seq: number) => ({
       cursor: String(seq), dropped: 0,
-      entries: [{ seq, ts: "2026-09-08T10:00:00Z", level: "INFO", source: "demo", message: `riga ${seq}` }],
+      entries: [{ seq, ts: "2026-09-08T10:00:00Z", level: "INFO", source: "master_agent", message: `riga ${seq}` }],
     });
     fetchMock.mockResolvedValueOnce(page(1)).mockResolvedValueOnce(page(2)).mockResolvedValueOnce(page(3));
     const { rerender } = render(<Inspector events={[]} running />);
@@ -160,7 +160,7 @@ describe("Inspector", () => {
     expect(screen.getByText("riga 1")).not.toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Log" }));
     expect(screen.getByText("riga 1")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Eventi 0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Events 0" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(fetchMock.mock.calls[1][0]).toBe("1");
     rerender(<Inspector events={[]} running={false} />);

@@ -22,10 +22,10 @@ const MARKER: Record<string, string> = {
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  pending: "In attesa",
-  in_progress: "In corso",
-  completed: "Completato",
-  failed: "Fallito",
+  pending: "Pending",
+  in_progress: "In progress",
+  completed: "Completed",
+  failed: "Failed",
 };
 
 const TONE: Record<string, string> = {
@@ -66,7 +66,7 @@ export function PlanPanel({ shared }: { shared: Record<string, unknown> }) {
     return (
       <section className="border-b border-[var(--border)] px-4 py-3">
         <h2 className="text-sm font-medium text-[var(--foreground)]">
-          Piano di lavoro
+          Work plan
         </h2>
         <p className="pt-1 text-xs text-[var(--muted)]">no plan in progress</p>
       </section>
@@ -79,7 +79,7 @@ export function PlanPanel({ shared }: { shared: Record<string, unknown> }) {
     <section className="border-b border-[var(--border)] px-4 py-3">
       <header className="flex items-baseline justify-between">
         <h2 className="text-sm font-medium text-[var(--foreground)]">
-          Piano di lavoro
+          Work plan
         </h2>
         <span className="font-mono text-xs">
           {done}/{plan.steps.length}
@@ -91,7 +91,7 @@ export function PlanPanel({ shared }: { shared: Record<string, unknown> }) {
           <li key={step.id} className="flex gap-2">
             <span
               role="img"
-              aria-label={STATUS_LABEL[step.status] ?? "Stato sconosciuto"}
+              aria-label={STATUS_LABEL[step.status] ?? "Unknown status"}
               className={`pt-0.5 text-xs ${TONE[step.status] ?? ""}`}
             >
               {MARKER[step.status] ?? "○"}

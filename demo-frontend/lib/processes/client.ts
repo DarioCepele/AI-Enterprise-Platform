@@ -1,4 +1,4 @@
-import { runtimeConfig } from "../runtime-config";
+import { apiCredentials, runtimeConfig } from "../runtime-config";
 import type { Instance, ProcessSummary } from "./types";
 
 /** Where the process service answers, read at runtime like everything else. */
@@ -12,7 +12,11 @@ export function processesConfigured(): boolean {
 }
 
 async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${processUrl()}${path}`, { signal, cache: "no-store" });
+  const response = await fetch(`${processUrl()}${path}`, {
+    signal,
+    cache: "no-store",
+    credentials: apiCredentials(),
+  });
   if (!response.ok) {
     throw new Error(`${path} answered ${response.status}`);
   }
@@ -43,6 +47,7 @@ async function send(path: string, body: unknown): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     cache: "no-store",
+    credentials: apiCredentials(),
   });
   if (!response.ok) {
     // The service says why in `detail`: a step that is no longer waiting, or

@@ -18,6 +18,10 @@ interface Props {
    */
   onSend: (content: string | MessagePart[], displayText?: string) => void;
   onStop?: () => void;
+  /** Answers to the approval the agent is waiting on (see ApprovalEntry). */
+  onResolve?: (entryId: string, decisions: Record<string, boolean>) => void;
+  /** The agent waits for a person: nothing else may be sent until they answer. */
+  awaitingApproval?: boolean;
   /** Hidden entirely when this deployment has no voice service, same as before. */
   voiceAvailable: boolean;
   voiceActive: boolean;
@@ -77,6 +81,8 @@ export function Chat({
   error,
   onSend,
   onStop,
+  onResolve,
+  awaitingApproval = false,
   voiceAvailable,
   voiceActive,
   voiceError,
@@ -88,10 +94,11 @@ export function Chat({
   const [video, setVideo] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const busy = running || uploading || voiceActive;
+  const busy = running || uploading || voiceActive || awaitingApproval;
   // The mic itself must stay clickable while voice is active — that's how it
-  // stops. Only a text-side run in flight blocks starting a voice turn.
-  const micDisabled = running || uploading;
+  // stops. A text-side run in flight, or a question waiting for an answer,
+  // blocks starting a voice turn.
+  const micDisabled = running || uploading || (awaitingApproval && !voiceActive);
 
   useEffect(() => {
     const el = scroller.current;
@@ -125,7 +132,7 @@ export function Chat({
         <div className="mx-auto max-w-[70ch]">
           {entries.map((entry) => (
             <div key={entry.id} className="timeline-entry" data-kind={entry.kind}>
-              <EntryView entry={entry} />
+              <EntryView entry={entry} onResolve={onResolve} />
             </div>
           ))}
         </div>
@@ -234,7 +241,13 @@ export function Chat({
             name="q"
             aria-label="Message"
             disabled={busy}
-            placeholder={voiceActive ? "Listening…" : "Write a message…"}
+            placeholder={
+              awaitingApproval
+                ? "Answer the approval above to continue…"
+                : voiceActive
+                  ? "Listening…"
+                  : "Write a message…"
+            }
             className="min-w-0 flex-1 bg-transparent text-sm focus-visible:outline-2 focus-visible:outline-offset-2"
           />
           <button

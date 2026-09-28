@@ -57,6 +57,15 @@ describe("VoiceSession.handleSocketMessage", () => {
     expect(cancelSpy).toHaveBeenCalledWith("1");
     expect(onTurnCancelled).toHaveBeenCalled();
   });
+
+  it("says so when the agent did not answer a turn, instead of staying silent", () => {
+    const onError = vi.fn();
+    const session = new VoiceSession({ onError }, { scheduler: new PlaybackScheduler(fakeContext()) });
+
+    session.handleSocketMessage(JSON.stringify({ type: "assistant_turn_failed" }));
+
+    expect(onError).toHaveBeenCalledWith("the agent did not answer this turn: try again");
+  });
 });
 
 // Regression test for a real bug: an AudioWorkletNode with no path onward to

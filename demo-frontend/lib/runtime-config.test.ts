@@ -44,7 +44,15 @@ describe("runtime configuration", () => {
 
     expect(built.aguiUrl).toBe("http://built-in/agui");
     expect(bare.aguiUrl).toBe("http://127.0.0.1:8000/agui");
-    expect(bare.product.name).toBe("AG-UI Lab");
+    expect(bare.product.name).toBe("Agent Platform");
+  });
+
+  it("sends no cookies to the services unless told to", () => {
+    expect(configFromEnvironment({}).credentials).toBe("same-origin");
+    expect(configFromEnvironment({ API_CREDENTIALS: "include" }).credentials).toBe("include");
+    expect(configFromEnvironment({ API_CREDENTIALS: " Include " }).credentials).toBe("include");
+    // A typo must not turn into a mode the browser rejects: the safe default.
+    expect(configFromEnvironment({ API_CREDENTIALS: "always" }).credentials).toBe("same-origin");
   });
 
   it("defaults to an explicit AI-interaction disclosure, distinct from the quality disclaimer", () => {

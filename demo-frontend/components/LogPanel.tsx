@@ -55,7 +55,7 @@ export function LogPanel({ running }: { running: boolean }) {
       {error && <p role="alert" className="py-1 text-red-600">logs unreachable: {error}</p>}
       {dropped > 0 && <p role="status" className="py-1 text-amber-600">{dropped} log lines no longer available</p>}
       {entries.length === 0 && !error && (
-        <p className="py-1 text-[var(--muted)]">nessun log</p>
+        <p className="py-1 text-[var(--muted)]">no logs yet</p>
       )}
       {entries.map((entry) => (
         <div key={entry.seq} className="flex gap-2 border-b border-[var(--border)] py-1">

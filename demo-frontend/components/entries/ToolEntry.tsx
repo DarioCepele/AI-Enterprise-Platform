@@ -1,5 +1,5 @@
 export function ToolEntry({ name, args, done }: { name: string; args: string; done: boolean }) {
-  const shown = format(args);
+  const shown = formatArgs(args);
 
   return (
     <details className="inline-block max-w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-mono text-xs">
@@ -9,13 +9,14 @@ export function ToolEntry({ name, args, done }: { name: string; args: string; do
         {!done && <span className="text-[var(--muted)]">…</span>}
       </summary>
       <pre className="mt-1 overflow-x-auto text-[var(--muted)]">
-        {shown === "" ? "nessun argomento" : shown}
+        {shown === "" ? "no arguments" : shown}
       </pre>
     </details>
   );
 }
 
-function format(args: string): string {
+/** A tool call's arguments, indented when they are JSON, as sent otherwise. */
+export function formatArgs(args: string): string {
   const trimmed = args.trim();
   if (trimmed === "") return "";
   try {

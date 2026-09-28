@@ -56,7 +56,7 @@ describe("EntryView", () => {
 
     const details = container.querySelector("details");
     expect(details?.open).toBe(false);
-    expect(screen.getByText("Ragionamento")).toBeInTheDocument();
+    expect(screen.getByText("Reasoning")).toBeInTheDocument();
   });
 
   it("shows the tool name and keeps the arguments collapsed", () => {
@@ -87,7 +87,7 @@ describe("EntryView", () => {
     const entry: Entry = { kind: "tool", id: "3c", name: "list_skills", args: "", done: true };
     render(<EntryView entry={entry} />);
 
-    expect(screen.getByText("nessun argomento")).toBeInTheDocument();
+    expect(screen.getByText("no arguments")).toBeInTheDocument();
   });
 
   it("renders a ui-table as a real table", () => {
@@ -258,5 +258,90 @@ describe("briefing in the timeline", () => {
     expect(screen.getByText("Statica, verificata dal compilatore.")).toBeInTheDocument();
     expect(screen.getByText("knowledge")).toBeInTheDocument();
     expect(screen.getByText(/sources: go, rust/)).toBeInTheDocument();
+  });
+});
+
+describe("ApprovalEntry", () => {
+  const request = {
+    interruptId: "i-1",
+    tool: "start_process",
+    args: '{"process_id":"example-approval","input_json":"{\\"amount\\": 5}"}',
+    question: "Approve running start_process?",
+  };
+  const pending: Entry = {
+    kind: "approval",
+    id: "approval:i-1",
+    requests: [request],
+    status: "pending",
+    decisions: {},
+  };
+
+  it("shows exactly what would run: the question, the tool and its arguments", () => {
+    render(<EntryView entry={pending} onResolve={vi.fn()} />);
+
+    const card = screen.getByRole("region", { name: "Approval needed" });
+    expect(card).toHaveTextContent("Approve running start_process?");
+    expect(card).toHaveTextContent("start_process");
+    expect(card.querySelector("pre")?.textContent).toContain('"process_id": "example-approval"');
+  });
+
+  it("one action: each button sends its answer at once", () => {
+    const onResolve = vi.fn();
+    const { unmount } = render(<EntryView entry={pending} onResolve={onResolve} />);
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(onResolve).toHaveBeenLastCalledWith("approval:i-1", { "i-1": true });
+    unmount();
+
+    render(<EntryView entry={pending} onResolve={onResolve} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    expect(onResolve).toHaveBeenLastCalledWith("approval:i-1", { "i-1": false });
+  });
+
+  it("several actions: the answers go out together, once each has one", () => {
+    const onResolve = vi.fn();
+    const two: Entry = {
+      ...pending,
+      requests: [request, { ...request, interruptId: "i-2", tool: "send_invoice", args: "" }],
+    };
+    render(<EntryView entry={two} onResolve={onResolve} />);
+
+    const send = screen.getByRole("button", { name: "Send answers" });
+    const [approveFirst] = screen.getAllByRole("button", { name: "Approve" });
+    const [, rejectSecond] = screen.getAllByRole("button", { name: "Reject" });
+    fireEvent.click(approveFirst);
+    expect(approveFirst).toHaveAttribute("aria-pressed", "true");
+    expect(send).toBeDisabled();
+    fireEvent.click(rejectSecond);
+    fireEvent.click(send);
+
+    expect(onResolve).toHaveBeenCalledTimes(1);
+    expect(onResolve).toHaveBeenCalledWith("approval:i-1", { "i-1": true, "i-2": false });
+  });
+
+  it("once answered, shows the answer and no buttons", () => {
+    const sent: Entry = { ...pending, status: "sent", decisions: { "i-1": false } };
+    render(<EntryView entry={sent} onResolve={vi.fn()} />);
+
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("an answer that could not be applied says why", () => {
+    const failed: Entry = {
+      ...pending,
+      status: "failed",
+      decisions: { "i-1": true },
+      error: "This approval is no longer open.",
+    };
+    render(<EntryView entry={failed} onResolve={vi.fn()} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("This approval is no longer open.");
+  });
+
+  it("without a way to answer, it only shows the question", () => {
+    render(<EntryView entry={pending} />);
+
+    expect(screen.getByText("Approve running start_process?")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });

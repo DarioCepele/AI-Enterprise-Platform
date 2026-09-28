@@ -2,7 +2,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const DEFAULT_LOCATION = resolve(process.cwd(), "..", "demo-infra", "contracts");
-const LOCATION_VARIABLE = "AGUI_LAB_CONTRACTS";
+// The name the Python services read too; the second is the older one.
+const LOCATION_VARIABLES = ["CONTRACTS_DIR", "AGUI_LAB_CONTRACTS"] as const;
 
 export interface Contract {
   contract: string;
@@ -14,11 +15,12 @@ export interface Contract {
 }
 
 function contractsDir(): string {
-  const directory = process.env[LOCATION_VARIABLE] ?? DEFAULT_LOCATION;
+  const configured = LOCATION_VARIABLES.map((name) => process.env[name]).find(Boolean);
+  const directory = configured ?? DEFAULT_LOCATION;
   if (!existsSync(directory)) {
     throw new Error(
-      `shared contracts not found in ${directory}. Clone demo-infra as a sibling of this ` +
-        `repository, or set ${LOCATION_VARIABLE} to the contracts directory. These tests do ` +
+      `shared contracts not found in ${directory}. In the repository they sit in ` +
+        `demo-infra/contracts; elsewhere, set CONTRACTS_DIR to that directory. These tests do ` +
         `not skip themselves: a contract test that goes quiet when the other side is missing ` +
         `is the silence the contracts exist to remove.`,
     );

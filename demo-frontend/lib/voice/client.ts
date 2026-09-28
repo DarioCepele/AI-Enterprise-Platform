@@ -54,7 +54,7 @@ export class VoiceSession {
 
   async start(): Promise<void> {
     const url = voiceUrl();
-    if (!url) throw new Error("nessun servizio voce configurato");
+    if (!url) throw new Error("no voice service configured");
 
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1 },
@@ -84,7 +84,7 @@ export class VoiceSession {
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
     socket.onmessage = (event) => this.handleSocketMessage(event.data as string | ArrayBuffer);
-    socket.onerror = () => this.handlers.onError?.("connessione al servizio voce persa");
+    socket.onerror = () => this.handlers.onError?.("connection to the voice service lost");
     socket.onclose = () => this.handlers.onClose?.();
     this.ws = socket;
   }
@@ -114,6 +114,9 @@ export class VoiceSession {
         case "assistant_turn_cancelled":
           this.scheduler?.cancelTurn(String(this.turn));
           this.handlers.onTurnCancelled?.();
+          break;
+        case "assistant_turn_failed":
+          this.handlers.onError?.("the agent did not answer this turn: try again");
           break;
       }
       return;

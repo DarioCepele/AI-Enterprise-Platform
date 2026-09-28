@@ -1,4 +1,4 @@
-import { runtimeConfig } from "../runtime-config";
+import { apiCredentials, runtimeConfig } from "../runtime-config";
 import type { AGUIEvent, RunInput } from "./types";
 
 /** Read per call: the endpoint arrives with the page, not with the bundle. */
@@ -20,16 +20,17 @@ export async function uploadVideo(file: Blob, signal?: AbortSignal): Promise<str
     method: "POST",
     headers: { "Content-Type": file.type || "application/octet-stream" },
     body: file,
+    credentials: apiCredentials(),
     signal,
   });
 
   if (!response.ok) {
-    throw new Error(`/uploads ha risposto ${response.status}`);
+    throw new Error(`/uploads answered ${response.status}`);
   }
 
   const data = (await response.json().catch(() => null)) as { url?: unknown } | null;
   if (!data || typeof data.url !== "string" || data.url === "") {
-    throw new Error("/uploads non ha restituito un url valido");
+    throw new Error("/uploads returned no valid url");
   }
   return data.url;
 }
@@ -43,11 +44,12 @@ export async function runAgent(
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify(input),
+    credentials: apiCredentials(),
     signal,
   });
 
   if (!response.ok || !response.body) {
-    throw new Error(`AG-UI ha risposto ${response.status}`);
+    throw new Error(`AG-UI answered ${response.status}`);
   }
 
   const reader = response.body.getReader();
