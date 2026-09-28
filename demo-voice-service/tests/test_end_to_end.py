@@ -1,4 +1,4 @@
-"""Step 6 of the plan's Tappa 1: voice and text are the same run.
+"""Voice and text are the same run.
 
 Proves that the same question, asked (a) through the voice pipeline
 (`/ws/voice`, a fixed audio file standing in for a microphone) and (b) as
@@ -11,7 +11,7 @@ subprocess.
 
 Reuses the exact subprocess/fake-client pattern `tests/test_agui_bridge.py`
 established (its docstring explains the choices in full): `demo-master-agent`
-started from its own synced `.venv`, `DEMO_FAKE_CLIENT=true` so the reply is
+started from its own synced `.venv`, `MASTER_FAKE_CLIENT=true` so the reply is
 deterministic (`FakeStreamingChatClient`'s default chunks, joined:
 "I am working on the answer." -- see that module's `EXPECTED_REPLY`), no
 Postgres/memory-service/knowledge-agent/subagents wired in. The fixture that

@@ -1,8 +1,8 @@
 """Two questions, two answers: is the process alive, and can it serve.
 
-This scaffold has no backend yet (no Pipecat, no STT/TTS, no store), so both
-probes currently answer the same way. The test still pins the contract these
-endpoints have to keep once a real dependency lands behind `/health/ready`.
+The models load on first use and nothing else is a dependency, so both probes
+answer the same way today. The test still pins the contract these endpoints
+have to keep once a real dependency lands behind `/health/ready`.
 """
 from __future__ import annotations
 

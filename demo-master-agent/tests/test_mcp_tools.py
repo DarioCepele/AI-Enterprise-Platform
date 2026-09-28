@@ -1,36 +1,37 @@
-"""`DEMO_MCP_SERVERS` config parsing, and `build_mcp_tools` turning it into
-`MCPStreamableHTTPTool` instances -- the same shape `test_subagents.py`
-exercises for `DEMO_SUBAGENTS`, a different protocol.
+"""`MASTER_MCP_SERVERS` parsing, and the tools it becomes.
 
-Connecting to a real MCP server is `agent_framework`'s own job (`Agent`
-itself opens the session lazily, on first use), not retested here.
+The same shape `test_subagents.py` exercises for `MASTER_SUBAGENTS`, a
+different protocol. Connecting to a real MCP server is Agent Framework's own
+job (the agent opens the session lazily, on first use), not retested here.
 """
+
 from __future__ import annotations
 
 import pytest
 from agent_framework import MCPStreamableHTTPTool
+from platform_core.mcp import build_mcp_tools
 from pydantic import ValidationError
 
-from demo.config import MCPServerConfig, get_settings
-from demo.tools.mcp_tools import build_mcp_tools
+from master_agent.config import MCPServerConfig, get_settings
 
 
 def test_no_servers_configured_means_no_tools(monkeypatch):
-    monkeypatch.delenv("DEMO_MCP_SERVERS", raising=False)
+    monkeypatch.delenv("MASTER_MCP_SERVERS", raising=False)
+    monkeypatch.delenv("MASTER_MCP_SERVERS", raising=False)
 
     assert get_settings().mcp_servers == ()
     assert build_mcp_tools(()) == []
 
 
 def test_an_empty_list_is_not_an_error(monkeypatch):
-    monkeypatch.setenv("DEMO_MCP_SERVERS", "")
+    monkeypatch.setenv("MASTER_MCP_SERVERS", "")
 
     assert get_settings().mcp_servers == ()
 
 
 def test_parses_a_json_list(monkeypatch):
     monkeypatch.setenv(
-        "DEMO_MCP_SERVERS",
+        "MASTER_MCP_SERVERS",
         '[{"name":"docs","url":"http://mcp-docs:9000/mcp"},'
         '{"name":"search","url":"http://mcp-search:9100/mcp","token":"secret"}]',
     )
@@ -39,6 +40,13 @@ def test_parses_a_json_list(monkeypatch):
 
     assert [s.name for s in servers] == ["docs", "search"]
     assert servers[1].token == "secret"  # noqa: S105
+
+
+def test_the_old_variable_name_still_works(monkeypatch):
+    monkeypatch.delenv("MASTER_MCP_SERVERS", raising=False)
+    monkeypatch.setenv("MASTER_MCP_SERVERS", '[{"name":"docs","url":"http://x/mcp"}]')
+
+    assert [s.name for s in get_settings().mcp_servers] == ["docs"]
 
 
 def test_a_name_unusable_as_a_tool_prefix_is_rejected():
@@ -68,9 +76,21 @@ def test_an_allow_list_reaches_the_tool():
     assert tool.allowed_tools == ("search",)
 
 
+def test_a_server_can_require_a_person_before_any_of_its_tools_runs():
+    config = MCPServerConfig(
+        name="payments", url="http://mcp-pay:9000/mcp", approval="always"
+    )
+
+    [tool] = build_mcp_tools((config,))
+
+    assert tool.approval_mode == "always_require"
+
+
 def test_a_token_becomes_a_bearer_header():
     config = MCPServerConfig(
-        name="docs", url="http://mcp-docs:9000/mcp", token="secret"  # noqa: S106
+        name="docs",
+        url="http://mcp-docs:9000/mcp",
+        token="secret",  # noqa: S106
     )
 
     [tool] = build_mcp_tools((config,))

@@ -1,4 +1,5 @@
 """Instances: rows that outlive the process that wrote them."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -42,9 +43,7 @@ REVISED = parse_definition(
 
 async def test_the_migrations_are_recorded_and_idempotent(pool):
     async with pool.connection() as connection:
-        assert await applied_versions(connection) == set(
-            range(1, LATEST_VERSION + 1)
-        )
+        assert await applied_versions(connection) == set(range(1, LATEST_VERSION + 1))
         assert await run_migrations(connection) == []
 
 
@@ -192,3 +191,24 @@ async def test_a_browser_from_the_interface_may_read_the_instances(app, scope):
     # A service that answered everybody would let any page a browser happens to
     # have open read what is running here.
     assert "access-control-allow-origin" not in stranger.headers
+
+
+async def test_without_a_declared_header_the_scope_is_the_default(
+    store, dbos, monkeypatch
+):
+    # Nobody declared a proxy in front: a scope sent by the client is a wish,
+    # not an identity, and it must not choose whose instances it reads.
+    monkeypatch.delenv("PROCESS_SCOPE_HEADER", raising=False)
+    catalog = load_catalog("processes")
+    use_engine(Engine(catalog, store))
+    app = create_app(catalog=catalog, store=store)
+
+    async with await client_for(app) as client:
+        started = await client.post(
+            "/processes/example-approval/instances",
+            json={"input": {"request_id": "r-scope"}},
+            headers={"X-Process-Scope": "somebody-else"},
+        )
+
+    assert started.status_code == 201
+    assert started.json()["scope"] == "local-laboratory"

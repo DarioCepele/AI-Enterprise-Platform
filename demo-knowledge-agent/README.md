@@ -1,8 +1,9 @@
 # Knowledge agent
 
-Sottoagente del laboratorio AG-UI, esposto via **A2A**. Il master agent lo
-interroga come agente remoto, non come tool locale: è il pezzo che rende la
-tappa 3 un sistema multi-agente e non un agente con più funzioni.
+Sottoagente d'esempio, esposto via **A2A**. Il master agent lo interroga come
+agente remoto, non come tool locale: è il pezzo che rende la piattaforma un
+sistema multi-agente e non un agente con più funzioni. È fatto per essere
+sostituito dal tuo.
 
 ```powershell
 uv sync
@@ -55,8 +56,13 @@ uv run pytest
 ```
 
 Offline: verificano la carta d'identità (streaming dichiarato, versione non
-legacy, url coerente) e il tool di lettura del corpus. La verifica dello
-streaming vero richiede un modello e sta nei numeri qui sopra.
+legacy, url coerente), il tool di lettura del corpus, i webhook ammessi e la
+modalità senza modello. La verifica dello streaming vero richiede un modello e
+sta nei numeri qui sopra.
+
+Con `KNOWLEDGE_FAKE_CLIENT=true` l'agente parte e risponde con un testo fisso,
+senza credenziali: è quello che il compose accende con `FAKE_MODEL=true`. La
+configurazione completa è nel [README di demo-infra](../demo-infra/README.md#knowledge-agent).
 
 ## L'executor è nostro, e l'artefatto ha un nome
 
@@ -163,18 +169,18 @@ estesa a non esserlo. Il token viaggia come parametro della singola chiamata.
 Conseguenza pratica: l'`AuthInterceptor` dell'SDK, che si attiva proprio su
 `security_requirements`, qui non serve a niente.
 
-## Contratti fra i repo
+## Contratti fra i servizi
 
-I campioni di ciò che questo repo mette sul filo — o legge da un altro — stanno
+I campioni di ciò che questo servizio mette sul filo — o legge da un altro — stanno
 in `demo-infra/contracts`, versionati e in copia unica. I test di contratto li
 caricano da lì: se manca la cartella **falliscono**, invece di saltarsi da soli.
 Un test di contratto silenzioso quando la controparte non c'è è esattamente il
 silenzio che i contratti tolgono.
 
 ```bash
-# i quattro repo come cloni fratelli: nessuna configurazione
-# altrove: AGUI_LAB_CONTRACTS=/percorso/a/demo-infra/contracts
+# nel repository: nessuna configurazione
+# altrove: CONTRACTS_DIR=/percorso/a/demo-infra/contracts
 ```
 
-Quando un campione cambia, cambia insieme in tutti i repo elencati nel suo
+Quando un campione cambia, cambia insieme in tutti i servizi elencati nel suo
 `produced_by` e `consumed_by`. Il messaggio di fallimento dice quali sono.

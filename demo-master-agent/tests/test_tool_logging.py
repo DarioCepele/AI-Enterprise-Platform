@@ -1,7 +1,7 @@
-from demo.logging_bridge import LogCollector
-from demo.tools.plan_tools import PlanStore, build_plan_tools
-from demo.tools.skill_tools import build_skill_tools
-from demo.tools.ui_tools import ui_table
+from master_agent.logging_bridge import LogCollector
+from master_agent.tools.plan_tools import PlanStore, build_plan_tools
+from master_agent.tools.skill_tools import build_skill_tools
+from master_agent.tools.ui_tools import ui_table
 
 STEPS = [
     {"id": 1, "title": "First", "detail": "d", "source": "ui_table"},
@@ -38,7 +38,7 @@ def test_every_step_transition_is_logged():
     assert "completed" in messages[1]
 
 
-def test_a_failed_step_is_logged_as_an_error_with_its_reason():
+def test_a_failed_step_is_logged_as_an_error_without_its_text():
     store = PlanStore()
     todo_write, todo_set_status = build_plan_tools(store)
     todo_write.func(steps=STEPS)
@@ -50,7 +50,10 @@ def test_a_failed_step_is_logged_as_an_error_with_its_reason():
 
     entry = collector.since("")["entries"][0]
     assert entry["level"] == "ERROR"
-    assert "the tool does not answer" in entry["message"]
+    # The reason is the model's words about the user's task: its length is
+    # diagnostic, its text belongs in the plan the user sees, not in the logs.
+    assert "the tool does not answer" not in entry["message"]
+    assert "24-character reason" in entry["message"]
 
 
 def test_loading_a_skill_is_logged_with_its_name():
@@ -81,7 +84,8 @@ def test_producing_a_table_is_logged_with_its_shape():
 
     entry = collector.since("")["entries"][0]
     assert entry["source"] == "tools.ui_tools"
-    assert "Comparison" in entry["message"]
+    # The title says what the user asked about: the shape is enough.
+    assert "Comparison" not in entry["message"]
     assert "2 columns" in entry["message"]
     assert "1 rows" in entry["message"]
 

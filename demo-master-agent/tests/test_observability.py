@@ -1,4 +1,5 @@
 """What a log line says, and what it takes to join three services."""
+
 from __future__ import annotations
 
 import json
@@ -6,13 +7,13 @@ import logging
 
 import pytest
 
-from demo.observability import JsonFormatter, configure_tracing
-from demo.server.run_context import current_thread
+from master_agent.observability import JsonFormatter, configure_tracing
+from master_agent.server.run_context import current_thread
 
 
 def a_record(message: str = "plan written", **extra) -> logging.LogRecord:
     record = logging.LogRecord(
-        "demo.tools", logging.INFO, __file__, 1, message, (), None
+        "master_agent.tools", logging.INFO, __file__, 1, message, (), None
     )
     record.__dict__.update(extra)
     return record
@@ -24,7 +25,7 @@ def test_a_line_is_an_object_with_the_service_on_it():
     assert line["service"] == "master"
     assert line["level"] == "INFO"
     assert line["message"] == "plan written"
-    assert line["logger"] == "demo.tools"
+    assert line["logger"] == "master_agent.tools"
 
 
 def test_the_line_carries_the_thread_of_the_turn():
@@ -66,19 +67,19 @@ def test_an_exception_arrives_as_text():
 def test_without_a_collector_tracing_stays_off(monkeypatch, caplog):
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
 
-    with caplog.at_level(logging.INFO, logger="demo.observability"):
+    with caplog.at_level(logging.INFO):
         assert configure_tracing("master") is False
 
     # A template that needed a collector to start is a template nobody runs.
-    assert "Tracing off" in caplog.text
+    assert "Telemetry off" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_the_app_starts_with_tracing_off(monkeypatch):
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
-    from demo.agents.master import build_master_agent
-    from demo.chat_clients.fake import FakeStreamingChatClient
-    from demo.server.app import create_app
+    from master_agent.agents.master import build_master_agent
+    from master_agent.chat_clients.fake import FakeStreamingChatClient
+    from master_agent.server.app import create_app
 
     app = create_app(
         agent=build_master_agent(chat_client=FakeStreamingChatClient(chunks=["ok"]))

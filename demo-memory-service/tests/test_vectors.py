@@ -1,4 +1,4 @@
-"""L'indice delle memorie, contro pgvector vero."""
+"""The index of the memories, against a real pgvector."""
 from __future__ import annotations
 
 import pytest

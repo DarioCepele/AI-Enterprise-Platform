@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from ag_ui.core.events import BaseEvent, EventType, RunFinishedEvent, RunStartedEvent
 
-from demo.server.run_context import LabRunner, subagent_run
+from master_agent.server.run_context import LabRunner, subagent_run
 
 
 class Relay(LabRunner):

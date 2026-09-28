@@ -87,8 +87,8 @@ async def test_without_a_configured_token_nobody_gets_in(monkeypatch):
 
 
 @pytest.fixture
-def app():
-    return create_app(agent=None, base_url="http://analysis:8400/")
+def app(offline_agent):
+    return create_app(agent=offline_agent, base_url="http://analysis:8400/")
 
 
 async def ask_for_the_card(app, headers: dict[str, str]) -> httpx.Response:

@@ -1,65 +1,60 @@
-"""`KNOWLEDGE_MCP_SERVERS` config parsing, and `build_mcp_tools` turning it
-into `MCPStreamableHTTPTool` instances.
+"""MCP servers from configuration, and what their presence changes in the prompt.
 
-Connecting to a real MCP server is `agent_framework`'s own job (`Agent`
-itself opens the session lazily, on first use), not retested here.
+Connecting to a real MCP server is Agent Framework's own job (the agent opens
+the session lazily, on first use), not retested here.
 """
+
 from __future__ import annotations
 
 import pytest
 from agent_framework import MCPStreamableHTTPTool
 
-from knowledge.mcp_tools import MCPServerConfig, build_mcp_tools, mcp_servers_from_env
+from knowledge.agent import build_knowledge_agent, instructions_for
+from knowledge.config import Settings
 
 
-def test_no_servers_configured_means_no_tools():
-    assert mcp_servers_from_env(raw="") == ()
-    assert build_mcp_tools(()) == []
+def test_no_servers_configured_means_no_mcp_tools(offline_agent):
+    names = [getattr(t, "name", "") for t in offline_agent.default_options["tools"]]
+    assert names == ["read_document"]
 
 
-def test_parses_a_json_list():
-    servers = mcp_servers_from_env(
-        raw='[{"name":"docs","url":"http://mcp-docs:9000/mcp"},'
-        '{"name":"search","url":"http://mcp-search:9100/mcp","token":"secret"}]'
+def test_configured_servers_become_prefixed_tools():
+    settings = Settings(
+        mcp_servers='[{"name":"docs","url":"http://mcp-docs:9000/mcp"},'
+        '{"name":"search","url":"http://mcp-search:9100/mcp","token":"secret",'
+        '"approval":"always"}]'
     )
+    from platform_core.mcp import build_mcp_tools
 
-    assert [s.name for s in servers] == ["docs", "search"]
-    assert servers[1].token == "secret"  # noqa: S105
-
-
-def test_a_name_unusable_as_a_tool_prefix_is_rejected():
-    with pytest.raises(ValueError, match="not usable as a tool prefix"):
-        mcp_servers_from_env(raw='[{"name":"!!!","url":"http://mcp:9000/mcp"}]')
-
-
-def test_build_mcp_tools_prefixes_by_server_name():
-    configs = (
-        MCPServerConfig(name="docs", url="http://mcp-docs:9000/mcp"),
-        MCPServerConfig(name="search", url="http://mcp-search:9100/mcp"),
-    )
-
-    tools = build_mcp_tools(configs)
+    tools = build_mcp_tools(settings.mcp())
 
     assert [t.tool_name_prefix for t in tools] == ["docs", "search"]
     assert all(isinstance(t, MCPStreamableHTTPTool) for t in tools)
+    assert tools[1]._header_provider({})["Authorization"] == "Bearer secret"
 
 
-def test_a_token_becomes_a_bearer_header():
-    config = MCPServerConfig(
-        name="docs", url="http://mcp-docs:9000/mcp", token="secret"  # noqa: S106
+def test_a_name_unusable_as_a_tool_prefix_is_rejected():
+    with pytest.raises(ValueError, match="not usable"):
+        Settings(mcp_servers='[{"name":"!!!","url":"http://mcp:9000/mcp"}]').mcp()
+
+
+def test_web_pages_are_declared_untrusted_when_the_agent_can_fetch_them():
+    prompt = instructions_for("", fetches_the_web=True)
+
+    assert "not instructions" in prompt
+    assert "language the request is written in" in prompt
+
+
+def test_without_web_tools_the_prompt_stays_about_the_catalogue():
+    prompt = instructions_for("Italian", fetches_the_web=False)
+
+    assert "Answer in Italian." in prompt
+    assert "strangers" not in prompt
+
+
+def test_the_agent_uses_the_configured_language():
+    agent = build_knowledge_agent(
+        chat_client=object(),  # type: ignore[arg-type]
+        settings=Settings(language="Spanish"),
     )
-
-    [tool] = build_mcp_tools((config,))
-
-    # `MCPStreamableHTTPTool` keeps the provider on a private attribute; no
-    # public accessor exists to assert this without one.
-    assert tool._header_provider is not None
-    assert tool._header_provider({})["Authorization"] == "Bearer secret"
-
-
-def test_no_token_means_no_header_provider():
-    config = MCPServerConfig(name="docs", url="http://mcp-docs:9000/mcp")
-
-    [tool] = build_mcp_tools((config,))
-
-    assert tool._header_provider is None
+    assert "Answer in Spanish." in agent.default_options["instructions"]

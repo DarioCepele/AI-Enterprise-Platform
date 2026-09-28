@@ -1,5 +1,9 @@
-.venv
-.git
-__pycache__
-.pytest_cache
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.git/
+.git.bak/
 .env
+tests/

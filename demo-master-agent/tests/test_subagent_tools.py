@@ -7,9 +7,9 @@ import logging
 import pytest
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
-from demo.a2a.client import Progress
-from demo.config import SubagentConfig
-from demo.tools.subagent_tools import build_subagent_tools
+from master_agent.a2a.client import Progress
+from master_agent.config import SubagentConfig
+from master_agent.tools.subagent_tools import build_subagent_tools
 
 KNOWLEDGE = SubagentConfig(name="knowledge", url="http://kb:8200/")
 
@@ -91,7 +91,7 @@ async def test_the_card_is_fetched_once_and_reused():
 async def test_a_card_without_streaming_is_reported(caplog):
     the_tool = tool_with(FakeRemote(["ok"]), streaming=False)
 
-    with caplog.at_level(logging.WARNING, logger="demo.tools.subagent_tools"):
+    with caplog.at_level(logging.WARNING, logger="master_agent.tools.subagent_tools"):
         await the_tool.func(question="something")
 
     assert "does not declare streaming" in caplog.text
@@ -131,7 +131,7 @@ async def test_an_unreachable_subagent_does_not_kill_the_run(caplog):
         [KNOWLEDGE], card_loader=load, client_factory=lambda config, _card: Broken()
     )[0]
 
-    with caplog.at_level(logging.ERROR, logger="demo.tools.subagent_tools"):
+    with caplog.at_level(logging.ERROR, logger="master_agent.tools.subagent_tools"):
         answer = await the_tool.func(question="anything")
 
     assert "did not answer" in answer.text
@@ -150,7 +150,7 @@ async def test_an_empty_answer_is_declared_not_faked():
 
 class RemoteWithArtifacts(FakeRemote):
     async def ask(self, text, task_id=None, context_id=None, webhook=None):
-        from demo.a2a.client import Artifact
+        from master_agent.a2a.client import Artifact
 
         self.questions.append(text)
         yield a_progress(state="accepted", raw=1)
@@ -183,7 +183,7 @@ async def test_the_text_that_arrives_as_an_artifact_is_not_lost():
 async def test_the_task_lifecycle_ends_up_in_the_logs(caplog):
     the_tool = tool_with(FakeRemote(["ok"]))
 
-    with caplog.at_level(logging.INFO, logger="demo.tools.subagent_tools"):
+    with caplog.at_level(logging.INFO, logger="master_agent.tools.subagent_tools"):
         await the_tool.func(question="something")
 
     assert "accepted -> working -> completed" in caplog.text
@@ -233,7 +233,7 @@ async def test_an_asking_subagent_is_remembered_in_the_thread_state():
 
 @pytest.mark.asyncio
 async def test_the_answer_resumes_the_same_task():
-    from demo.server.run_context import current_pending
+    from master_agent.server.run_context import current_pending
 
     remote = RemoteThatResumes()
     answer_tool = tools_with(remote)[1]
@@ -253,7 +253,7 @@ async def test_the_answer_resumes_the_same_task():
 
 @pytest.mark.asyncio
 async def test_resuming_clears_the_pending_state():
-    from demo.server.run_context import current_pending
+    from master_agent.server.run_context import current_pending
 
     answer_tool = tools_with(RemoteThatResumes())[1]
     token = current_pending.set({"task_id": "t-99", "agent": "knowledge"})
@@ -402,7 +402,7 @@ async def test_a_card_that_cannot_be_reread_keeps_the_one_in_hand(caplog):
 
     loader.broken = True
     now[0] += 11
-    with caplog.at_level(logging.WARNING, logger="demo.tools.subagent_tools"):
+    with caplog.at_level(logging.WARNING, logger="master_agent.tools.subagent_tools"):
         answer = await the_tool.func(question="after the ttl")
 
     assert "ok" in answer.text

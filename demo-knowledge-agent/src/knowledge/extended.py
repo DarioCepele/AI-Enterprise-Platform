@@ -1,74 +1,28 @@
-"""The extended card, and who is entitled to see it."""
+"""The extended card: what it adds to the public one, and who may see it.
+
+Who may see it is the platform's rule (`platform_core.service_token`); what it
+adds -- the catalogue of indexed documents -- is this agent's own business.
+"""
+
 from __future__ import annotations
 
-import logging
-import os
 from collections.abc import Sequence
-from hmac import compare_digest
 
-from a2a.server.context import ServerCallContext
 from a2a.types import AgentCard, AgentSkill
-from a2a.utils.errors import ExtendedAgentCardNotConfiguredError
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from platform_core.service_token import SCHEME, ServiceToken
 
-logger = logging.getLogger(__name__)
+__all__ = [
+    "SCHEME",
+    "TOKEN",
+    "ServiceTokenOnly",
+    "build_extended_card",
+    "card_for_the_caller",
+    "catalogue_skill",
+]
 
-SCHEME = "service"
-PREFIX = "bearer "
-PROTECTED_PATHS = ("/extendedAgentCard", "/v1/extendedAgentCard")
-
-
-def expected_token() -> str:
-    return os.getenv("KNOWLEDGE_SERVICE_TOKEN", "")
-
-
-def token_of_request(headers: dict[str, str]) -> str:
-    value = ""
-    for name, content in headers.items():
-        if name.lower() == "authorization":
-            value = content
-            break
-    if not value.lower().startswith(PREFIX):
-        return ""
-    return value[len(PREFIX) :].strip()
-
-
-def headers_are_valid(headers: dict[str, str]) -> bool:
-    expected = expected_token()
-    received = token_of_request(headers)
-    return bool(expected) and bool(received) and compare_digest(received, expected)
-
-
-def authenticated(context: ServerCallContext | None) -> bool:
-    return headers_are_valid((context.state.get("headers") if context else None) or {})
-
-
-class ServiceTokenOnly(BaseHTTPMiddleware):
-    """401 on the extended card's REST path, telling the caller how to authenticate.
-
-    It serves a legitimate client, which learns from the 401 which scheme to
-    use; the rest of the API is untouched, because the public agent stays
-    public.
-    """
-
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        if request.url.path in PROTECTED_PATHS and not headers_are_valid(
-            dict(request.headers)
-        ):
-            logger.warning(
-                "Extended card refused on %s: token missing or invalid.",
-                request.url.path,
-            )
-            return JSONResponse(
-                {"error": "a service token is required"},
-                status_code=401,
-                headers={"WWW-Authenticate": f'Bearer realm="{SCHEME}"'},
-            )
-        return await call_next(request)
+TOKEN = ServiceToken("KNOWLEDGE_SERVICE_TOKEN")
+ServiceTokenOnly = TOKEN.middleware()
+card_for_the_caller = TOKEN.card_modifier()
 
 
 def catalogue_skill(documents: Sequence[str]) -> AgentSkill:
@@ -97,22 +51,3 @@ def build_extended_card(public: AgentCard, documents: Sequence[str]) -> AgentCar
     )
     extended.skills.append(catalogue_skill(documents))
     return extended
-
-
-async def card_for_the_caller(card: AgentCard, context: ServerCallContext) -> AgentCard:
-    """Serves the extended card only to a caller that authenticated.
-
-    To everyone else the extended card does not exist, rather than existing and
-    being denied: the answer is the same one an agent without an extended card
-    would give, and it does not confirm to a stranger that there is more to ask
-    for here. The 401 with `WWW-Authenticate` goes to whoever arrives on the
-    REST path, which is where a legitimate client looks for the credentials to
-    use.
-    """
-    if not authenticated(context):
-        logger.warning("Extended card refused: service token missing or invalid.")
-        raise ExtendedAgentCardNotConfiguredError(
-            "Authenticated Extended Card is not configured"
-        )
-    logger.info("Extended card served to an authenticated caller.")
-    return card

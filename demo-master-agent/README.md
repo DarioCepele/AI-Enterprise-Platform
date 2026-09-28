@@ -1,27 +1,36 @@
-# Master agent del laboratorio AG-UI
+# Il master agent
 
-Backend Python con Microsoft Agent Framework e FastAPI. Espone il master agent su `POST /agui` tramite `add_agent_framework_fastapi_endpoint`: lo stream SSE contiene gli eventi AG-UI per chat, piano e inspector. I log operativi usano un secondo canale HTTP, `GET /logs`. `GET /health` restituisce lo stato del servizio.
+Backend Python con Microsoft Agent Framework e FastAPI. Espone il master agent su `POST /agui` tramite `add_agent_framework_fastapi_endpoint`: lo stream SSE contiene gli eventi AG-UI per chat, piano, inspector e approvazioni. Accanto:
+
+| Endpoint | |
+| --- | --- |
+| `POST /uploads`, `GET /uploads/{id}` | I video caricati dal browser, condivisi fra le repliche quando c'è Postgres. |
+| `GET /logs` | I log operativi, con un cursore opaco. Si spegne con `MASTER_LOGS_ENDPOINT=false`. |
+| `GET /transparency` | Modello, provider e comportamento dell'agente, generati dalla configurazione: niente credenziali, niente indirizzi interni. |
+| `POST /a2a/push/{scope}/{thread}/{agente}` | Il webhook dei sottoagenti, con un token firmato per scope, thread e agente. Non va esposto fuori dalla piattaforma. |
+| `GET /health/live`, `GET /health/ready` | Le sonde: la prima non interroga nessuno, la seconda controlla memoria e Postgres. |
 
 ## Avvio e configurazione
 
-Servono Python 3.12 e `uv`. Dalla radice di questo repository:
+Servono Python 3.12 e `uv`. Da questa cartella:
 
 ```powershell
 uv sync --locked
-uv run python -m demo
+uv run python -m master_agent
 ```
 
-Il server locale ascolta su `http://127.0.0.1:8000`. Per avviare anche il frontend con Docker Compose, seguire il [README di demo-infra](../demo-infra/README.md).
+Il server locale ascolta su `http://127.0.0.1:8000`. Per avviare tutta la piattaforma con Docker Compose, seguire il [README di demo-infra](../demo-infra/README.md).
 
-La configurazione viene letta dall'ambiente; in locale viene caricato anche il file `.env`, non versionato. Le variabili sono:
+La configurazione viene letta dall'ambiente; in locale viene caricato anche il file `.env`, non versionato. La tabella completa, generata dal codice, sta nel [README di demo-infra](../demo-infra/README.md#master-agent). Quelle che si toccano per prime:
 
 | Variabile | Uso |
 | --- | --- |
-| `OPENAI_BASE_URL` | Endpoint del provider compatibile con Chat Completions. |
-| `OPENAI_API_KEY` | Credenziale del provider. |
-| `OPENAI_CHAT_COMPLETION_MODEL` | Identificativo del modello. |
-| `DEMO_FAKE_CLIENT` | Attiva il client deterministico per verifiche locali senza LLM. |
-| `DEMO_ALLOWED_ORIGINS` | Origini CORS del frontend, separate da virgole. |
+| `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_CHAT_COMPLETION_MODEL` | Il provider, compatibile con Chat Completions, e il modello. |
+| `MASTER_FAKE_CLIENT` | Il client deterministico, per lavorare senza un modello. |
+| `MASTER_PRODUCT_NAME`, `MASTER_PRODUCT_LANGUAGE` | Come si chiama l'agente, e in che lingua risponde (vuota: quella dell'utente). |
+| `MASTER_INSTRUCTIONS_FILE`, `MASTER_SKILLS_DIRS`, `MASTER_TOOL_FACTORIES` | Istruzioni, skill e tool di un fork, senza modificare questo codice. |
+| `MASTER_TOOLS_REQUIRING_APPROVAL` | I tool che si fermano per l'approvazione di una persona. Default: `start_process`. |
+| `MASTER_ALLOWED_ORIGINS`, `MASTER_CORS_CREDENTIALS` | Le pagine che possono chiamare l'agente, e se possono farlo con i propri cookie. |
 
 Il flusso del piano richiede un modello che esegua davvero le chiamate ai tool. Il client finto serve ai test del protocollo, non riproduce l'intero flusso del modello reale.
 
@@ -32,7 +41,13 @@ Il flusso del piano richiede un modello che esegua davvero le chiamate ai tool. 
 | Piano | `todo_write`, `todo_set_status` | Scrivono e aggiornano `state.plan`. |
 | Skill | `load_skill` | Restituisce al modello le istruzioni Markdown della skill richiesta. |
 | Artefatti UI | `ui_table` | Produce il payload della tabella e aggiorna `state.artifacts`. |
-| Memoria | `cerca_nei_ricordi` | Cerca per significato nelle conversazioni passate. Esiste solo se il servizio di memoria e' configurato. |
+| Memoria | `search_memories` | Cerca per significato nelle conversazioni passate. Esiste solo se il servizio di memoria è configurato. |
+| Processi | `list_processes`, `start_process`, `process_status` | Leggono e avviano i processi durevoli. `start_process` chiede un'approvazione. Esistono solo con `MASTER_PROCESS_SERVICE_URL`. |
+| Sottoagenti | `ask_<nome>`, `answer_subagent` | Uno per sottoagente A2A configurato; il secondo risponde a un sottoagente che ha chiesto un chiarimento. |
+| Video | `analyze_video` | Trascrive e descrive un video caricato, o scaricato da un host ammesso (`MASTER_MEDIA_HOSTS`). |
+| MCP | quelli dei server in `MASTER_MCP_SERVERS` | Con i nomi prefissati dal server, e un'approvazione per server se configurata. |
+
+Ogni run ha un tetto alle chiamate al modello e ai tool (`MASTER_MAX_MODEL_CALLS`, `MASTER_MAX_TOOL_CALLS`): un modello che continua a chiamare tool, per errore o perché qualcuno ce lo spinge, si ferma lì.
 
 `todo_write(steps)` sostituisce il piano precedente. Ogni passo ha un `id` intero, `title`, `detail` e `source`; parte da `pending`. `todo_set_status(step_id, status, note)` accetta `pending`, `in_progress`, `completed` e `failed`. Per `failed` la nota deve essere non vuota. Gli aggiornamenti includono i tempi di inizio e fine e riemettono il piano intero. L'agente deve aggiornare i passi mentre lavora, per rendere visibile l'avanzamento.
 
@@ -44,9 +59,15 @@ Lo si è scoperto proprio riavviando: idratare dallo stato della *richiesta* non
 
 `ui_table(title, columns, rows)` restituisce un artefatto `ui-table` con un `id` numerato per processo, usato per collegare il risultato del tool al riepilogo nello stato. L'id non è stabile fra riavvii. Il risultato AG-UI contiene una stringa JSON con titolo, colonne e righe; `state.artifacts` contiene il riepilogo della tabella corrente. `plan` e `artifacts` sono chiavi separate: gli aggiornamenti sostituiscono le chiavi di primo livello, quindi ogni gruppo scrive solo la propria.
 
+## Le approvazioni
+
+Un tool in `MASTER_TOOLS_REQUIRING_APPROVAL` non parte quando il modello lo chiama: il run finisce su un *interrupt* di AG-UI che nomina la chiamata, e il frontend mostra la domanda con gli argomenti esatti. La risposta arriva nel run successivo, nel campo `resume`; il tool parte solo se è sì. Una risposta ripetuta non lo esegue due volte, e una risposta che l'agente non riconosce -- scaduta, già data, arrivata a un'altra replica -- fallisce chiusa. `tests/test_approvals.py` verifica ognuno di questi casi.
+
+Lo stato di un'approvazione in attesa vive nella memoria della replica che l'ha chiesta: con più repliche serve affinità per conversazione, come spiega il [README dei manifest](../demo-infra/deploy/README.md#approvazioni-e-repliche).
+
 ## Aggiungere una skill
 
-Le skill sono cartelle sotto `src/demo/skills/`, ciascuna con un file `SKILL.md`. Esempio:
+Le skill sono cartelle sotto `src/master_agent/skills/`, ciascuna con un file `SKILL.md`. Esempio:
 
 ```markdown
 ---
@@ -61,7 +82,7 @@ Individua le dimensioni del confronto, chiama ui_table e sintetizza le differenz
 
 Il frontmatter deve iniziare alla prima riga ed essere delimitato da `---`; `name` e `description` sono obbligatori. Il parser attuale supporta solo righe scalari `chiave: valore`, non YAML annidato o multilinea. Il corpo successivo è Markdown.
 
-Per aggiungere una skill, creare `src/demo/skills/<nome>/SKILL.md` con un nome univoco e riavviare l'agente; se si usa Docker, ricostruire l'immagine. Non serve registrarla nel codice: il catalogo viene letto alla costruzione dei tool e incluso nella descrizione di `load_skill`. Un file malformato interrompe la costruzione del catalogo. Una richiesta a `load_skill` con nome sconosciuto restituisce invece un messaggio con i nomi disponibili, senza interrompere la run. Le skill sono incluse anche nel pacchetto Python.
+Per aggiungere una skill, creare `src/master_agent/skills/<nome>/SKILL.md` con un nome univoco e riavviare l'agente; se si usa Docker, ricostruire l'immagine. Non serve registrarla nel codice: il catalogo viene letto alla costruzione dei tool e incluso nella descrizione di `load_skill`. Un file malformato interrompe la costruzione del catalogo. Una richiesta a `load_skill` con nome sconosciuto restituisce invece un messaggio con i nomi disponibili, senza interrompere la run. Le skill sono incluse anche nel pacchetto Python.
 
 ## Log operativi
 
@@ -126,7 +147,7 @@ e riassunto dei turni vecchi.
 
 Un middleware di chat registra la dimensione del contesto **a ogni chiamata al
 modello**, non a ogni run: e' dentro la singola run, fra un tool e l'altro, che
-il contesto si gonfia. Le righe finiscono su `demo.telemetry`, quindi nel tab
+il contesto si gonfia. Le righe finiscono su `master_agent.telemetry`, quindi nel tab
 LOG del frontend:
 
 ```
@@ -147,7 +168,7 @@ la telemetria risulterebbe verde in laboratorio e assente in produzione.
 
 ## Dove vive la memoria dei thread
 
-Con `DEMO_MEMORY_SERVICE_URL` impostata, gli snapshot dei thread stanno nel
+Con `MASTER_MEMORY_SERVICE_URL` impostata, gli snapshot dei thread stanno nel
 [servizio di memoria](../demo-memory-service/README.md): la conversazione
 sopravvive al riavvio dell'agente. Senza quella variabile si torna allo store
 in memoria di processo, e il laboratorio resta avviabile senza database.
@@ -173,8 +194,8 @@ LOG: un'amnesia silenziosa è il difetto peggiore che questo pezzo possa avere.
 
 ## Cercare nei ricordi
 
-Con il servizio di memoria configurato, l'agente ha un quarto gruppo di tool:
-`cerca_nei_ricordi(domanda)` interroga `POST /search` del servizio e riceve i
+Con il servizio di memoria configurato, l'agente ha un tool in più:
+`search_memories(query)` interroga `POST /search` del servizio e riceve i
 frammenti di conversazioni passate più vicini per significato.
 
 È un tool e non un'iniezione automatica nel contesto: infilare a ogni run i
@@ -183,18 +204,18 @@ più roba c'è nel contesto meno il modello ne recupera con precisione. Così la
 memoria si raggiunge quando serve, e a decidere se serve è il modello, che la
 domanda ce l'ha davanti.
 
-Senza `DEMO_MEMORY_SERVICE_URL` il tool **non esiste**, invece di esistere e
+Senza `MASTER_MEMORY_SERVICE_URL` il tool **non esiste**, invece di esistere e
 fallire: un tool che risponde sempre «non raggiungibile» insegna al modello a
 non chiamarlo più. Quando la memoria è configurata ma irraggiungibile, l'errore
 torna al modello come testo e la run continua.
 
 Verificato dal vivo: informazione detta in una conversazione, poi in un thread
 nuovo la domanda «quale alternativa avevamo scartato per il deploy?» → l'agente
-chiama `cerca_nei_ricordi` e risponde «ECS», che nel contesto non c'era.
+chiama `search_memories` e risponde «ECS», che nel contesto non c'era.
 
 ## Interrogare il sottoagente
 
-Con `DEMO_KNOWLEDGE_AGENT_URL` impostata, l'agente ha `interroga_knowledge`:
+Con `MASTER_KNOWLEDGE_AGENT_URL` impostata, l'agente ha `interroga_knowledge`:
 gira una domanda al [knowledge agent](../demo-knowledge-agent/README.md) via
 **A2A**, non come tool locale ma come agente remoto.
 
@@ -265,7 +286,7 @@ stanno sull'SDK stabile.
 ## Lavori lunghi: il push invece del socket aperto
 
 Il master non aspetta un sottoagente all'infinito. Dopo
-`DEMO_SUBAGENT_WAIT_SECONDS` smette di ascoltare e lo dice al modello, che
+`MASTER_SUBAGENT_WAIT_SECONDS` smette di ascoltare e lo dice al modello, che
 risponde con quello che ha; il risultato arriva dopo, come **notifica push**, e
 finisce nella memoria del thread — quindi al turno successivo è nel contesto.
 
@@ -365,18 +386,18 @@ Se la card estesa viene negata non succede niente di grave: si prosegue con
 quella pubblica e la descrizione resta generica. Non poter vedere la vista
 estesa non è un motivo per non interrogare l'agente.
 
-## Contratti fra i repo
+## Contratti fra i servizi
 
-I campioni di ciò che questo repo mette sul filo — o legge da un altro — stanno
+I campioni di ciò che questo servizio mette sul filo — o legge da un altro — stanno
 in `demo-infra/contracts`, versionati e in copia unica. I test di contratto li
 caricano da lì: se manca la cartella **falliscono**, invece di saltarsi da soli.
 Un test di contratto silenzioso quando la controparte non c'è è esattamente il
 silenzio che i contratti tolgono.
 
 ```bash
-# i quattro repo come cloni fratelli: nessuna configurazione
-# altrove: AGUI_LAB_CONTRACTS=/percorso/a/demo-infra/contracts
+# nel repository: nessuna configurazione
+# altrove: CONTRACTS_DIR=/percorso/a/demo-infra/contracts
 ```
 
-Quando un campione cambia, cambia insieme in tutti i repo elencati nel suo
+Quando un campione cambia, cambia insieme in tutti i servizi elencati nel suo
 `produced_by` e `consumed_by`. Il messaggio di fallimento dice quali sono.

@@ -1,4 +1,4 @@
-"""Step 3 of the plan's Tappa 2: endpointing thresholds become configurable.
+"""Endpointing thresholds are configuration, and their known limit is documented.
 
 `voice_service.pipeline.ANALYSIS_WINDOW_S` (0.32s) and `SILENCE_THRESHOLD_S`
 (0.6s) used to be hardcoded. They are now `voice_service.config.Settings`
@@ -14,10 +14,9 @@ This module has two kinds of test:
   overrides from the environment, and actually reach
   `TurnEndpointingProcessor` through `build_voice_pipeline`. Fast -- no
   audio, no model loading.
-- The known limitation the plan names ahead of time (Tappa 2 Step 3: "un
-  turn-detection semantico sopra il VAD e' la correzione nota in
-  letteratura" -- explicitly out of scope for this stage, see the plan's
-  Fonti). `speech_en_midpause.wav` is built the same way `speech_en.wav` was
+- The known limitation, named ahead of time: semantic turn detection on
+  top of the VAD is the fix the literature knows, and it is out of scope
+  here. `speech_en_midpause.wav` is built the same way `speech_en.wav` was
   (`tests/test_stt.py`'s docstring: Windows SAPI, `System.Speech.Synthesis`,
   offline, rendered as 16kHz mono 16-bit PCM) -- via a `PromptBuilder` with
   an explicit ~900ms `AppendBreak` in the middle of what a person would call
@@ -75,13 +74,26 @@ def _recv_json_with_timeout(websocket, timeout: float = RECEIVE_TIMEOUT_S) -> di
             raise AssertionError(f"no message received within {timeout}s") from err
 
 
+def _next_transcript(websocket) -> dict:
+    """The next `user_transcript`, past whatever the assistant said in between.
+
+    No master agent runs here, so every turn also ends in an
+    `assistant_turn_failed`: that is the reply side, and these tests are about
+    where the turns are cut.
+    """
+    while True:
+        message = _recv_json_with_timeout(websocket)
+        if message["type"] == "user_transcript":
+            return message
+
+
 # --- Settings/pipeline wiring -------------------------------------------------
 
 
 def test_settings_default_endpointing_thresholds_match_the_pipeline_module(monkeypatch):
     """No env override: `Settings()` must reproduce the exact values that used
-    to be hardcoded in `pipeline.py` -- the plan requires the defaults not to
-    change, only to become overridable."""
+    to be hardcoded in `pipeline.py` -- the defaults do not change, they only
+    become overridable."""
     monkeypatch.delenv("VOICE_ANALYSIS_WINDOW_S", raising=False)
     monkeypatch.delenv("VOICE_SILENCE_THRESHOLD_S", raising=False)
 
@@ -102,8 +114,8 @@ def test_settings_read_endpointing_thresholds_from_the_environment(monkeypatch):
 
 
 def test_build_voice_pipeline_forwards_custom_thresholds_to_the_endpointing_stage():
-    """White-box: `TurnEndpointingProcessor` already accepted these
-    constructor arguments (Tappa 1); this checks that `build_voice_pipeline`
+    """White-box: `TurnEndpointingProcessor` accepts these constructor
+    arguments; this checks that `build_voice_pipeline`
     -- the function `/ws/voice` actually calls -- forwards them instead of
     silently keeping its own defaults."""
     pipeline = build_voice_pipeline(analysis_window_s=0.5, silence_threshold_s=1.5)
@@ -117,7 +129,7 @@ def test_build_voice_pipeline_forwards_custom_thresholds_to_the_endpointing_stag
 def test_build_voice_pipeline_keeps_old_defaults_with_no_arguments():
     """Every existing caller (including every other test in this suite) calls
     `build_voice_pipeline()` with no threshold arguments -- confirms that
-    still yields the exact pre-Tappa-2 behaviour."""
+    still yields the documented defaults."""
     pipeline = build_voice_pipeline()
 
     endpointing_stage = pipeline.processors[1]
@@ -132,9 +144,9 @@ def test_build_voice_pipeline_keeps_old_defaults_with_no_arguments():
 
 
 def test_a_midsentence_pause_longer_than_the_silence_threshold_splits_the_turn_in_two():
-    """Documents, does not fix (see module docstring and the plan's Tappa 2
-    Step 3 / Fonti -- semantic turn-detection is explicitly out of scope
-    here): with the default 0.6s `SILENCE_THRESHOLD_S`, a single spoken
+    """Documents, does not fix (see the module docstring -- semantic turn
+    detection is out of scope here): with the default 0.6s
+    `SILENCE_THRESHOLD_S`, a single spoken
     passage with a ~900ms pause in the middle is NOT treated as one turn --
     it is cut at the pause, exactly as a real trailing silence would be, and
     the second half surfaces as its own, independent second turn once its
@@ -148,8 +160,8 @@ def test_a_midsentence_pause_longer_than_the_silence_threshold_splits_the_turn_i
         for offset in range(0, len(audio), CHUNK_BYTES):
             websocket.send_bytes(audio[offset : offset + CHUNK_BYTES])
 
-        first_turn = _recv_json_with_timeout(websocket)
-        second_turn = _recv_json_with_timeout(websocket)
+        first_turn = _next_transcript(websocket)
+        second_turn = _next_transcript(websocket)
 
     assert first_turn["type"] == "user_transcript"
     assert second_turn["type"] == "user_transcript"

@@ -1,4 +1,5 @@
 """Combine durable storage and short-term memory."""
+
 from __future__ import annotations
 
 import logging
@@ -400,10 +401,24 @@ class ThreadMemory:
         await self._durable.ping()
         return {"status": "ok", "durable": "ok"}
 
+    async def facts(self, scope: str) -> list[dict[str, Any]]:
+        """What the service remembers about a scope, with where it learned it."""
+        return await self._durable.facts_with_origin(scope)
+
+    async def forget_fact(self, scope: str, key: str) -> bool:
+        return await self._durable.forget_fact(scope, key)
+
     async def forget(self, scope: str, thread_id: str) -> int:
-        """Delete the conversation first, then what points at it."""
+        """Delete the conversation first, then what points at it.
+
+        The facts learned in it go too: deleting a conversation that keeps
+        speaking through its facts would not be deleting it.
+        """
         seqs = await self._durable.seqs_of(scope, thread_id) if self._memories else []
         removed = await self._durable.forget(scope, thread_id)
+        facts = await self._durable.forget_facts_of_thread(scope, thread_id)
+        if facts:
+            logger.info("Thread %s forgotten with %d facts.", thread_id[:8], facts)
         if self._memories and seqs:
             try:
                 await self._memories.forget_thread(scope, thread_id, seqs)

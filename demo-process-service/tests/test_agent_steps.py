@@ -4,6 +4,7 @@ An agent step is the one that can take hours, so every test here is about the
 instance being a row in the meantime -- and about the answer finding it again,
 whatever happened to the process that asked the question.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -275,8 +276,11 @@ async def test_a_notification_without_the_text_makes_the_step_read_the_task(
     assert step_of(read, "ask").output["text"] == "the answer of task-1"
 
     # What the answer cost is part of the history, not of the log.
-    spent = [event for event in await store.events_of(instance_id=instance.id)
-             if event.kind == "step_usage"]
+    spent = [
+        event
+        for event in await store.events_of(instance_id=instance.id)
+        if event.kind == "step_usage"
+    ]
     assert [event.data["agent"] for event in spent] == ["knowledge"]
     assert spent[0].data["input_tokens"] == 1000
 
@@ -389,21 +393,37 @@ async def test_the_webhook_refuses_a_notification_that_is_not_signed(app, store,
             f"/a2a/push/{scope}/{instance.id}/ask",
             json=completion("task-1", "hello"),
             headers={
-                "X-A2A-Notification-Token": token_for(str(instance.id), "another-step")
+                "X-A2A-Notification-Token": token_for(
+                    scope, str(instance.id), "another-step"
+                )
             },
         )
 
     # A token good for one step is not good for another: the signature covers
-    # the pair, so a leaked token cannot be pointed somewhere else.
+    # scope, instance and step, so a leaked token cannot be pointed elsewhere.
     assert without.status_code == 403
     assert wrong.status_code == 403
+
+
+async def test_a_token_does_not_cross_scopes(app, store, scope):
+    instance = await store.create(scope=scope, definition=DELEGATES, payload={})
+    elsewhere = token_for(f"{scope}-other", str(instance.id), "ask")
+
+    async with await client_for(app) as client:
+        crossed = await client.post(
+            f"/a2a/push/{scope}/{instance.id}/ask",
+            json=completion("task-1", "hello"),
+            headers={"X-A2A-Notification-Token": elsewhere},
+        )
+
+    assert crossed.status_code == 403
 
 
 async def test_the_webhook_wakes_the_instance_and_ignores_progress(
     engine, app, store, scope
 ):
     instance, handle = await running_instance(store, scope)
-    headers = {"X-A2A-Notification-Token": token_for(str(instance.id), "ask")}
+    headers = {"X-A2A-Notification-Token": token_for(scope, str(instance.id), "ask")}
 
     async with await client_for(app) as client:
         progress = await client.post(

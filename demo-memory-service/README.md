@@ -298,7 +298,7 @@ con sé stesso, i secondi si riottengono richiamando il tool.
 
 **Un tool, non un'iniezione automatica.** Infilare a ogni run i ricordi
 «probabilmente pertinenti» li paga sempre e li azzecca a volte, e più roba c'è
-nel contesto meno il modello ne recupera con precisione. Con `cerca_nei_ricordi`
+nel contesto meno il modello ne recupera con precisione. Con `search_memories`
 la memoria si raggiunge quando serve, e a decidere è il modello, che la domanda
 ce l'ha davanti.
 
@@ -403,20 +403,20 @@ loro. Senza `.env` configurato i test si saltano invece di fallire.
 - **Reindicizzazione**: se l'indice dei ricordi va perso si ricostruisce dai
   transcript, ma non c'e' ancora un comando che lo faccia.
 
-## Contratti fra i repo
+## Contratti fra i servizi
 
-I campioni di ciò che questo repo mette sul filo — o legge da un altro — stanno
+I campioni di ciò che questo servizio mette sul filo — o legge da un altro — stanno
 in `demo-infra/contracts`, versionati e in copia unica. I test di contratto li
 caricano da lì: se manca la cartella **falliscono**, invece di saltarsi da soli.
 Un test di contratto silenzioso quando la controparte non c'è è esattamente il
 silenzio che i contratti tolgono.
 
 ```bash
-# i quattro repo come cloni fratelli: nessuna configurazione
-# altrove: AGUI_LAB_CONTRACTS=/percorso/a/demo-infra/contracts
+# nel repository: nessuna configurazione
+# altrove: CONTRACTS_DIR=/percorso/a/demo-infra/contracts
 ```
 
-Quando un campione cambia, cambia insieme in tutti i repo elencati nel suo
+Quando un campione cambia, cambia insieme in tutti i servizi elencati nel suo
 `produced_by` e `consumed_by`. Il messaggio di fallimento dice quali sono.
 
 ## Migrazioni

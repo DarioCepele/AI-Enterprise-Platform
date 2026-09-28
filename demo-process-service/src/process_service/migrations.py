@@ -1,24 +1,17 @@
 """Schema changes that travel with the code.
 
-Same shape as the memory service: numbered, idempotent, recorded, applied at
-startup. A fork must never have to find a script and run it by hand before the
-service will start.
+Numbered, idempotent, recorded, applied at startup -- and serialised by an
+advisory lock, so two replicas starting together apply each migration once.
+The runner is the platform's (`platform_core.migrations`); the schema is this
+service's own.
 """
+
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
-SCHEMA_TABLE = """
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version     integer PRIMARY KEY,
-    name        text NOT NULL,
-    applied_at  timestamptz NOT NULL DEFAULT now()
-)
-"""
+from platform_core.migrations import Migration, applied_versions
+from platform_core.migrations import run_migrations as _run
 
 INSTANCES = """
 CREATE TABLE IF NOT EXISTS process_instances (
@@ -87,13 +80,6 @@ CREATE INDEX IF NOT EXISTS instance_events_by_instance
 """
 
 
-@dataclass(frozen=True)
-class Migration:
-    version: int
-    name: str
-    statements: tuple[str, ...]
-
-
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "instances and steps", (INSTANCES, STEPS)),
     Migration(2, "effects that must not repeat", (EFFECTS,)),
@@ -105,28 +91,17 @@ MIGRATIONS: tuple[Migration, ...] = (
 LATEST_VERSION = max(migration.version for migration in MIGRATIONS)
 
 
-async def applied_versions(connection: Any) -> set[int]:
-    await connection.execute(SCHEMA_TABLE)
-    result = await connection.execute("SELECT version FROM schema_migrations")
-    rows = await result.fetchall()
-    return {int(row[0]) for row in rows}
+__all__ = [
+    "LATEST_VERSION",
+    "MIGRATIONS",
+    "Migration",
+    "applied_versions",
+    "run_migrations",
+]
+
+LOCK = "process-service"
 
 
 async def run_migrations(connection: Any) -> list[Migration]:
-    """Applies the missing migrations, in order, and returns what it applied."""
-    already = await applied_versions(connection)
-    applied: list[Migration] = []
-    for migration in sorted(MIGRATIONS, key=lambda item: item.version):
-        if migration.version in already:
-            continue
-        logger.info("Applying migration %d: %s.", migration.version, migration.name)
-        for statement in migration.statements:
-            await connection.execute(statement)
-        await connection.execute(
-            "INSERT INTO schema_migrations (version, name) VALUES (%s, %s)",
-            (migration.version, migration.name),
-        )
-        applied.append(migration)
-    if not applied:
-        logger.info("Schema up to date: %d migrations already applied.", len(already))
-    return applied
+    """Applies the missing migrations, in order, one replica at a time."""
+    return await _run(connection, MIGRATIONS, lock=LOCK)

@@ -1,7 +1,7 @@
 import pytest
 
-from demo.tools.plan_tools import PlanStore, build_plan_tools
-from demo.tools.ui_tools import STATE_KEY
+from master_agent.tools.plan_tools import PlanStore, build_plan_tools
+from master_agent.tools.ui_tools import STATE_KEY
 
 STEPS = [
     {

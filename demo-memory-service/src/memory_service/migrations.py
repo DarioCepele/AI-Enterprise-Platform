@@ -5,14 +5,18 @@ have to find a script and run it by hand before the service will start. That
 lesson was paid for once, when renaming a field left an index that could not be
 built and a service that would not boot.
 
-The same shape as the process service's migrations, on purpose: two services,
-one habit.
+The runner is the platform's (`platform_core.migrations`): numbered, recorded,
+and serialised by an advisory lock, so two replicas starting together apply
+each migration once.
 """
+
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
+from platform_core.migrations import Migration, applied_versions
+from platform_core.migrations import missing_migrations as _missing
+from platform_core.migrations import run_migrations as _run
 from psycopg import AsyncConnection
 
 logger = logging.getLogger(__name__)
@@ -73,13 +77,6 @@ CREATE INDEX IF NOT EXISTS facts_by_age ON scope_facts (scope, updated_at DESC);
 """
 
 
-@dataclass(frozen=True)
-class Migration:
-    version: int
-    name: str
-    statements: tuple[str, ...]
-
-
 MEMORIES = """
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -99,50 +96,31 @@ MIGRATIONS: tuple[Migration, ...] = (
     # No index on the embeddings: exact search is right below the tens of
     # thousands of vectors, and an HNSW index built too early costs memory and
     # accuracy for a scan that takes a millisecond. The moment a scope grows,
-    # `CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)` is one
-    # migration away.
+    # an HNSW index is one migration away -- on an expression with a cast,
+    # `USING hnsw ((embedding::vector(1536)) vector_cosine_ops)`, because the
+    # column does not fix a dimension (pgvector's documented pattern), and the
+    # query has to use the same cast to be served by it.
     Migration(2, "the index of the memories", (MEMORIES,)),
 )
 
 LATEST_VERSION = max(migration.version for migration in MIGRATIONS)
 
-REGISTER = """
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version     integer     PRIMARY KEY,
-    name        text        NOT NULL,
-    applied_at  timestamptz NOT NULL DEFAULT now()
-)
-"""
+__all__ = [
+    "LATEST_VERSION",
+    "MIGRATIONS",
+    "Migration",
+    "applied_versions",
+    "missing_migrations",
+    "run_migrations",
+]
 
-
-async def applied_versions(connection: AsyncConnection) -> set[int]:
-    await connection.execute(REGISTER)
-    cursor = await connection.execute("SELECT version FROM schema_migrations")
-    rows = await cursor.fetchall()
-    return {int(row[0]) for row in rows}
+LOCK = "memory-service"
 
 
 async def run_migrations(connection: AsyncConnection) -> list[Migration]:
-    """Applies what is missing, in order, and says what it applied."""
-    already = await applied_versions(connection)
-    applied: list[Migration] = []
-    for migration in sorted(MIGRATIONS, key=lambda m: m.version):
-        if migration.version in already:
-            continue
-        logger.info("Applying migration %d: %s.", migration.version, migration.name)
-        for statement in migration.statements:
-            await connection.execute(statement)
-        await connection.execute(
-            "INSERT INTO schema_migrations (version, name) VALUES (%s, %s) "
-            "ON CONFLICT (version) DO NOTHING",
-            (migration.version, migration.name),
-        )
-        applied.append(migration)
-    if not applied:
-        logger.info("Schema up to date: %d migrations already applied.", len(already))
-    return applied
+    """Applies what is missing, in order, one replica at a time."""
+    return await _run(connection, MIGRATIONS, lock=LOCK)
 
 
 async def missing_migrations(connection: AsyncConnection) -> list[int]:
-    known = {migration.version for migration in MIGRATIONS}
-    return sorted(known - await applied_versions(connection))
+    return await _missing(connection, MIGRATIONS)

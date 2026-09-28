@@ -1,6 +1,6 @@
 # Analysis agent
 
-Secondo sottoagente del laboratorio, esposto via **A2A** come il primo.
+Il secondo sottoagente d'esempio, esposto via **A2A** come il primo.
 
 ```powershell
 uv sync
@@ -87,6 +87,11 @@ GET /extendedAgentCard  Bearer <giusto>   200  skills: numbers, methods
 uv run pytest
 ```
 
-Offline: card, aritmetica, executor e contratto. I campioni di contratto stanno
-in `demo-infra/contracts` e i test li caricano da li': se la cartella manca
-**falliscono**, invece di saltarsi da soli.
+Offline: card, aritmetica, executor, webhook ammessi, modalità senza modello e
+contratto. I campioni di contratto stanno in `demo-infra/contracts` e i test li
+caricano da li': se la cartella manca **falliscono**, invece di saltarsi da
+soli.
+
+Con `ANALYSIS_FAKE_CLIENT=true` l'agente parte e risponde con un testo fisso,
+senza credenziali: è quello che il compose accende con `FAKE_MODEL=true`. La
+configurazione completa è nel [README di demo-infra](../demo-infra/README.md#analysis-agent).

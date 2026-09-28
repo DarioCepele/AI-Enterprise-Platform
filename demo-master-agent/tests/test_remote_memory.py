@@ -7,7 +7,7 @@ import httpx
 import pytest
 from agent_framework.ag_ui import AGUIThreadSnapshot
 
-from demo.memory.remote_store import MemoryServiceSnapshotStore
+from master_agent.memory.remote_store import MemoryServiceSnapshotStore
 
 SNAPSHOT = AGUIThreadSnapshot(
     messages=[{"id": "m1", "role": "user", "content": "hello"}],
@@ -74,7 +74,7 @@ async def test_a_memory_service_down_does_not_stop_the_conversation(caplog):
 
     store, _ = store_talking_to(broken)
 
-    with caplog.at_level(logging.ERROR, logger="demo.memory.remote_store"):
+    with caplog.at_level(logging.ERROR, logger="master_agent.memory.remote_store"):
         snapshot = await store.get(scope="tenant-a", thread_id="t1")
 
     assert snapshot is None
@@ -86,7 +86,7 @@ async def test_a_failed_save_is_logged_and_does_not_raise(caplog):
         lambda _: httpx.Response(500, json={"detail": "broken"})
     )
 
-    with caplog.at_level(logging.ERROR, logger="demo.memory.remote_store"):
+    with caplog.at_level(logging.ERROR, logger="master_agent.memory.remote_store"):
 
         await store.save(scope="tenant-a", thread_id="t1", snapshot=SNAPSHOT)
 
@@ -142,7 +142,7 @@ async def test_the_pruning_done_by_the_memory_shows_up_in_the_logs(caplog):
     }
     store, _ = store_talking_to(lambda _: httpx.Response(200, json=payload))
 
-    with caplog.at_level(logging.INFO, logger="demo.memory.remote_store"):
+    with caplog.at_level(logging.INFO, logger="master_agent.memory.remote_store"):
         await store.get(scope="tenant-a", thread_id="t1")
 
     assert "4 reasonings removed" in caplog.text

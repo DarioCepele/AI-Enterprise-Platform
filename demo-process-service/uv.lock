@@ -524,10 +524,7 @@ dependencies = [
     { name = "agent-framework-orchestrations" },
     { name = "dbos" },
     { name = "fastapi" },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-instrumentation-fastapi" },
-    { name = "opentelemetry-instrumentation-httpx" },
-    { name = "opentelemetry-sdk" },
+    { name = "platform-core", extra = ["maf", "otel", "postgres", "runtime"] },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -554,10 +551,7 @@ requires-dist = [
     { name = "agent-framework-orchestrations", specifier = "==1.1.1" },
     { name = "dbos", specifier = ">=2.31.1" },
     { name = "fastapi", specifier = ">=0.139.2" },
-    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.44.0" },
-    { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.65b0" },
-    { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.65b0" },
-    { name = "opentelemetry-sdk", specifier = ">=1.44.0" },
+    { name = "platform-core", extras = ["maf", "otel", "postgres", "runtime"], editable = "../packages/platform-core" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2.10" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
@@ -1263,6 +1257,72 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6fd36efb827202a2d997a375e160a71eb2888a925aac1/pathspec-1.1.1.tar.gz", hash = "sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a", size = 135180, upload-time = "2026-04-27T01:46:08.907Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328, upload-time = "2026-04-27T01:46:07.06Z" },
+]
+
+[[package]]
+name = "platform-core"
+version = "0.1.0"
+source = { editable = "../packages/platform-core" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "starlette" },
+]
+
+[package.optional-dependencies]
+maf = [
+    { name = "agent-framework-core" },
+]
+otel = [
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-instrumentation-httpx" },
+    { name = "opentelemetry-sdk" },
+]
+postgres = [
+    { name = "psycopg", extra = ["binary", "pool"] },
+]
+runtime = [
+    { name = "python-dotenv" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "a2a-sdk", marker = "extra == 'a2a'", specifier = ">=1.1" },
+    { name = "agent-framework-core", marker = "extra == 'maf'", specifier = ">=1.17" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.30" },
+    { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel'", specifier = ">=0.51b0" },
+    { name = "opentelemetry-instrumentation-httpx", marker = "extra == 'otel'", specifier = ">=0.51b0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.30" },
+    { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'postgres'", specifier = ">=3.2" },
+    { name = "pydantic", specifier = ">=2.10" },
+    { name = "pydantic-settings", specifier = ">=2.10" },
+    { name = "python-dotenv", marker = "extra == 'runtime'", specifier = ">=1.1" },
+    { name = "starlette", specifier = ">=0.40" },
+    { name = "uvicorn", marker = "extra == 'runtime'", specifier = ">=0.34" },
+]
+provides-extras = ["otel", "postgres", "a2a", "maf", "runtime"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "a2a-sdk", extras = ["postgresql"], specifier = ">=1.1" },
+    { name = "agent-framework-core", specifier = ">=1.17" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "mypy", specifier = ">=2.3.1" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.30" },
+    { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.51b0" },
+    { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.51b0" },
+    { name = "opentelemetry-sdk", specifier = ">=1.30" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
+    { name = "pytest", specifier = ">=8.4" },
+    { name = "pytest-asyncio", specifier = ">=1.3" },
+    { name = "python-dotenv", specifier = ">=1.1" },
+    { name = "ruff", specifier = ">=0.16.8" },
+    { name = "types-protobuf", specifier = ">=5.29" },
+    { name = "uvicorn", specifier = ">=0.34" },
 ]
 
 [[package]]

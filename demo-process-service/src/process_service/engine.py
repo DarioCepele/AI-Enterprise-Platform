@@ -9,6 +9,7 @@ starting it twice harmless.
 An instance that is waiting -- for an agent, for a person -- is a row, not a
 held connection: that is the property everything else here is built to keep.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -266,6 +267,8 @@ async def _run_approval_step(
     output = {
         "decision": decision.get("decision", REJECTED),
         "by": decision.get("by", ""),
+        # Whether an authenticating proxy vouched for `by`, or somebody typed it.
+        "verified": bool(decision.get("verified", False)),
         "note": decision.get("note"),
     }
     await write_step_output(instance_id, step.id, output)
@@ -293,11 +296,19 @@ async def reply_to_agent(
     task_id: str,
     answer: str,
     context_id: str = "",
+    answered_by: str = "",
+    verified: bool = False,
 ) -> None:
     """Hands the person's answer to the agent that asked for it."""
     engine = current_engine()
     if engine.agents is None:
         raise RuntimeError("no agents are configured: an agent step cannot run")
+    await engine.store.record(
+        instance_id=UUID(instance_id),
+        step_id=step_id,
+        kind="answered",
+        data={"by": answered_by, "verified": verified},
+    )
     await engine.agents.reply(
         agent=owner,
         answer=answer,
@@ -469,7 +480,7 @@ async def _one_step(
         raise RuntimeError(f"step '{step_id}' is not in process '{plan['process_id']}'")
 
     try:
-        return await _do_step(instance_id, scope, step, context)
+        return await _do_step(instance_id, scope, plan["process_id"], step, context)
     except Exception as error:
         # Whatever the step was doing, the process is entitled to hear that it
         # did not work and which one it was: an exception that escaped here
@@ -482,7 +493,11 @@ async def _one_step(
 
 
 async def _do_step(
-    instance_id: str, scope: str, step: Step, context: dict[str, Any]
+    instance_id: str,
+    scope: str,
+    process_id: str,
+    step: Step,
+    context: dict[str, Any],
 ) -> dict[str, Any]:
     step_id = step.id
     if step.type == "agent":
@@ -500,7 +515,7 @@ async def _do_step(
     elif step.type == "open_goal":
         outcome = await run_open_goal(instance_id, scope, step_id, context)
     else:
-        outcome = await _run_step(instance_id, step, context)
+        outcome = await _run_step(instance_id, scope, process_id, step, context)
 
     if outcome is FAILED:
         return _stopped(step_id, FAILED)
@@ -600,7 +615,9 @@ async def _advance(instance_id: str, scope: str) -> str:
             if result["state"] != COMPLETED and not result.get("goto")
         ]
         if stopped:
-            return await _stop_here(instance_id, definition, stopped, finished, context)
+            return await _stop_here(
+                instance_id, scope, definition, stopped, finished, context
+            )
 
         for result in results:
             step = definition.step(result["step_id"])
@@ -613,6 +630,7 @@ async def _advance(instance_id: str, scope: str) -> str:
 
 async def _stop_here(
     instance_id: str,
+    scope: str,
     definition: ProcessDefinition,
     stopped: list[dict[str, Any]],
     finished: list[str],
@@ -632,7 +650,9 @@ async def _stop_here(
 
         undone = []
         if state in (FAILED, REJECTED):
-            undone = await _compensate(instance_id, definition, finished, context)
+            undone = await _compensate(
+                instance_id, scope, definition, finished, context
+            )
 
         final = COMPENSATED if state == FAILED and undone else state
         note = f"{state}: {', '.join(named)}"
@@ -647,6 +667,7 @@ async def _stop_here(
 
 async def _compensate(
     instance_id: str,
+    scope: str,
     definition: ProcessDefinition,
     finished: list[str],
     context: dict[str, Any],
@@ -662,8 +683,8 @@ async def _compensate(
         if step is None or not step.compensate_with:
             continue
         key = (
-            f"undo:{instance_id}:{step.id}:{context.get(step.idempotency_key, '')}"
-            if step.idempotency_key
+            f"undo:{effect_key(scope, definition.id, step, context)}"
+            if step.idempotency_key and context.get(step.idempotency_key)
             else ""
         )
         undone_ok = await compensate_step(
@@ -715,6 +736,8 @@ async def _run_agent_step(
             answer.get("task_id") or started.get("task_id", ""),
             str(from_a_person.get("text", "")),
             started.get("context_id", ""),
+            str(from_a_person.get("by", "")),
+            bool(from_a_person.get("verified", False)),
         )
         answer = await DBOS.recv_async(topic=step.id, timeout_seconds=timeout)
         if answer is None:
@@ -877,7 +900,32 @@ async def escalate(
     logger.warning("Instance %s step %s: %s.", instance_id, step_id, note)
 
 
-async def _run_step(instance_id: str, step: Step, context: dict[str, Any]) -> Any:
+def effect_key(scope: str, process_id: str, step: Step, context: dict[str, Any]) -> str:
+    """The identity of an effect in the world, not of the run that produced it.
+
+    DBOS already makes a step inside one instance run once. What it cannot see
+    is the same request arriving twice -- a client retrying, a model calling
+    `start_process` again -- as two instances. The key is therefore the value
+    the definition names (`idempotency_key: request_id`), scoped by tenant,
+    process and step: two instances for the same request leave one effect.
+    """
+    value = context.get(step.idempotency_key or "")
+    if value in (None, ""):
+        raise ValueError(
+            f"step '{step.id}' declares idempotency_key '{step.idempotency_key}' "
+            "but the instance has no such value: refusing to apply an effect "
+            "that could not be recognised if it came again"
+        )
+    return f"{scope}:{process_id}:{step.id}:{value}"
+
+
+async def _run_step(
+    instance_id: str,
+    scope: str,
+    process_id: str,
+    step: Step,
+    context: dict[str, Any],
+) -> Any:
     if step.type == "decision":
         branches = [branch.model_dump() for branch in step.branches]
         try:
@@ -891,8 +939,8 @@ async def _run_step(instance_id: str, step: Step, context: dict[str, Any]) -> An
             return FAILED
 
     if step.idempotency_key:
-        key = f"{instance_id}:{step.id}:{context.get(step.idempotency_key, '')}"
+        key = effect_key(scope, process_id, step, context)
         if not await record_effect(instance_id, step.id, key):
-            return {}
+            return {"applied": False, "duplicate_of": key}
 
     return await run_tool_step(instance_id, step.id, step.tool or "", context)

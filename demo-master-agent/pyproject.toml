@@ -1,7 +1,8 @@
 [project]
 name = "demo-master-agent"
 version = "0.1.0"
-description = "Master agent del laboratorio AG-UI: AG-UI su SSE + tool nativi"
+license = "Apache-2.0"
+description = "The master agent: AG-UI over SSE, native tools, A2A subagents, MCP servers"
 requires-python = ">=3.12"
 dependencies = [
     "a2a-sdk[http-server]",
@@ -14,14 +15,13 @@ dependencies = [
     # MCPStreamableHTTPTool -- added directly rather than pulling that
     # extra's few dozen unrelated provider packages in with it.
     "mcp>=1.24.0,<2",
-    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
-    "opentelemetry-instrumentation-fastapi>=0.65b0",
-    "opentelemetry-instrumentation-httpx>=0.65b0",
-    "opentelemetry-sdk>=1.44.0",
     "pillow>=12.3.0",
+    "platform-core[maf,otel,postgres,runtime]",
     "psycopg[binary,pool]>=3.3.5",
     "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.3",
+    # Skill frontmatter is YAML: read with a parser, not with a regex.
+    "pyyaml>=6.0",
     "uvicorn>=0.52.4",
 ]
 
@@ -32,6 +32,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.8",
+    "types-pyyaml>=6.0",
     "types-protobuf>=7.35.1.20260906",
 ]
 
@@ -60,12 +61,12 @@ select = ["E", "W", "F", "UP", "B", "I", "S", "C4", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
 
+[tool.uv.sources]
+platform-core = { path = "../packages/platform-core", editable = true }
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/demo"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/demo/skills" = "demo/skills"
+packages = ["src/master_agent"]

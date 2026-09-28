@@ -6,7 +6,7 @@ import logging
 import httpx
 import pytest
 
-from demo.resilience import Breaker, with_retries
+from master_agent.resilience import Breaker, with_retries
 
 
 class Flaky:
@@ -48,7 +48,7 @@ async def test_the_breaker_stops_calling_after_enough_failures(caplog):
     )
     flaky = Flaky(failures=99)
 
-    with caplog.at_level(logging.WARNING, logger="demo.resilience"):
+    with caplog.at_level(logging.WARNING, logger="master_agent.resilience"):
         for _ in range(4):
             with pytest.raises(Exception):  # noqa: B017
                 await breaker.call(flaky)
@@ -116,7 +116,7 @@ async def test_a_success_closes_the_breaker_again():
 
 @pytest.mark.asyncio
 async def test_the_memory_store_retries_a_failing_read(monkeypatch):
-    from demo.memory.remote_store import MemoryServiceSnapshotStore
+    from master_agent.memory.remote_store import MemoryServiceSnapshotStore
 
     attempts = []
 

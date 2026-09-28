@@ -8,8 +8,7 @@ different audio sample-by-sample -- `np.array_equal` on two runs of the
 fixed sentence below returned `False`, with a max absolute sample
 difference around 0.09 (samples are floats in [-1, 1] before quantizing to
 int16). So this module does not assert exact bytes, only that the output is
-non-empty and its duration is plausible for the input text -- the same
-choice this contract's instructions call for.
+non-empty and its duration is plausible for the input text.
 """
 from __future__ import annotations
 

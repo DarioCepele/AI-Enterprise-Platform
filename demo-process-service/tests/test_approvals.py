@@ -4,6 +4,7 @@ An approval is the longest wait a process has, and the one that has to survive
 everything: the restart, the day in between, the second click on the same
 button.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -254,6 +255,8 @@ async def test_the_decision_is_written_down_with_whoever_made_it(
     assert signed.output == {
         "decision": "approved",
         "by": "reviewer",
+        # Nobody in front of this service vouched for the name: the record says so.
+        "verified": False,
         "note": "checked the numbers",
     }
     assert CALLS == ["prepare", "apply"]
@@ -494,3 +497,47 @@ async def test_the_approval_can_come_after_a_restart(engine, store, scope, tmp_p
     assert read.status == "completed"
     assert step_of(read, "sign_off").output["by"] == "reviewer"
     assert step_of(read, "apply").status == "completed"
+
+
+async def test_a_decision_without_an_identity_proxy_is_marked_unverified(
+    engine, app, store, scope
+):
+    instance, handle = await waiting_instance(store, scope)
+
+    async with await client_for(app) as client:
+        decided = await client.post(
+            f"/instances/{instance.id}/steps/sign_off/decision",
+            json={"by": "reviewer"},
+            headers={"X-Process-Scope": scope},
+        )
+
+    assert decided.json() == {"state": "approved", "by": "reviewer", "verified": False}
+    assert await handle.get_result() == "completed"
+
+
+async def test_behind_an_identity_proxy_the_decider_is_who_the_proxy_says(
+    engine, store, scope, monkeypatch
+):
+    monkeypatch.setenv("PROCESS_IDENTITY_HEADER", "X-Forwarded-User")
+    app = create_app(catalog=Catalog([NEEDS_A_YES]), store=store)
+    instance, handle = await waiting_instance(store, scope)
+
+    async with await client_for(app) as client:
+        impostor = await client.post(
+            f"/instances/{instance.id}/steps/sign_off/decision",
+            json={"by": "reviewer"},
+            headers={"X-Process-Scope": scope, "X-Forwarded-User": "mallory"},
+        )
+        genuine = await client.post(
+            f"/instances/{instance.id}/steps/sign_off/decision",
+            json={"by": "whatever the form says"},
+            headers={"X-Process-Scope": scope, "X-Forwarded-User": "reviewer"},
+        )
+
+    # Typing an approver's name is not being one, once the deployment says who
+    # is asking.
+    assert impostor.status_code == 403
+    assert genuine.json() == {"state": "approved", "by": "reviewer", "verified": True}
+    assert await handle.get_result() == "completed"
+    read = await store.get(scope=scope, instance_id=instance.id)
+    assert step_of(read, "sign_off").output["verified"] is True

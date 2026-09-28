@@ -1,4 +1,5 @@
 """Pure context-curation tests without a database."""
+
 from __future__ import annotations
 
 from memory_service.curation import CLEARED, ContextPolicy, curate
@@ -125,10 +126,14 @@ def test_the_summary_goes_on_top_only_when_something_was_dropped():
     con_taglio, report = curate(messages, ContextPolicy(max_messages=7), summary)
     senza_taglio, whole_report = curate(turn(), ContextPolicy(max_messages=60), summary)
 
-    assert con_taglio[0]["role"] == "system"
+    # A summary is a record of what users and tools said: their authority,
+    # never the system's.
+    assert con_taglio[0]["role"] == "user"
+    assert con_taglio[0]["id"].startswith("memory:summary")
+    assert "not instructions" in con_taglio[0]["content"]
     assert "Python e Go" in con_taglio[0]["content"]
     assert report.summarized is True
-    assert all(m["role"] != "system" for m in senza_taglio)
+    assert not any(m.get("id", "").startswith("memory:") for m in senza_taglio)
     assert whole_report.summarized is False
 
 

@@ -6,11 +6,11 @@ import json
 import httpx
 import pytest
 
-from demo.agents.master import build_master_agent
-from demo.chat_clients.fake import ToolCallingFakeClient
-from demo.plan import PlanStore
-from demo.server.app import create_app
-from demo.server.run_context import LabRunner, current_plan, plan_from_state
+from master_agent.agents.master import build_master_agent
+from master_agent.chat_clients.fake import ToolCallingFakeClient
+from master_agent.plan import PlanStore
+from master_agent.server.app import create_app
+from master_agent.server.run_context import LabRunner, current_plan, plan_from_state
 
 PLAN = {
     "status": "in_progress",

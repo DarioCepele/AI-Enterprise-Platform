@@ -1,12 +1,12 @@
 """Text-to-speech: turn text into audio.
 
 Uses Kokoro-82M (`kokoro` on PyPI, https://pypi.org/project/kokoro/, by
-hexgrad -- the model this repo's own plan names as the TTS default, see
-`piani/2026-09-10-audio-video.md`, Tappa 1's "STT/TTS/VAD di default" row):
-Apache-2.0 weights, ~82M parameters, fast enough on CPU to not need a GPU --
-matching this repo's no-GPU-by-default posture (`voice_service.stt` makes the
-same choice for STT). Runs on CPU by default through PyTorch; nothing here
-pins a CUDA device.
+hexgrad): Apache-2.0 weights, ~82M parameters, fast enough on CPU to not need a
+GPU -- the same no-GPU-by-default posture `voice_service.stt` takes. The
+language and the voice are configuration (`VOICE_TTS_LANG_CODE`,
+`VOICE_TTS_VOICE`): an agent answering in Italian needs an Italian voice, or
+every word is read with an English accent. Runs on CPU through PyTorch;
+nothing here pins a CUDA device.
 
 System dependencies: none beyond what `uv sync` installs. Kokoro's G2P
 (`misaki[en]`) normally needs eSpeak NG installed on the system for
@@ -32,6 +32,7 @@ looks like sampling noise internal to the model rather than a caching bug:
 this module makes no attempt to seed or cache around it, and tests assert
 non-empty, plausibly-timed audio, never exact bytes.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -44,16 +45,14 @@ SAMPLE_RATE = 24_000
 """Kokoro's native output rate (mono). Not resampled -- see module docstring."""
 
 VOICE = "af_heart"
-"""Kokoro's American-English voice used throughout the project's own
-README/Colab examples -- picked as a well-known default; nothing else in
-this contract steers the choice of voice."""
+"""Kokoro's American-English default voice; `VOICE_TTS_VOICE` overrides it."""
 
 LANG_CODE = "a"
-"""Kokoro's language code for American English, matching `VOICE`."""
+"""Kokoro's language code for American English; `VOICE_TTS_LANG_CODE` overrides it."""
 
 
-@lru_cache(maxsize=1)
-def _pipeline() -> Any:
+@lru_cache(maxsize=2)
+def _pipeline(lang_code: str = LANG_CODE) -> Any:
     """Loads the Kokoro pipeline once and reuses it for the process lifetime.
 
     Downloads `hexgrad/Kokoro-82M`'s weights from Hugging Face on first use
@@ -63,10 +62,10 @@ def _pipeline() -> Any:
     """
     from kokoro import KPipeline
 
-    return KPipeline(lang_code=LANG_CODE)
+    return KPipeline(lang_code=lang_code)
 
 
-def synthesize(text: str, *, voice: str = VOICE) -> bytes:
+def synthesize(text: str, *, voice: str | None = None) -> bytes:
     """Synthesizes `text` as speech.
 
     Returns 16-bit PCM mono bytes at `SAMPLE_RATE`, or `b""` for empty/
@@ -76,16 +75,21 @@ def synthesize(text: str, *, voice: str = VOICE) -> bytes:
     `voice_service.agui_client.AGUIBridgeClient.stream_turn`'s sentence
     chunking, which is what decides how much text reaches one call of this
     function at a time. They are concatenated here into one clip since this
-    function's contract is "text in, one clip out"; the streaming behaviour
-    the plan asks for (Step 4/5 of Tappa 1) comes from calling this function
-    once per `stream_turn` chunk, in `voice_service.api`, not from streaming
-    inside a single call.
+    function's contract is "text in, one clip out"; the reply streams because
+    `voice_service.api` calls it once per `stream_turn` sentence, not because
+    a single call streams.
     """
     if not text.strip():
         return b""
 
+    from .config import get_settings
+
+    settings = get_settings()
     segments: list[npt.NDArray[np.float32]] = []
-    for _graphemes, _phonemes, audio in _pipeline()(text, voice=voice):
+    speaking = _pipeline(settings.tts_lang_code)
+    for _graphemes, _phonemes, audio in speaking(
+        text, voice=voice or settings.tts_voice
+    ):
         segments.append(np.asarray(audio, dtype=np.float32))
 
     if not segments:

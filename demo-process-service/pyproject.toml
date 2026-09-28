@@ -1,6 +1,7 @@
 [project]
 name = "demo-process-service"
 version = "0.1.0"
+license = "Apache-2.0"
 description = "Durable business processes: versioned definitions, instances that survive restarts"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,10 +10,7 @@ dependencies = [
     "agent-framework-orchestrations==1.1.1",
     "dbos>=2.31.1",
     "fastapi>=0.139.2",
-    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
-    "opentelemetry-instrumentation-fastapi>=0.65b0",
-    "opentelemetry-instrumentation-httpx>=0.65b0",
-    "opentelemetry-sdk>=1.44.0",
+    "platform-core[maf,otel,postgres,runtime]",
     "psycopg[binary,pool]>=3.2.10",
     "pydantic>=2.12.0",
     "pydantic-settings>=2.15.0",
@@ -55,6 +53,9 @@ asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
 markers = ["integration: needs a real Postgres"]
+
+[tool.uv.sources]
+platform-core = { path = "../packages/platform-core", editable = true }
 
 [build-system]
 requires = ["hatchling"]

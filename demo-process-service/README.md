@@ -171,11 +171,17 @@ POST /a2a/push/{scope}/{id}/{step}    la notifica dell'agente, firmata
 GET  /health/live  /health/ready      processo vivo / puo' servire
 ```
 
-Lo scope arriva dall'intestazione `X-Process-Scope` e vale come confine: le
-istanze di uno scope non si leggono da un altro. E' la stessa giuntura degli
-altri servizi, ed e' li' che si attacchera' l'autenticazione.
+Lo scope vale come confine: le istanze di uno scope non si leggono da un
+altro. Di default e' uno solo (`PROCESS_DEFAULT_SCOPE`); un'intestazione lo
+decide solo se `PROCESS_SCOPE_HEADER` la nomina, e va nominata solo quando la
+scrive un proxy che ha verificato l'utente -- un valore che manda il browser e'
+una richiesta, non un'identita'. Allo stesso modo `PROCESS_IDENTITY_HEADER`
+dice chi ha risposto o deciso: ogni decisione registra chi l'ha presa e se
+quel nome arrivava da un'identita' verificata (`verified`) o da quello che il
+pannello ha scritto. E' la stessa giuntura degli altri servizi, ed e' li' che
+si attacca l'autenticazione.
 
-**Chi legge questa API.** Il tab *Istanze* dell'interfaccia la chiama
+**Chi legge questa API.** Il tab *Instances* dell'interfaccia la chiama
 **direttamente dal browser**: e' l'unico modo perche' una vista che segue
 un'istanza non passi per l'agente, che nel frattempo puo' non esserci. Per
 questo `PROCESS_ALLOWED_ORIGINS` esiste e non e' `*`: un servizio che

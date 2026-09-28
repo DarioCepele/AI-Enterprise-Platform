@@ -4,6 +4,7 @@ Plain SQL on Postgres, one connection pool per process. The engine that runs the
 steps arrives next; this is the part that has to survive it -- an instance is a
 row, and a row outlives the process that created it.
 """
+
 from __future__ import annotations
 
 import builtins
@@ -96,9 +97,10 @@ class InstanceStore:
         return await self.get(scope=scope, instance_id=instance_id)  # type: ignore[return-value]
 
     async def get(self, *, scope: str, instance_id: UUID) -> Instance | None:
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT * FROM process_instances WHERE id = %s AND scope = %s",
                 (instance_id, scope),
@@ -130,9 +132,10 @@ class InstanceStore:
         query += " ORDER BY created_at DESC LIMIT %s"
         parameters.append(limit)
 
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(query, parameters)
             rows = await cursor.fetchall()
             instances = []
@@ -210,8 +213,13 @@ class InstanceStore:
                        ended_at = now()
                  WHERE instance_id = %s AND step_id = %s
                 """,
-                (status, json.dumps(output) if output is not None else None, note,
-                 instance_id, step_id),
+                (
+                    status,
+                    json.dumps(output) if output is not None else None,
+                    note,
+                    instance_id,
+                    step_id,
+                ),
             )
             await _write_event(
                 connection,
@@ -242,6 +250,13 @@ class InstanceStore:
                 "step_noted",
                 {"status": status, "note": note},
             )
+
+    async def record(
+        self, *, instance_id: UUID, step_id: str | None, kind: str, data: dict[str, Any]
+    ) -> None:
+        """Writes an event that changes no state: who answered, and whether verified."""
+        async with self._pool.connection() as connection:
+            await _write_event(connection, instance_id, step_id, kind, data)
 
     async def record_effect(self, *, instance_id: UUID, step_id: str, key: str) -> bool:
         """Writes an effect under its key, and says whether it is the first one.
@@ -318,9 +333,10 @@ class InstanceStore:
         self, *, instance_id: UUID, after: int = 0
     ) -> builtins.list[Event]:
         """The history of an instance, in the order it happened."""
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT * FROM instance_events WHERE instance_id = %s AND id > %s "
                 "ORDER BY id",

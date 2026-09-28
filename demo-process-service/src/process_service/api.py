@@ -1,4 +1,5 @@
 """The HTTP surface: definitions to read, instances to start and to follow."""
+
 from __future__ import annotations
 
 import logging
@@ -10,6 +11,9 @@ from uuid import UUID
 from dbos import DBOS
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from platform_core.cors import cors_options
+from platform_core.http import BodySizeLimit
+from platform_core.secrets import require_secret
 
 from .agents import (
     NEEDS_INPUT,
@@ -31,7 +35,7 @@ from .engine import (
 )
 from .migrations import run_migrations
 from .models import AnswerRequest, ApprovalRequest, Event, Instance, StartRequest
-from .observability import configure_logging, configure_tracing
+from .observability import configure_logging, configure_telemetry
 from .replay import ReplayDiverged, replay
 from .store import InstanceStore, build_pool
 
@@ -55,6 +59,10 @@ def create_app(
     definitions = (
         catalog if catalog is not None else load_catalog(config.definitions_path)
     )
+    if agents is None and config.agents:
+        # Agent steps wait for a signed notification: with no key to sign it,
+        # none of them could ever be woken up. Better not to start at all.
+        require_secret("PROCESS_PUSH_SECRET", config.push_secret)
     gateway = (
         agents if agents is not None else AgentGateway(config.agents, config.public_url)
     )
@@ -80,14 +88,20 @@ def create_app(
         # DBOS owns the durability: it keeps the ledger of what each instance has
         # already done, and on launch it picks up the workflows this process --
         # or the one it replaces -- left half-finished.
-        DBOS(
-            config={
-                "name": SERVICE_NAME,
-                "system_database_url": config.postgres_dsn,
-                "run_admin_server": False,
-                "enable_otlp": False,
-            }
-        )
+        dbos_config: dict[str, Any] = {
+            "name": SERVICE_NAME,
+            "system_database_url": config.postgres_dsn,
+            "run_admin_server": False,
+            "enable_otlp": False,
+        }
+        # Each replica recovers only the workflows tagged with its own executor
+        # id: two replicas sharing the default would both recover everything
+        # pending, including what the other one is running right now.
+        if config.executor_id:
+            dbos_config["executor_id"] = config.executor_id
+        if config.app_version:
+            dbos_config["application_version"] = config.app_version
+        DBOS(config=dbos_config)  # type: ignore[arg-type]
         DBOS.launch()
         try:
             yield
@@ -103,11 +117,10 @@ def create_app(
     # what is running.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=list(config.allowed_origins),
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-Process-Scope"],
+        **cors_options(config.allowed_origins, credentials=config.cors_credentials),
     )
-    configure_tracing(SERVICE_NAME, app)
+    app.add_middleware(BodySizeLimit, default=config.max_request_bytes)
+    configure_telemetry(SERVICE_NAME, app)
 
     def current_store() -> InstanceStore:
         instance = state.get("store")
@@ -115,11 +128,22 @@ def create_app(
             raise HTTPException(status_code=503, detail="service not initialized")
         return instance
 
-    def current_scope(
-        scope: str | None = Header(default=None, alias=config.scope_header),
-    ) -> str:
-        """The authorization boundary, with the same seam as the other services."""
-        return (scope or "").strip() or config.default_scope
+    def current_scope(request: Request) -> str:
+        """The authorization boundary, with the same seam as the other services.
+
+        The header is read only when the operator names it: a value nobody
+        verified is a request from the client, not an identity.
+        """
+        if not config.scope_header:
+            return config.default_scope
+        received = (request.headers.get(config.scope_header) or "").strip()
+        return received or config.default_scope
+
+    def current_identity(request: Request) -> str:
+        """Who is acting, as the proxy in front verified it; empty when nobody did."""
+        if not config.identity_header:
+            return ""
+        return (request.headers.get(config.identity_header) or "").strip()
 
     @app.get("/health/live")
     async def live() -> dict[str, str]:
@@ -193,7 +217,6 @@ def create_app(
         await current_engine().start(instance.id, scope)
         return instance
 
-
     @app.post("/a2a/push/{scope}/{instance_id}/{step_id}")
     async def agent_notification(
         scope: str,
@@ -209,7 +232,7 @@ def create_app(
         else's process. Only terminal states and questions wake an instance;
         progress is noise.
         """
-        if not token_is_valid(str(instance_id), step_id, token):
+        if not token_is_valid(scope, str(instance_id), step_id, token):
             logger.warning(
                 "Notification refused for instance %s step %s: invalid token.",
                 instance_id,
@@ -255,6 +278,7 @@ def create_app(
         step_id: str,
         request: AnswerRequest,
         scope: str = Depends(current_scope),
+        identity: str = Depends(current_identity),
         store: InstanceStore = Depends(current_store),
     ) -> dict[str, str]:
         """A person answers what the agent stopped to ask.
@@ -283,7 +307,7 @@ def create_app(
 
         await DBOS.send_async(
             destination_id=step_workflow_id(str(instance_id), step_id),
-            message={"text": request.text},
+            message={"text": request.text, "by": identity, "verified": bool(identity)},
             topic=human_topic(step_id),
         )
         return {"state": "answered"}
@@ -294,8 +318,9 @@ def create_app(
         step_id: str,
         request: ApprovalRequest,
         scope: str = Depends(current_scope),
+        identity: str = Depends(current_identity),
         store: InstanceStore = Depends(current_store),
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         """A person approves or refuses a step that is waiting for a decision.
 
         Deciding twice does nothing: the second decision arrives when the step
@@ -324,11 +349,17 @@ def create_app(
         definition = definitions.get(instance.process_id, instance.process_version)
         step = definition.step(step_id)
         approvers = list(step.approvers) if step else []
-        if approvers and request.by not in approvers:
+        # With an authenticating proxy in front, who decides is who the proxy
+        # says; without one, the name typed in the panel is all there is, and
+        # the record says it was never verified. Authentication belongs to the
+        # deployment -- what belongs here is not pretending it happened.
+        decider = identity or request.by
+        verified = bool(identity)
+        if approvers and decider not in approvers:
             raise HTTPException(
                 status_code=403,
                 detail=(
-                    f"'{request.by}' cannot decide '{step_id}'. "
+                    f"'{decider}' cannot decide '{step_id}'. "
                     f"Approvers: {', '.join(approvers)}"
                 ),
             )
@@ -337,19 +368,21 @@ def create_app(
             destination_id=step_workflow_id(str(instance_id), step_id),
             message={
                 "decision": request.decision,
-                "by": request.by,
+                "by": decider,
+                "verified": verified,
                 "note": request.note,
             },
             topic=approval_topic(step_id),
         )
         logger.info(
-            "Instance %s step %s: %s by %s.",
+            "Instance %s step %s: %s by %s (%s).",
             instance_id,
             step_id,
             request.decision,
-            request.by,
+            decider,
+            "verified" if verified else "self-declared",
         )
-        return {"state": request.decision}
+        return {"state": request.decision, "by": decider, "verified": verified}
 
     @app.get("/instances/{instance_id}/events")
     async def read_events(
@@ -412,8 +445,9 @@ def create_app(
         return {"instances": await store.list(scope=scope, status=status, limit=limit)}
 
     logger.info(
-        "Process service ready: %d definitions, scope header %s.",
+        "Process service ready: %d definitions, scope header %s, identity header %s.",
         len(definitions.all()),
-        config.scope_header,
+        config.scope_header or "none (single scope)",
+        config.identity_header or "none (decisions recorded as unverified)",
     )
     return app

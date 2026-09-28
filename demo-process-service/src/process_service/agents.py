@@ -6,10 +6,9 @@ instance suspends, and the agent calls back on a signed webhook when it has
 finished. That is what A2A's task lifecycle and push notifications are for, and
 using them for anything shorter would be building a second one.
 """
+
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
 from typing import Any
 from uuid import uuid4
@@ -28,93 +27,42 @@ from a2a.types import (
     TaskState,
 )
 from google.protobuf.json_format import MessageToDict, ParseDict
+from platform_core import push
 
 from .config import get_settings
 
 logger = logging.getLogger(__name__)
 
 CARD_PATH = ".well-known/agent-card.json"
-# S105 is a false positive here: this is the name of the HTTP header that
-# carries the token, not a credential. The secret comes from settings, in
-# _secret() below.
-TOKEN_HEADER = "X-A2A-Notification-Token"  # noqa: S105
+TOKEN_HEADER = push.HEADER
 
-TERMINAL = {
-    "TASK_STATE_COMPLETED",
-    "TASK_STATE_FAILED",
-    "TASK_STATE_CANCELED",
-    "TASK_STATE_REJECTED",
-}
-NEEDS_INPUT = "TASK_STATE_INPUT_REQUIRED"
+TERMINAL = push.TERMINAL
+NEEDS_INPUT = push.NEEDS_INPUT
+summary_of = push.summary_of
 
 
-def _secret() -> bytes:
-    return get_settings().push_secret.encode()
+def _secret() -> str:
+    return get_settings().push_secret
 
 
-def token_for(instance_id: str, step_id: str) -> str:
-    """Signs the pair the webhook is about, so a token is good for one step only."""
-    payload = f"{instance_id}:{step_id}".encode()
-    return hmac.new(_secret(), payload, hashlib.sha256).hexdigest()
+def token_for(scope: str, instance_id: str, step_id: str) -> str:
+    """Signs the triple the webhook is about: a token is good for one step only.
+
+    The scope is signed too: it travels in the URL, and a token that did not
+    cover it would let a notification cross from one scope into another.
+    """
+    return push.sign(_secret(), scope, instance_id, step_id)
 
 
-def token_is_valid(instance_id: str, step_id: str, received: str | None) -> bool:
-    if not received:
-        return False
-    return hmac.compare_digest(token_for(instance_id, step_id), received)
+def token_is_valid(
+    scope: str, instance_id: str, step_id: str, received: str | None
+) -> bool:
+    return push.verify(_secret(), received, scope, instance_id, step_id)
 
 
 def webhook_url(base: str, scope: str, instance_id: str, step_id: str) -> str:
     """The correlation is in the URL: whoever receives it knows which step it is."""
     return f"{base.rstrip('/')}/a2a/push/{scope}/{instance_id}/{step_id}"
-
-
-def summary_of(notification: dict[str, Any]) -> tuple[str, str, str]:
-    """Reads (task_id, state, text) from a notification without trusting its shape.
-
-    The agent notifies one event at a time and in camelCase: sometimes a whole
-    task, sometimes a status update, sometimes an artifact. Everything is
-    accepted here, and the caller decides what to ignore.
-    """
-    task = notification.get("task") or {}
-    status_update = (
-        notification.get("statusUpdate") or notification.get("status_update") or {}
-    )
-    artifact_update = (
-        notification.get("artifactUpdate") or notification.get("artifact_update") or {}
-    )
-
-    task_id = str(
-        task.get("id")
-        or status_update.get("taskId")
-        or status_update.get("task_id")
-        or artifact_update.get("taskId")
-        or artifact_update.get("task_id")
-        or ""
-    )
-    state = str(
-        (task.get("status") or {}).get("state")
-        or (status_update.get("status") or {}).get("state")
-        or ""
-    )
-
-    artifacts = list(task.get("artifacts") or [])
-    if artifact_update.get("artifact"):
-        artifacts.append(artifact_update["artifact"])
-    parts = [
-        part["text"]
-        for artifact in artifacts
-        for part in artifact.get("parts") or []
-        if isinstance(part.get("text"), str)
-    ]
-    if not parts:
-        message = (status_update.get("status") or {}).get("message") or {}
-        parts = [
-            part["text"]
-            for part in message.get("parts") or []
-            if isinstance(part.get("text"), str)
-        ]
-    return task_id, state, "".join(parts).strip()
 
 
 def _usage_of(data: dict[str, Any]) -> dict[str, int]:
@@ -182,8 +130,15 @@ class AgentGateway:
         return self._clients[name]
 
     async def _send(
-        self, *, agent: str, text: str, scope: str, instance_id: str, step_id: str,
-        task_id: str = "", context_id: str = "",
+        self,
+        *,
+        agent: str,
+        text: str,
+        scope: str,
+        instance_id: str,
+        step_id: str,
+        task_id: str = "",
+        context_id: str = "",
     ) -> dict[str, Any]:
         """Sends a message and returns as soon as the agent has taken it.
 
@@ -211,7 +166,7 @@ class AgentGateway:
             SendMessageConfiguration(
                 task_push_notification_config=TaskPushNotificationConfig(
                     url=webhook_url(self._public_url, scope, instance_id, step_id),
-                    token=token_for(instance_id, step_id),
+                    token=token_for(scope, instance_id, step_id),
                 )
             )
         )
@@ -335,6 +290,11 @@ class AgentGateway:
         worked out, and would ask the same question again.
         """
         return await self._send(
-            agent=agent, text=answer, scope=scope, instance_id=instance_id,
-            step_id=step_id, task_id=task_id, context_id=context_id,
+            agent=agent,
+            text=answer,
+            scope=scope,
+            instance_id=instance_id,
+            step_id=step_id,
+            task_id=task_id,
+            context_id=context_id,
         )

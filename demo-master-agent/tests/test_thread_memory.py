@@ -18,8 +18,8 @@ from agent_framework import (
     ResponseStream,
 )
 
-from demo.agents.master import build_master_agent
-from demo.server.app import create_app
+from master_agent.agents.master import build_master_agent
+from master_agent.server.app import create_app
 
 
 class RecordingChatClient(BaseChatClient):

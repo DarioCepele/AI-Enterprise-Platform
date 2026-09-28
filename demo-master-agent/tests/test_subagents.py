@@ -1,4 +1,5 @@
 """More than one subagent, or none: the tools follow the configuration."""
+
 from __future__ import annotations
 
 import logging
@@ -6,10 +7,10 @@ import logging
 import pytest
 from a2a.types import AgentCapabilities, AgentCard
 
-from demo.a2a.client import Progress
-from demo.config import SubagentConfig
-from demo.server.run_context import current_pending
-from demo.tools.subagent_tools import build_subagent_tools
+from master_agent.a2a.client import Progress
+from master_agent.config import SubagentConfig
+from master_agent.server.run_context import current_pending
+from master_agent.tools.subagent_tools import build_subagent_tools
 
 
 def card(name: str, description: str = "") -> AgentCard:
@@ -159,7 +160,9 @@ async def test_an_answer_for_a_subagent_that_is_gone_says_so(caplog):
         {"task_id": "t-99", "agent": "retired", "question": "which?"}
     )
     try:
-        with caplog.at_level(logging.WARNING, logger="demo.tools.subagent_tools"):
+        with caplog.at_level(
+            logging.WARNING, logger="master_agent.tools.subagent_tools"
+        ):
             result = await answer_subagent.func(answer="the answer")
     finally:
         current_pending.reset(token)
@@ -172,7 +175,7 @@ async def test_an_answer_for_a_subagent_that_is_gone_says_so(caplog):
 async def test_the_artifact_says_which_subagent_produced_it():
     class WithBriefing(Remote):
         async def ask(self, text, task_id=None, context_id=None, webhook=None):
-            from demo.a2a.client import Artifact
+            from master_agent.a2a.client import Artifact
 
             progress = Progress(task_id="t-1", state="working", raw_state=2)
             progress.artifact = Artifact(
@@ -198,11 +201,11 @@ async def test_the_artifact_says_which_subagent_produced_it():
 
 
 def test_a_single_subagent_needs_no_json(monkeypatch):
-    monkeypatch.setenv("DEMO_KNOWLEDGE_AGENT_URL", "http://kb:8200/")
-    monkeypatch.setenv("DEMO_KNOWLEDGE_SERVICE_TOKEN", "secret")
-    monkeypatch.delenv("DEMO_SUBAGENTS", raising=False)
+    monkeypatch.setenv("MASTER_KNOWLEDGE_AGENT_URL", "http://kb:8200/")
+    monkeypatch.setenv("MASTER_KNOWLEDGE_SERVICE_TOKEN", "secret")
+    monkeypatch.delenv("MASTER_SUBAGENTS", raising=False)
 
-    from demo.config import get_settings
+    from master_agent.config import get_settings
 
     # The compose file has been passing these two for three stages: a fork with
     # one subagent should not have to learn a JSON list to say so.
@@ -217,18 +220,20 @@ def test_a_single_subagent_needs_no_json(monkeypatch):
 
 
 def test_an_empty_list_of_subagents_is_not_an_error(monkeypatch):
-    monkeypatch.setenv("DEMO_SUBAGENTS", "")
-    monkeypatch.delenv("DEMO_KNOWLEDGE_AGENT_URL", raising=False)
+    monkeypatch.setenv("MASTER_SUBAGENTS", "")
+    monkeypatch.delenv("MASTER_KNOWLEDGE_AGENT_URL", raising=False)
 
-    from demo.config import get_settings
+    from master_agent.config import get_settings
 
     assert get_settings().subagents == ()
 
 
 def test_the_list_wins_over_the_single_variable(monkeypatch):
-    monkeypatch.setenv("DEMO_KNOWLEDGE_AGENT_URL", "http://kb:8200/")
-    monkeypatch.setenv("DEMO_SUBAGENTS", '[{"name":"legal","url":"http://legal:8300/"}]')
+    monkeypatch.setenv("MASTER_KNOWLEDGE_AGENT_URL", "http://kb:8200/")
+    monkeypatch.setenv(
+        "MASTER_SUBAGENTS", '[{"name":"legal","url":"http://legal:8300/"}]'
+    )
 
-    from demo.config import get_settings
+    from master_agent.config import get_settings
 
     assert [s.name for s in get_settings().subagents] == ["legal"]

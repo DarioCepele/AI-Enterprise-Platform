@@ -40,7 +40,7 @@ def _test_database(dsn: str | None) -> str | None:
     if configured:
         return configured
     parsed = urlsplit(dsn)
-    database = (parsed.path.lstrip("/") or "memoria") + "_test"
+    database = (parsed.path.lstrip("/") or "memory") + "_test"
     return urlunsplit(parsed._replace(path=f"/{database}"))
 
 
@@ -80,7 +80,7 @@ def scope() -> str:
 
 @pytest.fixture
 async def pool(database):
-    connection_pool = build_pool(POSTGRES_DSN or "postgresql://127.0.0.1:5432/memoria_test")
+    connection_pool = build_pool(POSTGRES_DSN or "postgresql://127.0.0.1:5432/memory_test")
     await connection_pool.open(wait=True)
     try:
         async with connection_pool.connection() as connection:

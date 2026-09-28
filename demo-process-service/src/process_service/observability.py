@@ -1,37 +1,21 @@
-"""Logs you can join, and traces that cross the three services.
+"""Logs that name the instance they belong to, and traces that cross services.
 
-One question produces lines in three services and nothing to sew them together.
-The trace is what joins them: it arrives with the request and travels on with
-every outgoing call.
-
-The exporter is optional. Without `OTEL_EXPORTER_OTLP_ENDPOINT` nothing is
-exported and nothing breaks: a template that needed a collector to start would
-be a template nobody runs.
+The generic part -- JSON lines, OpenTelemetry export -- is the platform's
+(`platform_core.observability`). What is this service's own is the instance:
+every line written while a step runs carries it, so a log line and an instance
+can find each other without anybody remembering to say which one they were
+talking about.
 """
+
 from __future__ import annotations
 
-import json
-import logging
-import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from opentelemetry import trace
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from platform_core import observability
 
-logger = logging.getLogger(__name__)
-
-ENDPOINT_VARIABLE = "OTEL_EXPORTER_OTLP_ENDPOINT"
-
-# Which instance the current work belongs to. Every line written while a step
-# runs carries it, so a log line and an instance can find each other without
-# anybody having to remember to say which instance they were talking about.
 _INSTANCE: ContextVar[str | None] = ContextVar("instance_id", default=None)
 
 
@@ -46,93 +30,25 @@ def working_on(instance_id: str) -> Iterator[None]:
 
 def current_trace() -> str | None:
     """The trace this work belongs to, when there is a collector listening."""
-    span = trace.get_current_span().get_span_context()
-    return format(span.trace_id, "032x") if span.is_valid else None
-
-RESERVED = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
-    "message",
-    "asctime",
-    "taskName",
-}
+    return observability.current_trace_id()
 
 
-class JsonFormatter(logging.Formatter):
-    """One line, one object: service, level, message, and what joins it to a turn."""
+def _context() -> dict[str, str | None]:
+    return {"instance_id": _INSTANCE.get()}
+
+
+class JsonFormatter(observability.JsonFormatter):
+    """The platform's JSON line, with the instance of the running step in it."""
 
     def __init__(self, service: str) -> None:
-        super().__init__()
-        self._service = service
-
-    def format(self, record: logging.LogRecord) -> str:
-        payload: dict[str, Any] = {
-            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
-            "level": record.levelname,
-            "service": self._service,
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
-
-        span = trace.get_current_span().get_span_context()
-        if span.is_valid:
-            payload["trace_id"] = format(span.trace_id, "032x")
-            payload["span_id"] = format(span.span_id, "016x")
-
-        instance_id = _INSTANCE.get()
-        if instance_id:
-            payload["instance_id"] = instance_id
-
-        if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
-
-        payload.update(
-            {
-                key: value
-                for key, value in record.__dict__.items()
-                if key not in RESERVED
-            }
-        )
-        return json.dumps(payload, ensure_ascii=False, default=str)
+        super().__init__(service, context=_context)
 
 
 def configure_logging(service: str, as_json: bool) -> None:
-    """Structured or readable, one handler either way.
-
-    JSON is for a log collector; a person reading `docker compose logs` wants
-    the plain line, so the choice stays configuration.
-    """
-    root = logging.getLogger()
-    if root.handlers:
-        return
-    handler = logging.StreamHandler()
-    if as_json:
-        handler.setFormatter(JsonFormatter(service))
-    else:
-        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    observability.configure_logging(service, as_json, context=_context)
 
 
-def configure_tracing(service: str, app: Any = None) -> bool:
-    """Traces that survive the jump between services, when a collector is there.
-
-    Instrumenting httpx is what makes the trace travel: the A2A client and the
-    memory client both go through it, so the subagent and the memory service
-    continue the trace that started with the request instead of opening two of
-    their own.
-    """
-    endpoint = os.getenv(ENDPOINT_VARIABLE, "").strip()
-    if not endpoint:
-        logger.info("Tracing off: no %s configured.", ENDPOINT_VARIABLE)
-        return False
-
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-    provider = TracerProvider(resource=Resource.create({"service.name": service}))
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-    trace.set_tracer_provider(provider)
-
-    HTTPXClientInstrumentor().instrument()
-    if app is not None:
-        FastAPIInstrumentor.instrument_app(app)
-    logger.info("Tracing on, exporting to %s.", endpoint)
-    return True
+def configure_telemetry(service: str, app: Any = None) -> bool:
+    # The open goals run Agent Framework's orchestration: its GenAI spans and
+    # token metrics come with the rest.
+    return observability.configure_telemetry(service, app, agent_framework=True)

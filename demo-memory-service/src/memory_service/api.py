@@ -3,6 +3,7 @@
 Deploy on a private network with service authentication; never expose it
 directly to browsers or accept an end-user scope.
 """
+
 from __future__ import annotations
 
 import logging
@@ -10,6 +11,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
+from platform_core.http import BodySizeLimit
+from platform_core.observability import configure_logging, configure_telemetry
 
 from .config import Settings, get_settings
 from .curation import ContextPolicy
@@ -24,7 +27,6 @@ from .models import (
     StoredMessage,
     Transcript,
 )
-from .observability import configure_logging, configure_tracing
 from .service import ThreadMemory
 from .stores.locks import PostgresLock
 from .stores.postgres import PostgresTranscripts, build_pool
@@ -73,7 +75,10 @@ def create_app(
         summarizer = None
         if config.summary_model:
             summarizer = OpenAICompatibleSummarizer(
-                config.summary_base_url, config.summary_api_key, config.summary_model
+                config.summary_base_url,
+                config.summary_api_key,
+                config.summary_model,
+                language=config.summary_language,
             )
             logger.info(
                 "Compaction and durable facts active with model %s.",
@@ -104,8 +109,9 @@ def create_app(
         finally:
             await pool.close()
 
-    app = FastAPI(title="Memoria conversazionale", lifespan=lifespan)
-    configure_tracing(SERVICE_NAME, app)
+    app = FastAPI(title="Conversation memory", lifespan=lifespan)
+    configure_telemetry(SERVICE_NAME, app)
+    app.add_middleware(BodySizeLimit, default=config.max_request_bytes)
 
     def current_memory() -> ThreadMemory:
         instance = state.get("memory")
@@ -227,6 +233,43 @@ def create_app(
                 for memory in found
             ]
         }
+
+    @app.get("/facts")
+    async def list_facts(
+        scope: str = Depends(current_scope),
+        memory_instance: ThreadMemory = Depends(current_memory),
+    ) -> dict[str, list[dict[str, object]]]:
+        """Everything remembered about a scope, and the conversation it came from.
+
+        What an automated memory holds about a person is theirs to see: this is
+        the read side of that right, `DELETE /facts/{key}` the erasure side.
+        """
+        facts = await memory_instance.facts(scope)
+        return {
+            "facts": [
+                {
+                    "key": fact["key"],
+                    "value": fact["value"],
+                    "thread_id": fact["thread_id"],
+                    "updated_at": fact["updated_at"].isoformat()
+                    if fact["updated_at"]
+                    else None,
+                }
+                for fact in facts
+            ]
+        }
+
+    @app.delete("/facts/{key}")
+    async def forget_fact(
+        key: str,
+        scope: str = Depends(current_scope),
+        memory_instance: ThreadMemory = Depends(current_memory),
+    ) -> dict[str, bool]:
+        """Forget one fact, without touching the conversations."""
+        removed = await memory_instance.forget_fact(scope, key)
+        if not removed:
+            raise HTTPException(status_code=404, detail="unknown fact")
+        return {"removed": True}
 
     @app.post("/admin/retention")
     async def apply_retention(

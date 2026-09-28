@@ -1,5 +1,4 @@
-"""Live end-to-end test for Tappa 3 Step 4 of the plan
-(`piani/2026-09-10-audio-video.md`): a real video with a spoken phrase and a
+"""Live end-to-end test of video analysis: a real video with a spoken phrase and a
 single-frame visual detail, analyzed by the real `analyze_video` tool
 (`tools/video_tools.py`) against two real dependencies -- not the fakes
 `tests/test_video_tools.py` uses for its own (fast, free, deterministic)
@@ -14,7 +13,7 @@ coverage of the tool's plumbing:
 
 Skips the whole module (rather than failing) when `OPENAI_API_KEY` is empty,
 the same "skip on missing infrastructure, don't fail" idiom
-`tests/test_log_stream.py` already uses for `DEMO_POSTGRES_DSN` -- this test
+`tests/test_log_stream.py` already uses for `MASTER_POSTGRES_DSN` -- this test
 makes one real, billed call to a vision model, so absent credentials must be
 a skip. It also skips on anything but Windows, since the audio fixture below
 depends on Windows SAPI.
@@ -41,6 +40,7 @@ import asyncio
 import io
 import json
 import math
+import os
 import socket
 import subprocess
 import sys
@@ -55,10 +55,10 @@ import httpx
 import pytest
 from PIL import Image
 
-from demo.config import get_settings
-from demo.tools.ui_tools import DISPLAY_KEY
-from demo.tools.video_tools import build_video_tools
-from demo.vision import HttpVisionClient
+from master_agent.config import get_settings
+from master_agent.tools.ui_tools import DISPLAY_KEY
+from master_agent.tools.video_tools import build_video_tools
+from master_agent.vision import HttpVisionClient
 
 needs_windows = pytest.mark.skipif(
     sys.platform != "win32",
@@ -67,10 +67,10 @@ needs_windows = pytest.mark.skipif(
     ),
 )
 needs_real_model = pytest.mark.skipif(
-    not get_settings().api_key,
+    not get_settings().api_key or os.getenv("MASTER_LIVE_TESTS") != "1",
     reason=(
-        "OPENAI_API_KEY is empty: this test makes one real, "
-        "billed call to a vision model"
+        "this test makes one real, billed call to a vision model: it runs only "
+        "with MASTER_LIVE_TESTS=1 and OPENAI_API_KEY set, never by accident"
     ),
 )
 pytestmark = [needs_windows, needs_real_model, pytest.mark.asyncio]
@@ -151,8 +151,6 @@ async def voice_service_url():
 
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
-
-    import os
 
     env = dict(os.environ)
     env["VOICE_PORT"] = str(port)

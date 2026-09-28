@@ -19,8 +19,8 @@ The two stages:
   the buffer resets for the next turn. This is a batch VAD call (Silero's
   `get_speech_timestamps`) run repeatedly on small windows, not Pipecat's own
   streaming `VADAnalyzer` interface -- reusing the already-built,
-  already-tested `voice_service.vad` module (per contract) takes priority
-  over Pipecat's native per-chunk VAD hook.
+  already-tested `voice_service.vad` module takes priority over Pipecat's
+  native per-chunk VAD hook.
 - `TranscriptionProcessor`: on `EndOfTurnAudioFrame`, writes the turn's audio
   to a temporary wav file and calls `voice_service.stt.transcribe` on it --
   the same faster-whisper engine already built and tested, no other
@@ -29,6 +29,7 @@ The two stages:
 Nothing here talks to a WebSocket; `voice_service.api` wires this pipeline's
 input/output to `/ws/voice`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -63,14 +64,11 @@ SAMPLE_RATE = 16_000
 # and how much trailing silence after speech ends a turn. 320ms keeps each
 # analysis window comfortably above Silero's own 250ms minimum speech
 # duration (shorter windows risk a real word being discarded as too short to
-# count). 600ms of trailing silence is a common quick-endpointing default
-# (see the plan's Tappa 2 note that pure-silence endpointing is a known-rough
-# first cut, refined later with measured conversations); it is exposed as a
-# constructor argument so a caller can tune it without editing this module.
-# These are also the values `voice_service.config.Settings` defaults its
-# `analysis_window_s`/`silence_threshold_s` fields to (Tappa 2 Step 3 of the
-# plan: configurable thresholds, same defaults) -- `build_voice_pipeline`
-# below is the seam `voice_service.api` uses to pass the configured values in.
+# count). 600ms of trailing silence is a common quick-endpointing default --
+# pure-silence endpointing is a rough first cut, and a known one. Both are
+# the defaults of `voice_service.config.Settings` (`VOICE_ANALYSIS_WINDOW_S`,
+# `VOICE_SILENCE_THRESHOLD_S`); `build_voice_pipeline` below is the seam
+# `voice_service.api` uses to pass the configured values in.
 ANALYSIS_WINDOW_S = 0.32
 SILENCE_THRESHOLD_S = 0.6
 
@@ -230,9 +228,8 @@ def build_voice_pipeline(
     `analysis_window_s`/`silence_threshold_s` are forwarded to
     `TurnEndpointingProcessor` (see its docstring, and the module-level
     constants above); defaulting to those same constants keeps every
-    existing caller -- including every test that calls this function with no
-    arguments -- on the exact same behaviour as before Tappa 2 Step 3 made
-    them configurable. `voice_service.api` passes in
+    caller that passes nothing -- tests included -- on the documented
+    defaults. `voice_service.api` passes in
     `voice_service.config.Settings.analysis_window_s`/`silence_threshold_s`
     (environment-configurable, same defaults).
     """

@@ -6,7 +6,7 @@ import json
 import httpx
 import pytest
 
-from demo.tools.process_tools import build_process_tools
+from master_agent.tools.process_tools import build_process_tools
 
 SCOPE = "test-scope"
 

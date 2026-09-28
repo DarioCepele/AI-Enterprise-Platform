@@ -1,5 +1,5 @@
-"""Step 7 of the plan's Tappa 1: measure this process's *real* RAM once VAD,
-STT and TTS are all loaded together.
+"""Measures this process's *real* RAM once VAD, STT and TTS are all loaded
+together: the number behind the service's memory limits.
 
 Run it with:
 

@@ -1,6 +1,6 @@
 import json
 
-from demo.tools.ui_tools import DISPLAY_KEY, STATE_KEY, get_tools, ui_table
+from master_agent.tools.ui_tools import DISPLAY_KEY, STATE_KEY, get_tools, ui_table
 
 
 def test_get_tools_exposes_ui_table():

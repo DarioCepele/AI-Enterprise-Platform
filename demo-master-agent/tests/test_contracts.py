@@ -8,14 +8,14 @@ import pytest
 from a2a.types import AgentCapabilities, AgentCard
 from contracts import assert_shape, load, sample
 
-from demo.a2a.client import Artifact, Progress
-from demo.config import SubagentConfig
-from demo.logging_bridge import LogCollector, SharedLogStream
-from demo.memory.remote_store import MemoryServiceSnapshotStore
-from demo.plan import PlanStore
-from demo.tools.memory_tools import build_memory_tools
-from demo.tools.subagent_tools import build_subagent_tools
-from demo.tools.ui_tools import DISPLAY_KEY, STATE_KEY, ui_table
+from master_agent.a2a.client import Artifact, Progress
+from master_agent.config import SubagentConfig
+from master_agent.logging_bridge import LogCollector, SharedLogStream
+from master_agent.memory.remote_store import MemoryServiceSnapshotStore
+from master_agent.plan import PlanStore
+from master_agent.tools.memory_tools import build_memory_tools
+from master_agent.tools.subagent_tools import build_subagent_tools
+from master_agent.tools.ui_tools import DISPLAY_KEY, STATE_KEY, ui_table
 
 STEPS = [
     {
@@ -156,7 +156,7 @@ async def test_the_pruning_report_of_the_memory_is_read_as_the_contract_declares
         "http://memory", client=memory_talking_with(payload)
     )
 
-    with caplog.at_level(logging.INFO, logger="demo.memory.remote_store"):
+    with caplog.at_level(logging.INFO, logger="master_agent.memory.remote_store"):
         await store.get(scope="tenant-a", thread_id="t1")
 
     curation = payload["curation"]
@@ -184,7 +184,7 @@ async def test_the_write_counters_of_the_memory_are_read_as_the_contract_declare
     saving = MemoryServiceSnapshotStore(
         "http://memory", client=memory_talking_with(counters["save_snapshot"])
     )
-    with caplog.at_level(logging.INFO, logger="demo.memory.remote_store"):
+    with caplog.at_level(logging.INFO, logger="master_agent.memory.remote_store"):
         await saving.save(
             scope="tenant-a",
             thread_id="t1",

@@ -1,7 +1,7 @@
 import pytest
 from agent_framework import ChatResponse
 
-from demo.chat_clients.fake import FakeStreamingChatClient
+from master_agent.chat_clients.fake import FakeStreamingChatClient
 
 
 @pytest.mark.asyncio

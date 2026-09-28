@@ -1,14 +1,14 @@
 import pytest
 from pydantic import ValidationError
 
-from demo.config import get_settings
+from master_agent.config import get_settings
 
 
 def test_settings_read_from_env(monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("OPENAI_CHAT_COMPLETION_MODEL", "m")
-    monkeypatch.setenv("DEMO_FAKE_CLIENT", "true")
+    monkeypatch.setenv("MASTER_FAKE_CLIENT", "true")
 
     s = get_settings()
 
@@ -19,7 +19,7 @@ def test_settings_read_from_env(monkeypatch):
 
 
 def test_fake_client_defaults_to_false(monkeypatch):
-    monkeypatch.delenv("DEMO_FAKE_CLIENT", raising=False)
+    monkeypatch.delenv("MASTER_FAKE_CLIENT", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "k")
 
     assert get_settings().use_fake_client is False
@@ -27,7 +27,7 @@ def test_fake_client_defaults_to_false(monkeypatch):
 
 def test_allowed_origins_default_covers_next_fallback_port(monkeypatch):
     """Next slides to 3001 when 3000 is taken: both must pass CORS."""
-    monkeypatch.delenv("DEMO_ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("MASTER_ALLOWED_ORIGINS", raising=False)
 
     origins = get_settings().allowed_origins
 
@@ -36,24 +36,27 @@ def test_allowed_origins_default_covers_next_fallback_port(monkeypatch):
 
 
 def test_allowed_origins_read_from_env(monkeypatch):
-    monkeypatch.setenv("DEMO_ALLOWED_ORIGINS", "http://a.test , http://b.test")
+    monkeypatch.setenv("MASTER_ALLOWED_ORIGINS", "http://a.test , http://b.test")
 
     assert get_settings().allowed_origins == ("http://a.test", "http://b.test")
 
 
-def test_the_product_has_a_name_and_a_language(monkeypatch):
-    monkeypatch.delenv("DEMO_PRODUCT_NAME", raising=False)
-    monkeypatch.delenv("DEMO_PRODUCT_LANGUAGE", raising=False)
+def test_the_product_has_a_name_and_follows_the_user_language(monkeypatch):
+    for name in ("PRODUCT_NAME", "PRODUCT_LANGUAGE"):
+        monkeypatch.delenv(f"MASTER_{name}", raising=False)
+        monkeypatch.delenv(f"DEMO_{name}", raising=False)
 
     settings = get_settings()
 
     assert settings.product_name
-    assert settings.product_language
+    # A template does not choose a language for everybody: unset, the agent
+    # answers in the language the user writes in.
+    assert settings.product_language == ""
 
 
 def test_the_name_and_the_language_come_from_the_environment(monkeypatch):
-    monkeypatch.setenv("DEMO_PRODUCT_NAME", "Acme Copilot")
-    monkeypatch.setenv("DEMO_PRODUCT_LANGUAGE", "English")
+    monkeypatch.setenv("MASTER_PRODUCT_NAME", "Acme Copilot")
+    monkeypatch.setenv("MASTER_PRODUCT_LANGUAGE", "English")
 
     settings = get_settings()
 
@@ -62,14 +65,14 @@ def test_the_name_and_the_language_come_from_the_environment(monkeypatch):
 
 
 def test_the_default_scope_is_configurable(monkeypatch):
-    monkeypatch.setenv("DEMO_DEFAULT_SCOPE", "acme-tenant")
+    monkeypatch.setenv("MASTER_DEFAULT_SCOPE", "acme-tenant")
 
     assert get_settings().default_scope == "acme-tenant"
 
 
 def test_a_missing_api_key_is_named_before_the_first_turn(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "")
-    monkeypatch.setenv("DEMO_FAKE_CLIENT", "false")
+    monkeypatch.setenv("MASTER_FAKE_CLIENT", "false")
 
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         get_settings().require_model_access()
@@ -77,16 +80,31 @@ def test_a_missing_api_key_is_named_before_the_first_turn(monkeypatch):
 
 def test_the_fake_client_needs_no_credentials(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "")
-    monkeypatch.setenv("DEMO_FAKE_CLIENT", "true")
+    monkeypatch.setenv("MASTER_FAKE_CLIENT", "true")
 
     get_settings().require_model_access()
 
 
 def test_a_number_that_is_not_a_number_is_refused_by_name(monkeypatch):
-    monkeypatch.setenv("DEMO_SUBAGENT_WAIT_SECONDS", "presto")
+    monkeypatch.setenv("MASTER_SUBAGENT_WAIT_SECONDS", "presto")
 
-    with pytest.raises(ValidationError, match="DEMO_SUBAGENT_WAIT_SECONDS"):
+    with pytest.raises(ValidationError, match="MASTER_SUBAGENT_WAIT_SECONDS"):
         get_settings()
+
+
+def test_the_new_name_wins_over_the_old_one(monkeypatch):
+    monkeypatch.setenv("DEMO_PRODUCT_NAME", "Old Name")
+    monkeypatch.setenv("MASTER_PRODUCT_NAME", "New Name")
+
+    assert get_settings().product_name == "New Name"
+
+
+def test_the_old_names_are_reported_for_renaming(monkeypatch):
+    from master_agent.config import legacy_variables
+
+    monkeypatch.setenv("DEMO_PRODUCT_NAME", "Old Name")
+
+    assert "DEMO_PRODUCT_NAME" in legacy_variables()
 
 
 def test_variables_that_are_not_ours_are_ignored(monkeypatch):
@@ -96,7 +114,7 @@ def test_variables_that_are_not_ours_are_ignored(monkeypatch):
 
 
 def test_the_instructions_carry_the_name_and_the_language():
-    from demo.agents.master import instructions_for
+    from master_agent.agents.master import instructions_for
 
     prompt = instructions_for("Acme Copilot", "English")
 

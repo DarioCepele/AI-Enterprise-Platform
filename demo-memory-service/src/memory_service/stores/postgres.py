@@ -10,6 +10,7 @@ What a turn contains stays JSON: roles, payloads and provider-specific fields
 vary, and that variety is real. What we query on -- scope, thread, position --
 is columns, because that is what an index is for.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,9 +46,10 @@ class PostgresTranscripts:
         bumped and the row written together, so two writers on the same thread
         cannot both take the same number, and a failure leaves neither.
         """
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 """
                 WITH position AS (
@@ -106,9 +108,10 @@ class PostgresTranscripts:
             )
 
     async def read_head(self, scope: str, thread_id: str) -> dict[str, Any] | None:
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT state, interrupt, session_state FROM threads "
                 "WHERE scope = %s AND thread_id = %s",
@@ -141,9 +144,10 @@ class PostgresTranscripts:
     async def _turns(
         self, query: str, parameters: tuple[Any, ...]
     ) -> list[StoredMessage]:
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(query, parameters)
             rows = await cursor.fetchall()
         return [
@@ -182,9 +186,10 @@ class PostgresTranscripts:
             )
 
     async def latest_summary(self, scope: str, thread_id: str) -> dict[str, Any] | None:
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT text, covers_to_seq FROM thread_summaries "
                 "WHERE scope = %s AND thread_id = %s "
@@ -221,9 +226,10 @@ class PostgresTranscripts:
 
     async def facts_of(self, scope: str, limit: int) -> list[dict[str, Any]]:
         """The most recent facts, bounded: a context that grows forever is a bill."""
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT key, value FROM scope_facts WHERE scope = %s "
                 "ORDER BY updated_at DESC LIMIT %s",
@@ -238,11 +244,45 @@ class PostgresTranscripts:
             )
             return deleted.rowcount or 0
 
+    async def forget_facts_of_thread(self, scope: str, thread_id: str) -> int:
+        """The facts a conversation taught, removed with the conversation.
+
+        Keeping them would make deleting a conversation a promise the service
+        does not keep: what it said would go on being injected elsewhere.
+        """
+        async with self._pool.connection() as connection:
+            deleted = await connection.execute(
+                "DELETE FROM scope_facts WHERE scope = %s AND thread_id = %s",
+                (scope, thread_id),
+            )
+            return deleted.rowcount or 0
+
+    async def facts_with_origin(self, scope: str) -> list[dict[str, Any]]:
+        """Every fact of a scope, with the thread it came from and when."""
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
+            await cursor.execute(
+                "SELECT key, value, thread_id, updated_at FROM scope_facts "
+                "WHERE scope = %s ORDER BY updated_at DESC",
+                (scope,),
+            )
+            return list(await cursor.fetchall())
+
+    async def forget_fact(self, scope: str, key: str) -> bool:
+        async with self._pool.connection() as connection:
+            deleted = await connection.execute(
+                "DELETE FROM scope_facts WHERE scope = %s AND key = %s", (scope, key)
+            )
+            return bool(deleted.rowcount)
+
     async def indexed_upto(self, scope: str, thread_id: str) -> int:
         """How far the semantic index has got. The index can disappear; this cannot."""
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT indexed_upto FROM threads WHERE scope = %s AND thread_id = %s",
                 (scope, thread_id),
@@ -260,9 +300,10 @@ class PostgresTranscripts:
 
     async def seqs_of(self, scope: str, thread_id: str) -> list[int]:
         """The positions of a thread, to take it out of the index."""
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT seq FROM thread_turns "
                 "WHERE scope = %s AND thread_id = %s ORDER BY seq",
@@ -280,16 +321,18 @@ class PostgresTranscripts:
             query += " AND scope = %s"
             parameters.append(scope)
         query += " ORDER BY updated_at"
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(query, parameters)
             return [(row["scope"], row["thread_id"]) for row in await cursor.fetchall()]
 
     async def threads_of(self, scope: str) -> list[str]:
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT thread_id FROM threads WHERE scope = %s", (scope,)
             )
@@ -301,9 +344,10 @@ class PostgresTranscripts:
         The turns and the summaries go with the thread: the foreign key says so
         once, instead of three deletes that have to be kept in step by hand.
         """
-        async with self._pool.connection() as connection, connection.cursor(
-            row_factory=dict_row
-        ) as cursor:
+        async with (
+            self._pool.connection() as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 "SELECT count(*) AS turns FROM thread_turns "
                 "WHERE scope = %s AND thread_id = %s",

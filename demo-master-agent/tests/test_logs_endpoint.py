@@ -3,10 +3,10 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from demo.agents.master import build_master_agent
-from demo.chat_clients.fake import FakeStreamingChatClient
-from demo.logging_bridge import LogCollector
-from demo.server.app import create_app
+from master_agent.agents.master import build_master_agent
+from master_agent.chat_clients.fake import FakeStreamingChatClient
+from master_agent.logging_bridge import LogCollector
+from master_agent.server.app import create_app
 
 
 @pytest.fixture
@@ -14,7 +14,7 @@ def make_app(monkeypatch):
     """Builds the app with an explicit agent on a fake client.
 
     Without an explicit `agent`, `create_app()` resolves the default
-    `build_master_agent()`, which without `DEMO_FAKE_CLIENT=true` tries a real
+    `build_master_agent()`, which without `MASTER_FAKE_CLIENT=true` tries a real
     `OpenAIChatCompletionClient` and fails on a clean clone with no
     credentials. The right pattern is already in conftest.py's fixtures:
     always pass a fake `chat_client`.
@@ -22,7 +22,7 @@ def make_app(monkeypatch):
 
     # This endpoint has two sources -- the local buffer and the shared stream --
     # and these tests are about the first. The shared one has its own tests.
-    monkeypatch.setenv("DEMO_POSTGRES_DSN", "")
+    monkeypatch.setenv("MASTER_POSTGRES_DSN", "")
 
     def _make(collector: LogCollector | None = None):
         agent = build_master_agent(chat_client=FakeStreamingChatClient())
@@ -34,7 +34,7 @@ def test_logs_endpoint_returns_collected_lines(make_app):
     app = make_app()
 
     with TestClient(app) as client:
-        logging.getLogger("demo.tools").info("plan written")
+        logging.getLogger("master_agent.tools").info("plan written")
         body = client.get("/logs").json()
 
     assert [e["message"] for e in body["entries"] if e["source"] == "tools"] == [
@@ -47,9 +47,9 @@ def test_logs_endpoint_honours_the_cursor(make_app):
     app = make_app()
 
     with TestClient(app) as client:
-        logging.getLogger("demo.tools").info("one")
+        logging.getLogger("master_agent.tools").info("one")
         first = client.get("/logs").json()
-        logging.getLogger("demo.tools").info("two")
+        logging.getLogger("master_agent.tools").info("two")
         second = client.get("/logs", params={"cursor": first["cursor"]}).json()
 
     assert [e["message"] for e in second["entries"]] == ["two"]
@@ -80,14 +80,14 @@ def test_cors_allows_the_browser_to_read_logs(make_app):
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
 
 def test_default_state_carries_an_empty_plan():
-    from demo.server.app import DEFAULT_STATE
+    from master_agent.server.app import DEFAULT_STATE
 
     assert DEFAULT_STATE["plan"] == {"status": "idle", "steps": []}
     assert DEFAULT_STATE["artifacts"] == []
 
 def test_shutdown_detaches_the_log_handler(make_app):
 
-    logger = logging.getLogger("demo")
+    logger = logging.getLogger("master_agent")
     baseline = len(logger.handlers)
     app = make_app()
 
@@ -106,8 +106,8 @@ def test_liveness_answers_without_touching_anything(make_app):
 
 
 def test_readiness_is_green_without_configured_dependencies(make_app, monkeypatch):
-    monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "")
-    monkeypatch.setenv("DEMO_POSTGRES_DSN", "")
+    monkeypatch.setenv("MASTER_MEMORY_SERVICE_URL", "")
+    monkeypatch.setenv("MASTER_POSTGRES_DSN", "")
 
     with TestClient(make_app()) as client:
         ready = client.get("/health/ready")
@@ -119,8 +119,8 @@ def test_readiness_is_green_without_configured_dependencies(make_app, monkeypatc
 
 
 def test_readiness_fails_when_the_memory_service_is_unreachable(make_app, monkeypatch):
-    monkeypatch.setenv("DEMO_MEMORY_SERVICE_URL", "http://memory.invalid")
-    monkeypatch.setenv("DEMO_POSTGRES_DSN", "")
+    monkeypatch.setenv("MASTER_MEMORY_SERVICE_URL", "http://memory.invalid")
+    monkeypatch.setenv("MASTER_POSTGRES_DSN", "")
 
     with TestClient(make_app()) as client:
         ready = client.get("/health/ready")

@@ -1,4 +1,4 @@
-"""Step 1/2 of the plan's Tappa 2: barge-in over `/ws/voice`.
+"""Barge-in over `/ws/voice`: talking over the assistant stops its reply.
 
 The scenario: the user starts a second turn (talks over the assistant)
 before the first turn's reply has finished being sent -- text and audio
@@ -10,7 +10,7 @@ anything further for that turn and emits `{"type":
 "assistant_turn_cancelled"}` once.
 
 Why the race needs a helping hand: `demo-master-agent`'s `FakeStreamingChatClient`
-(the offline client `DEMO_FAKE_CLIENT=true` selects -- see
+(the offline client `MASTER_FAKE_CLIENT=true` selects -- see
 `test_agui_bridge.py`'s docstring) defaults to `delay=0.0` between chunks,
 and its default chunks ("I am ", "working ", "on the ", "answer.") only
 contain one sentence-ending period, at the very end -- so
@@ -20,7 +20,7 @@ for a second turn's genuine VAD+STT to land inside. Rather than lean on
 uncontrolled timing (flaky depending on how fast a CPU happens to run
 Whisper), `delayed_stream_turn` below wraps `AGUIBridgeClient.stream_turn`
 with a deliberate `asyncio.sleep` before it yields its sentence -- a
-generous, reproducible stand-in for the same decoupling the plan describes
+generous, reproducible stand-in for the decoupling the service relies on
 (TTS/AG-UI I/O happen off the event loop, per `voice_service.api`'s own
 docstring, which is what lets a second turn's audio keep being processed
 while a first turn's reply is still being generated). This does not touch

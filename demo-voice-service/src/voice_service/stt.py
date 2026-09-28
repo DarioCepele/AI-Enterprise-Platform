@@ -6,10 +6,11 @@ required, matching the scaffold's no-GPU-by-default posture (see
 first use and cached under the user's home directory (faster-whisper's
 default `download_root`); after that first run it loads from local disk.
 
-This module only answers "what did this audio file say?". It is deliberately
-not wired to a WebSocket, Pipecat, or the master-agent yet -- that is the
-next contract's job.
+This module only answers "what did this audio file say?": the WebSocket
+pipeline and `/transcribe` both call it. The model size comes from
+`VOICE_STT_MODEL`; each size is loaded once and reused.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -21,15 +22,17 @@ COMPUTE_TYPE = "int8"
 DEVICE = "cpu"
 
 
-@lru_cache(maxsize=1)
-def _model() -> Any:
-    """Loads the faster-whisper model once and reuses it for the process lifetime."""
+@lru_cache(maxsize=2)
+def _model(size: str = MODEL_SIZE) -> Any:
+    """Loads a faster-whisper model once and reuses it for the process lifetime."""
     from faster_whisper import WhisperModel
 
-    return WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
+    return WhisperModel(size, device=DEVICE, compute_type=COMPUTE_TYPE)
 
 
-def transcribe(audio_path: str | Path, language: str | None = None) -> str:
+def transcribe(
+    audio_path: str | Path, language: str | None = None, model_size: str | None = None
+) -> str:
     """Transcribes an audio file to text.
 
     `audio_path` can be any format faster-whisper's bundled decoder (PyAV)
@@ -49,9 +52,12 @@ def transcribe(audio_path: str | Path, language: str | None = None) -> str:
     fixed to 8kHz/16kHz, while a video's audio track can be extracted at any
     original sample rate -- see `demo-master-agent/tools/video_tools.py`.)
     """
-    segments, _info = _model().transcribe(
+    from .config import get_settings
+
+    settings = get_settings()
+    segments, _info = _model(model_size or settings.stt_model).transcribe(
         str(audio_path),
-        language=language,
+        language=language or settings.stt_language or None,
         vad_filter=True,
         condition_on_previous_text=False,
     )

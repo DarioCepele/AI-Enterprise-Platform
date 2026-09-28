@@ -15,6 +15,7 @@ downloads, it extracts, it calls out, it reports both halves), not about
 whether faster-whisper transcribes correctly (that is `demo-voice-service`'s
 own test suite's job).
 """
+
 from __future__ import annotations
 
 import io
@@ -26,9 +27,9 @@ import pytest
 from contracts import assert_shape
 from PIL import Image
 
-from demo.tools.ui_tools import DISPLAY_KEY
-from demo.tools.video_tools import build_video_tools
-from demo.vision import FakeVisionClient
+from master_agent.tools.ui_tools import DISPLAY_KEY
+from master_agent.tools.video_tools import build_video_tools
+from master_agent.vision import FakeVisionClient
 
 KNOWN_PHRASE = "the quick brown fox"
 KNOWN_DESCRIPTION = "a solid red background"
@@ -134,6 +135,9 @@ def voice_service(monkeypatch):
 
     transport = httpx.MockTransport(handler)
     original = httpx.AsyncClient
+    # The fake video host is a host the operator declared: the SSRF guard lets
+    # it through without resolving it. Every other host must be public.
+    monkeypatch.setenv("MASTER_MEDIA_HOSTS", "files.test")
 
     class Patched(original):  # type: ignore[misc]
         def __init__(self, *args, **kwargs):
@@ -169,7 +173,7 @@ async def test_the_default_vision_client_uses_the_dedicated_vision_model(
     # No `vision_client` passed: `build_video_tools` must build its own
     # `HttpVisionClient`, pointed at `Settings.vision_model` -- not
     # `Settings.model`, which is the conversation's own model.
-    monkeypatch.setenv("DEMO_VISION_MODEL", "some/dedicated-vision-model")
+    monkeypatch.setenv("MASTER_VISION_MODEL", "some/dedicated-vision-model")
     monkeypatch.setenv("OPENAI_CHAT_COMPLETION_MODEL", "some/conversation-model")
 
     built = {t.name: t for t in build_video_tools("http://voice.test")}
@@ -338,9 +342,11 @@ async def test_an_unreachable_transcription_service_still_reports_what_was_seen(
 async def test_a_video_that_cannot_be_downloaded_does_not_break_the_turn(voice_service):
     built, vision = tools()
 
-    answer = await built["analyze_video"].func(video_url="http://files.test/missing.mp4")
+    answer = await built["analyze_video"].func(
+        video_url="http://files.test/missing.mp4"
+    )
 
-    assert "could not download" in answer.text
+    assert "could not get the video" in answer.text
     assert vision.calls == []
     assert vision.video_calls == []
 
@@ -357,3 +363,62 @@ async def test_nothing_is_left_on_disk_after_the_call(
     await built["analyze_video"].func(video_url="http://files.test/video.mp4")
 
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "http://memory-service:8100/threads/t1/snapshot",
+        "http://127.0.0.1:8000/logs",
+        "file:///etc/passwd",
+    ],
+)
+async def test_a_url_into_the_network_is_never_fetched(voice_service, url):
+    # The URL is chosen by a model reading untrusted text: it must not be able
+    # to point the agent at its own network.
+    built, vision = tools()
+
+    answer = await built["analyze_video"].func(video_url=url)
+
+    assert "could not get the video" in answer.text
+    assert not [r for r in voice_service["seen"] if r.method == "GET"]
+    assert vision.video_calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_uploaded_file_is_read_from_the_store_not_downloaded(
+    voice_service, tmp_path
+):
+    from master_agent.server.uploads import DiskUploadStore
+
+    store = DiskUploadStore(directory=tmp_path)
+
+    async def one_chunk():
+        yield VIDEO_BYTES
+
+    upload_id = await store.save(one_chunk(), "video/mp4")
+    built, vision = tools(uploads=store)
+
+    # Any host: what identifies an upload is its id, and any replica finds it.
+    answer = await built["analyze_video"].func(
+        video_url=f"http://replica-a.internal:8000/uploads/{upload_id}"
+    )
+
+    assert _payload(answer)["description"] == KNOWN_DESCRIPTION
+    assert not [r for r in voice_service["seen"] if r.method == "GET"]
+    assert vision.video_calls, "the stored video never reached the vision client"
+
+
+@pytest.mark.asyncio
+async def test_a_video_over_the_native_ceiling_is_described_by_frames(voice_service):
+    # Sent whole, a large video is held in memory a third bigger as base64:
+    # above the ceiling, sampled frames are described instead.
+    built, vision = tools(max_native_bytes=10)
+
+    answer = await built["analyze_video"].func(video_url="http://files.test/video.mp4")
+
+    assert _payload(answer)["description"] == KNOWN_DESCRIPTION
+    assert vision.video_calls == []
+    assert vision.calls, "the frames never reached the vision client"

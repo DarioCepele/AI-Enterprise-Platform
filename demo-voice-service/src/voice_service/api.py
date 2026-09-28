@@ -1,28 +1,24 @@
 """The HTTP surface of the voice service: health probes, and the pipeline.
 
-This service is a Pipecat pipeline (WebSocket audio in, VAD, STT, a turn
-handed to `demo-master-agent`'s AG-UI endpoint, TTS, audio out) built up in
-stages. The turn now reaches `demo-master-agent`: once a
-`TranscriptionFrame` closes a turn, its text goes to that agent's AG-UI
-endpoint as a normal user message, and the assistant's reply streams back
-over this same WebSocket -- as text captions and as synthesized speech,
-chunk by chunk, per Step 4/5 of the plan
-(`piani/2026-09-10-audio-video.md`, Tappa 1): each sentence
-`voice_service.agui_client.AGUIBridgeClient.stream_turn` yields is handed to
-`voice_service.tts.synthesize` and sent on as soon as it is ready, not
-buffered until the whole reply is in. Once a real dependency (a session
-store) lands, `/health/ready` should start checking it -- the way
-`process-service` and `memory-service` check Postgres before answering ok.
+A Pipecat pipeline -- WebSocket audio in, VAD, speech-to-text, a turn handed to
+the master agent's AG-UI endpoint, text-to-speech, audio out. Once a
+`TranscriptionFrame` closes a turn, its text goes to the agent as a normal user
+message, and the reply streams back over the same WebSocket, as captions and
+as speech, sentence by sentence rather than buffered until the end.
 
-`POST /transcribe` is a separate, independent surface: a batch "one audio
-file in, one transcript out" endpoint for tools (e.g. a future video-analysis
-tool in `demo-master-agent`) that already have a whole file and just want it
-transcribed, reusing `voice_service.stt.transcribe` directly -- no VAD, no
-streaming, no Pipecat pipeline involved.
+`POST /transcribe` is a separate surface: one audio file in, one transcript
+out, for tools that already hold a whole file (the master agent's video
+analysis) -- no VAD, no streaming, the same speech-to-text engine.
+
+Browsers do not apply CORS to WebSockets, so the `Origin` of every connection
+is checked against `VOICE_ALLOWED_ORIGINS`: without it, any page open in the
+same browser could talk to the agent through this endpoint.
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import tempfile
 import uuid
@@ -44,6 +40,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.workers.runner import WorkerRunner
+from platform_core.http import BodySizeLimit
+from platform_core.observability import configure_logging, configure_telemetry
 
 from .agui_client import AGUIBridgeClient
 from .config import Settings, get_settings
@@ -56,12 +54,25 @@ logger = logging.getLogger(__name__)
 
 SERVICE_NAME = "voice-service"
 
+# What a multipart envelope adds around the audio it carries.
+MULTIPART_SLACK = 64 * 1024
+
+CHUNK = 1024 * 1024
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Builds the app. `settings` is passed in tests."""
     config = settings or get_settings()
+    configure_logging(SERVICE_NAME, as_json=config.json_logs)
 
     app = FastAPI(title="Voice service")
+    configure_telemetry(SERVICE_NAME, app)
+    app.add_middleware(
+        BodySizeLimit,
+        default=MULTIPART_SLACK,
+        by_prefix={"/transcribe": config.transcribe_max_bytes + MULTIPART_SLACK},
+    )
+    allowed_origins = config.origins()
 
     @app.get("/health/live")
     async def live() -> dict[str, str]:
@@ -73,9 +84,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def ready() -> dict[str, str]:
         """Whether it can serve.
 
-        No backend to check yet -- this scaffold has none. This is the seam
-        a future dependency plugs into, not a promise that there is nothing
-        to check.
+        The models load on first use and nothing else is a dependency: ready
+        means the process answers. A dependency added later plugs in here.
         """
         return {"status": "ok"}
 
@@ -88,10 +98,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         Distinct from `/ws/voice`: this is a batch, "one file in, one
         transcript out" path -- no streaming, no turn-taking, no VAD, no
         Pipecat pipeline. It is meant for a tool that already has a whole
-        audio file (e.g. `demo-master-agent`'s future video-analysis tool,
-        handing it a video's extracted audio track) and just wants text back,
-        reusing this service's already-built STT engine instead of standing
-        up its own.
+        audio file (the master agent's video analysis, handing it a video's
+        audio track) and wants text back.
 
         Calls `voice_service.stt.transcribe` directly -- the same
         faster-whisper engine `/ws/voice` uses per turn via
@@ -107,15 +115,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         content-type, no file part) with a 422 before this body even runs,
         so there is no hand-rolled boundary/part parser to maintain here.
         """
-        audio_bytes = await file.read()
-        if not audio_bytes:
-            raise HTTPException(status_code=422, detail="Uploaded file is empty")
-
         suffix = Path(file.filename).suffix if file.filename else ".wav"
         tmp_name = f"voice-service-transcribe-{uuid.uuid4().hex}{suffix}"
         tmp_path = Path(tempfile.gettempdir()) / tmp_name
         try:
-            tmp_path.write_bytes(audio_bytes)
+            # Copied a chunk at a time and counted: the file never sits whole
+            # in memory, and one over the ceiling stops being read at once.
+            written = 0
+            with tmp_path.open("wb") as handle:
+                while chunk := await file.read(CHUNK):
+                    written += len(chunk)
+                    if written > config.transcribe_max_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"audio over {config.transcribe_max_bytes} bytes",
+                        )
+                    handle.write(chunk)
+            if written == 0:
+                raise HTTPException(status_code=422, detail="Uploaded file is empty")
             # faster-whisper inference is CPU-bound -- keep it off the event loop.
             text = await asyncio.to_thread(transcribe_speech, tmp_path)
         finally:
@@ -151,7 +168,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         waiting for the whole reply, the same way the caption text arrives
         sentence by sentence instead of all at once.
 
-        Barge-in (Tappa 2 Step 1 of the plan): each `TranscriptionFrame`
+        Barge-in: each `TranscriptionFrame`
         starts a new turn and bumps `current_turn`, a counter closed over by
         this handler. `on_frame_reached_downstream` runs each call as its
         own `asyncio.create_task` (see `pipecat.utils.base_object`'s
@@ -169,17 +186,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         `{"type": "assistant_turn_cancelled"}` once, so a real client knows
         to drop whatever of that reply it already queued for playback.
 
-        Known limit (verified against `demo-master-agent/src/demo/server/app.py`
-        and the `agent_framework_ag_ui` package it uses): `demo-master-agent`'s
-        AG-UI endpoint exposes exactly one route, `POST /agui` -- there is no
-        cancel/abort endpoint, and `AGUIRequest` carries no run-cancellation
-        field. So a superseded turn only stops *this* service from receiving,
-        relaying, and synthesizing further -- it does not stop
-        `demo-master-agent`'s own run, which was already started and may
-        keep computing (and consuming LLM tokens) until it finishes on its
-        own. Not a bug to fix here (`demo-master-agent` is out of scope for
-        this contract, read-only) -- a limit to know about.
+        Known limit: the master agent's AG-UI endpoint has no cancel route,
+        and the run input carries no cancellation field. A superseded turn
+        stops *this* service from relaying and synthesizing further, and the
+        stream is closed; the agent's run may still finish on its own.
         """
+        origin = (websocket.headers.get("origin") or "").rstrip("/")
+        if origin and origin not in allowed_origins:
+            logger.warning("Voice connection refused from origin %s.", origin[:80])
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
 
         pipeline = build_voice_pipeline(
@@ -189,7 +205,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         worker_params = PipelineParams(audio_in_sample_rate=SAMPLE_RATE)
         worker = PipelineWorker(pipeline, params=worker_params)
         worker.add_reached_downstream_filter((TranscriptionFrame,))
-        bridge = AGUIBridgeClient(config.master_agent_url)
+        bridge = AGUIBridgeClient(
+            config.master_agent_url, approval_notice=config.approval_notice
+        )
 
         # Barge-in bookkeeping: `current_turn` names the newest turn: each
         # TranscriptionFrame bumps it before doing anything else. `send_lock`
@@ -257,6 +275,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     config.master_agent_url,
                     exc_info=True,
                 )
+                # Said to the browser without the cause, which stays in the
+                # logs: silence would read as "still thinking".
+                with contextlib.suppress(Exception):
+                    async with send_lock:
+                        await websocket.send_json({"type": "assistant_turn_failed"})
                 return
             finally:
                 if superseded:

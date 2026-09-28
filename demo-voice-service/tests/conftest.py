@@ -61,13 +61,13 @@ async def master_agent_url():
     base_url = f"http://127.0.0.1:{port}"
 
     env = dict(os.environ)
-    env["DEMO_FAKE_CLIENT"] = "true"
+    env["MASTER_FAKE_CLIENT"] = "true"
     # Forced empty regardless of demo-master-agent/.env: see
     # test_agui_bridge.py's module docstring.
-    env["DEMO_POSTGRES_DSN"] = ""
-    env["DEMO_MEMORY_SERVICE_URL"] = ""
-    env["DEMO_KNOWLEDGE_AGENT_URL"] = ""
-    env["DEMO_SUBAGENTS"] = ""
+    env["MASTER_POSTGRES_DSN"] = ""
+    env["MASTER_MEMORY_SERVICE_URL"] = ""
+    env["MASTER_KNOWLEDGE_AGENT_URL"] = ""
+    env["MASTER_SUBAGENTS"] = ""
 
     # Safe: the interpreter path is derived from this file's own location and the
     # rest of the argv is hardcoded (the port is an int from _free_port()).
@@ -76,7 +76,7 @@ async def master_agent_url():
             str(python),
             "-m",
             "uvicorn",
-            "demo.server.app:create_app",
+            "master_agent.server.app:create_app",
             "--factory",
             "--host",
             "127.0.0.1",

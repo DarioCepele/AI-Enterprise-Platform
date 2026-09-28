@@ -1,71 +1,18 @@
 """The operational logs leave the process, so two replicas tell one story."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import sys
 import uuid
-from urllib.parse import urlsplit, urlunsplit
 
 import pytest
-from psycopg_pool import AsyncConnectionPool
+from conftest import needs_postgres
 
-from demo.logging_bridge import LogCollector, SharedLogStream
-from demo.migrations import run_migrations
-
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-
-def _test_database(dsn: str | None) -> str | None:
-    """Un database dei test accanto a quello vero, come negli altri servizi."""
-    if not dsn:
-        return None
-    parsed = urlsplit(dsn)
-    database = (parsed.path.lstrip("/") or "agente") + "_test"
-    return urlunsplit(parsed._replace(path=f"/{database}"))
-
-
-POSTGRES_DSN = _test_database(os.getenv("DEMO_POSTGRES_DSN"))
-
-needs_postgres = pytest.mark.skipif(
-    not POSTGRES_DSN,
-    reason="DEMO_POSTGRES_DSN is required: this test needs a real Postgres",
-)
+from master_agent.logging_bridge import LogCollector, SharedLogStream
+from master_agent.migrations import run_migrations
 
 pytestmark = [needs_postgres, pytest.mark.asyncio]
-
-
-def _create_database_if_missing(dsn: str) -> None:
-    import psycopg
-
-    parsed = urlsplit(dsn)
-    database = parsed.path.lstrip("/")
-    server = urlunsplit(parsed._replace(path="/postgres"))
-    with psycopg.connect(server, autocommit=True) as connection:
-        if not connection.execute(
-            "SELECT 1 FROM pg_database WHERE datname = %s", (database,)
-        ).fetchone():
-            connection.execute(f'CREATE DATABASE "{database}"')
-
-
-@pytest.fixture
-async def pool():
-    _create_database_if_missing(POSTGRES_DSN or "")
-    connection_pool = AsyncConnectionPool(
-        POSTGRES_DSN or "", min_size=1, max_size=4, open=False
-    )
-    await connection_pool.open(wait=True)
-    try:
-        async with connection_pool.connection() as connection:
-            await run_migrations(connection)
-            # Ogni test parte dalla propria finestra: i log sono condivisi per
-            # definizione, quindi non c'e' uno scope che li separi.
-            await connection.execute("TRUNCATE operational_logs")
-        yield connection_pool
-    finally:
-        await connection_pool.close()
 
 
 @pytest.fixture
@@ -200,10 +147,23 @@ async def test_an_unreachable_database_keeps_the_lines_in_the_process(caplog):
     stream.attach(collector)
 
     collector.append({"ts": "t", "level": "INFO", "source": "a", "message": "not lost"})
-    with caplog.at_level(logging.WARNING, logger="demo.logging_bridge"):
+    with caplog.at_level(logging.WARNING, logger="master_agent.logging_bridge"):
         await stream.flush()
 
     # The local buffer is the fallback, and the LOG tab of this replica still
     # shows its own lines: degraded, not blind.
     assert [e["message"] for e in collector.since("")["entries"]] == ["not lost"]
     assert "logs not published" in caplog.text
+
+
+async def test_seen_notifications_are_shared_through_postgres(pool):
+    """Two replicas share one memory of what already landed, through the table."""
+    from master_agent.a2a.push import SeenNotifications
+
+    async with pool.connection() as connection:
+        await run_migrations(connection)
+    replica_a, replica_b = SeenNotifications(pool), SeenNotifications(pool)
+    thread = uuid.uuid4().hex
+
+    assert await replica_a.first_time(thread, "task-1", "TASK_STATE_COMPLETED")
+    assert not await replica_b.first_time(thread, "task-1", "TASK_STATE_COMPLETED")

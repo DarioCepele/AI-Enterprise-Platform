@@ -1,23 +1,23 @@
 [project]
 name = "demo-knowledge-agent"
 version = "0.1.0"
+license = "Apache-2.0"
 description = "Sottoagente di knowledge base esposto via A2A"
 requires-python = ">=3.12"
 dependencies = [
     "agent-framework-core==1.17.0",
     "agent-framework-openai",
-    "a2a-sdk[http-server]",
+    # `postgresql` brings the durable task store: a task a process is waiting
+    # on has to survive a restart of the agent that is working on it.
+    "a2a-sdk[http-server,postgresql]",
     "fastapi>=0.120",
     # The version agent_framework_core's own "all" extra pins for
     # MCPStreamableHTTPTool -- added directly rather than pulling that
     # extra's few dozen unrelated provider packages in with it.
     "mcp>=1.24.0,<2",
+    "platform-core[a2a,maf,otel,runtime]",
+    "pydantic-settings>=2.10",
     "uvicorn[standard]>=0.40",
-    "python-dotenv>=1.1",
-    "opentelemetry-sdk>=1.44.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
-    "opentelemetry-instrumentation-fastapi>=0.65b0",
-    "opentelemetry-instrumentation-httpx>=0.65b0",
 ]
 
 [dependency-groups]
@@ -29,6 +29,9 @@ dev = [
     "mypy>=2.3.1",
     "types-protobuf>=7.35.1.20260906",
 ]
+
+[tool.uv.sources]
+platform-core = { path = "../packages/platform-core", editable = true }
 
 [build-system]
 requires = ["hatchling"]

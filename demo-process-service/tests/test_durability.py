@@ -1,4 +1,5 @@
 """What survives a crash, and what must not happen twice."""
+
 from __future__ import annotations
 
 import asyncio
@@ -310,3 +311,48 @@ async def test_an_instance_survives_the_death_of_the_process(
     # died is not. That difference is what recovery reads.
     assert quick_step.status == "completed"
     assert endless_step.status != "completed"
+
+
+async def test_two_instances_for_the_same_request_apply_the_effect_once(
+    engine, store, scope
+):
+    # The duplicate that matters is not a step replayed inside one run -- DBOS
+    # already prevents that -- but the same request arriving twice, as two
+    # instances: a client retrying, a model calling start_process again.
+    first = await store.create(
+        scope=scope, definition=WITH_EFFECT, payload={"request_id": "r-twice"}
+    )
+    second = await store.create(
+        scope=scope, definition=WITH_EFFECT, payload={"request_id": "r-twice"}
+    )
+
+    await advance_instance(str(first.id), scope)
+    await advance_instance(str(second.id), scope)
+
+    assert CALLS == ["one"]
+    effects = await store.effects_of(instance_id=first.id)
+    assert effects == [f"{scope}:with-effect:apply:r-twice"]
+    assert await store.effects_of(instance_id=second.id) == []
+
+
+async def test_the_same_request_in_another_scope_is_another_effect(
+    engine, store, scope
+):
+    for tenant in (scope, f"{scope}-other"):
+        instance = await store.create(
+            scope=tenant, definition=WITH_EFFECT, payload={"request_id": "r-shared"}
+        )
+        await advance_instance(str(instance.id), tenant)
+
+    assert CALLS == ["one", "one"]
+
+
+async def test_an_effect_without_its_key_is_refused_not_guessed(engine, store, scope):
+    instance = await store.create(scope=scope, definition=WITH_EFFECT, payload={})
+
+    assert await advance_instance(str(instance.id), scope) == "failed"
+
+    assert CALLS == []
+    read = await store.get(scope=scope, instance_id=instance.id)
+    apply = next(step for step in read.steps if step.step_id == "apply")
+    assert "idempotency_key 'request_id'" in (apply.note or "")

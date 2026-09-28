@@ -1,19 +1,17 @@
 [project]
 name = "demo-memory-service"
 version = "0.1.0"
-description = "Servizio di memoria conversazionale per il laboratorio AG-UI"
+license = "Apache-2.0"
+description = "Conversation memory: transcripts, summaries, durable facts, semantic search"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.120",
     "uvicorn[standard]>=0.40",
+    "platform-core[otel,postgres,runtime]",
     "pydantic>=2.12",
     "pydantic-settings>=2.12",
     "python-dotenv>=1.1",
     "httpx>=0.28",
-    "opentelemetry-sdk>=1.44.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
-    "opentelemetry-instrumentation-fastapi>=0.65b0",
-    "opentelemetry-instrumentation-httpx>=0.65b0",
     "psycopg[binary,pool]>=3.3.5",
 ]
 
@@ -24,6 +22,9 @@ dev = [
     "pytest-asyncio>=1.3",
     "ruff>=0.16.8",
 ]
+
+[tool.uv.sources]
+platform-core = { path = "../packages/platform-core", editable = true }
 
 [build-system]
 requires = ["hatchling"]

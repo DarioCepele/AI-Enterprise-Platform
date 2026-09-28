@@ -3,6 +3,7 @@
 An instance is a row that has to outlive the process that wrote it: a fake in
 memory would prove nothing about that.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,6 +25,7 @@ load_dotenv()
 # thing that fails, so the choice is made here instead of in a README.
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 
 def _test_database(dsn: str | None) -> str | None:
     """The tests get a database of their own, next to the real one.
@@ -79,7 +81,9 @@ def database() -> None:
 
 @pytest.fixture
 async def pool(database):
-    connection_pool = build_pool(POSTGRES_DSN or "postgresql://127.0.0.1:5432/processes")
+    connection_pool = build_pool(
+        POSTGRES_DSN or "postgresql://127.0.0.1:5432/processes"
+    )
     await connection_pool.open(wait=True)
     try:
         async with connection_pool.connection() as connection:
@@ -121,3 +125,20 @@ def dbos(database):
         for pending in DBOS.list_workflows(status=["PENDING", "ENQUEUED"]):
             DBOS.cancel_workflow(pending.workflow_id)
         DBOS.destroy()
+
+
+@pytest.fixture(autouse=True)
+def push_secret(monkeypatch):
+    """Every run signs its webhooks: a service without a key accepts none."""
+    monkeypatch.setenv("PROCESS_PUSH_SECRET", "a-test-push-secret-long-enough")
+
+
+@pytest.fixture(autouse=True)
+def trusted_scope_header(monkeypatch):
+    """These suites exercise the multi-tenant seam: a proxy is assumed in front.
+
+    Production code reads no header unless the operator declares one;
+    `test_instances.py::test_without_a_declared_header_the_scope_is_the_default`
+    covers the default.
+    """
+    monkeypatch.setenv("PROCESS_SCOPE_HEADER", "X-Process-Scope")

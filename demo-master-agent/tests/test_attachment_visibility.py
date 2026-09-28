@@ -17,10 +17,10 @@ import httpx
 import pytest
 from agent_framework import Message
 
-from demo.agents.master import build_master_agent
-from demo.chat_clients.fake import FakeStreamingChatClient
-from demo.server.app import create_app
-from demo.server.attachments import annotate_video_audio_attachments
+from master_agent.agents.master import build_master_agent
+from master_agent.chat_clients.fake import FakeStreamingChatClient
+from master_agent.server.app import create_app
+from master_agent.server.attachments import annotate_video_audio_attachments
 
 VIDEO_URL = "http://example.test/video.mp4"
 AUDIO_URL = "http://example.test/clip.mp3"

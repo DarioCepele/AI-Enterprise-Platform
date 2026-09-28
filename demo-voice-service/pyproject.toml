@@ -1,7 +1,8 @@
 [project]
 name = "demo-voice-service"
 version = "0.1.0"
-description = "Voice service scaffold: health probes and the uv-managed skeleton the future Pipecat pipeline builds on"
+license = "Apache-2.0"
+description = "Real-time voice for the agent: VAD, speech-to-text, text-to-speech, barge-in"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.120",
@@ -17,7 +18,29 @@ dependencies = [
     "misaki[en]>=0.9.4",
     "soundfile>=0.13",
     "python-multipart>=0.0.20",
+    "platform-core[otel,runtime]",
+    # Named directly only to choose where they come from (see [tool.uv.sources]):
+    # the voice models run on CPU, and PyPI's Linux wheels drag in several GB of
+    # CUDA libraries a CPU never uses.
+    "torch",
+    "torchaudio",
+    # misaki's English G2P needs this spaCy model and, without it, tries to
+    # pip-install it at run time -- into a read-only image with no pip. Pinned
+    # here instead: reproducible, and nothing is downloaded while serving.
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
 ]
+
+[tool.uv.sources]
+platform-core = { path = "../packages/platform-core", editable = true }
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchaudio = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+# PyTorch's own index of CPU-only builds, as uv documents for PyTorch. Explicit:
+# only the packages pointed at it above come from here.
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 dev = [
@@ -54,3 +77,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/voice_service"]
+
+[tool.hatch.metadata]
+# The spaCy model is published as a wheel on GitHub, not on PyPI.
+allow-direct-references = true

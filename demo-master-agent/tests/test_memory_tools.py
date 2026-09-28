@@ -7,7 +7,7 @@ import logging
 import httpx
 import pytest
 
-from demo.tools.memory_tools import build_memory_tools
+from master_agent.tools.memory_tools import build_memory_tools
 
 MEMORIES = {
     "memories": [
@@ -87,7 +87,7 @@ async def test_a_memory_service_down_does_not_kill_the_run(caplog):
 
     tool, _ = tool_talking_to(broken)
 
-    with caplog.at_level(logging.ERROR, logger="demo.tools.memory_tools"):
+    with caplog.at_level(logging.ERROR, logger="master_agent.tools.memory_tools"):
         text = await invoke(tool, "anything at all")
 
     assert "unreachable right now" in text

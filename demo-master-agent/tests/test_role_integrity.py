@@ -7,6 +7,7 @@ operational logs. These are regression tests for paths that already behave:
 each one fails the moment a `role` is dropped, renamed, or attached to the
 wrong author.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,13 +18,13 @@ import httpx
 import pytest
 from agent_framework.ag_ui import AGUIThreadSnapshot
 
-from demo.a2a.push import HEADER, token_for
-from demo.agents.master import build_master_agent
-from demo.chat_clients.fake import FakeStreamingChatClient
-from demo.logging_bridge import LogCollector
-from demo.memory.remote_store import MemoryServiceSnapshotStore
-from demo.server.app import create_app
-from demo.server.attachments import annotate_video_audio_attachments
+from master_agent.a2a.push import HEADER, token_for
+from master_agent.agents.master import build_master_agent
+from master_agent.chat_clients.fake import FakeStreamingChatClient
+from master_agent.logging_bridge import LogCollector
+from master_agent.memory.remote_store import MemoryServiceSnapshotStore
+from master_agent.server.app import create_app
+from master_agent.server.attachments import annotate_video_audio_attachments
 
 USER_TEXT = "the question typed by the person"
 ASSISTANT_TEXT = "the answer written by the agent."
@@ -135,9 +136,6 @@ async def test_a_subagent_outcome_is_noted_as_the_agent_speaking():
             kwargs["transport"] = httpx.MockTransport(transport)
         return monkey_target(*args, **kwargs)
 
-    app = create_app(
-        agent=build_master_agent(chat_client=FakeStreamingChatClient(chunks=["ok"]))
-    )
     notification = {
         "task": {
             "id": "task-77",
@@ -147,15 +145,20 @@ async def test_a_subagent_outcome_is_noted_as_the_agent_speaking():
     }
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("DEMO_MEMORY_SERVICE_URL", "http://memory")
-        patch.setattr("demo.server.app.httpx.AsyncClient", fake)
+        patch.setenv("MASTER_MEMORY_SERVICE_URL", "http://memory")
+        patch.setenv("MASTER_POSTGRES_DSN", "")
+        patch.setenv("MASTER_PUSH_SECRET", "a-test-push-secret-long-enough")
+        patch.setattr("master_agent.server.app.httpx.AsyncClient", fake)
+        app = create_app(
+            agent=build_master_agent(chat_client=FakeStreamingChatClient(chunks=["ok"]))
+        )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
             response = await client.post(
-                "/a2a/push/tenant-a/t-note",
+                "/a2a/push/tenant-a/t-note/knowledge",
                 json=notification,
-                headers={HEADER: token_for("t-note")},
+                headers={HEADER: token_for("tenant-a", "t-note", "knowledge")},
             )
         await asyncio.sleep(0)
 
@@ -184,7 +187,7 @@ async def test_the_operational_logs_do_not_carry_conversation_verbatim():
     )
 
     with LogCollector() as collector:
-        logging.getLogger("demo").setLevel(logging.INFO)
+        logging.getLogger("master_agent").setLevel(logging.INFO)
         await store.save(scope="tenant-a", thread_id="t1", snapshot=snapshot)
         await store.get(scope="tenant-a", thread_id="t1")
 

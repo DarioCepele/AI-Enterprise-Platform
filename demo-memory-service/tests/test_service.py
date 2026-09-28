@@ -1,4 +1,5 @@
 """Service integration tests covering cache hits, degradation, and HTTP APIs."""
+
 from __future__ import annotations
 
 import httpx
@@ -283,8 +284,7 @@ def summarizer() -> RecordingSummarizer:
 def compacting(transcripts, summarizer) -> ThreadMemory:
     from memory_service.curation import ContextPolicy
 
-    return ThreadMemory(
-        transcripts, ContextPolicy(max_messages=6), summarizer)
+    return ThreadMemory(transcripts, ContextPolicy(max_messages=6), summarizer)
 
 
 async def test_a_short_thread_is_not_summarized(compacting, summarizer, scope):
@@ -308,7 +308,8 @@ async def test_the_summary_arrives_at_the_head_of_the_context(compacting, scope)
 
     snapshot = await compacting.read_snapshot(scope, "t1")
 
-    assert snapshot.messages[0]["role"] == "system"
+    assert snapshot.messages[0]["id"].startswith("memory:summary")
+    assert snapshot.messages[0]["role"] == "user"
     assert "ORCHIDEA-77" in snapshot.messages[0]["content"]
     assert snapshot.curation["summarized"] == 1
     assert snapshot.curation["messages_dropped"] > 0
@@ -353,7 +354,8 @@ async def test_a_broken_summarizer_does_not_break_the_conversation(
     from memory_service.curation import ContextPolicy
 
     memory = ThreadMemory(
-        transcripts, ContextPolicy(max_messages=6), BrokenSummarizer())
+        transcripts, ContextPolicy(max_messages=6), BrokenSummarizer()
+    )
 
     with caplog.at_level(logging.ERROR):
         await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
@@ -367,8 +369,7 @@ async def test_a_broken_summarizer_does_not_break_the_conversation(
 async def test_without_a_summarizer_nothing_is_compacted(transcripts, scope):
     from memory_service.curation import ContextPolicy
 
-    memory = ThreadMemory(
-        transcripts, ContextPolicy(max_messages=6))
+    memory = ThreadMemory(transcripts, ContextPolicy(max_messages=6))
 
     await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await memory.compact_if_needed(scope, "t1")
@@ -410,8 +411,7 @@ async def test_saving_does_not_wait_for_the_summary(transcripts, scope):
     from memory_service.curation import ContextPolicy
 
     slow = SlowSummarizer()
-    memory = ThreadMemory(
-        transcripts, ContextPolicy(max_messages=6), slow)
+    memory = ThreadMemory(transcripts, ContextPolicy(max_messages=6), slow)
 
     async with asyncio.timeout(3):
         await memory.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
@@ -422,8 +422,7 @@ async def test_saving_does_not_wait_for_the_summary(transcripts, scope):
 async def test_the_api_compacts_after_answering(transcripts, summarizer, scope):
     from memory_service.curation import ContextPolicy
 
-    memory = ThreadMemory(
-        transcripts, ContextPolicy(max_messages=6), summarizer)
+    memory = ThreadMemory(transcripts, ContextPolicy(max_messages=6), summarizer)
 
     async with await client_for(memory) as client:
         headers = {"X-Memory-Scope": scope}
@@ -458,7 +457,8 @@ def learning(transcripts, summarizer, extractor) -> ThreadMemory:
     from memory_service.curation import ContextPolicy
 
     return ThreadMemory(
-        transcripts, ContextPolicy(max_messages=6), summarizer, extractor)
+        transcripts, ContextPolicy(max_messages=6), summarizer, extractor
+    )
 
 
 async def test_facts_are_learned_from_the_turns_that_leave(learning, extractor, scope):
@@ -479,7 +479,8 @@ async def test_a_fact_learned_in_one_thread_shows_up_in_another(learning, scope)
     )
     other = await learning.read_snapshot(scope, "t2")
 
-    assert other.messages[0]["role"] == "system"
+    assert other.messages[0]["id"] == "memory:facts"
+    assert other.messages[0]["role"] == "user"
     assert "contact: Marta" in other.messages[0]["content"]
 
 
@@ -492,7 +493,8 @@ async def test_facts_do_not_cross_scopes(
     await learning.compact_if_needed(scope, "t1")
 
     altrui = ThreadMemory(
-        transcripts, ContextPolicy(max_messages=6), summarizer, extractor)
+        transcripts, ContextPolicy(max_messages=6), summarizer, extractor
+    )
     await altrui.save_snapshot(
         f"{scope}-other",
         "t1",
@@ -517,13 +519,45 @@ async def test_the_same_fact_updated_does_not_become_two(
     assert facts == [{"key": "contact", "value": "Giulio"}]
 
 
-async def test_deleting_a_thread_keeps_the_facts(learning, transcripts, scope):
+async def test_deleting_a_thread_takes_the_facts_it_taught(
+    learning, extractor, transcripts, scope
+):
     await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
     await learning.compact_if_needed(scope, "t1")
+    extractor.raw = '[{"key": "city", "value": "Torino"}]'
+    await learning.save_snapshot(scope, "t2", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t2")
 
     await learning.forget(scope, "t1")
 
-    assert await transcripts.facts_of(scope, limit=10) != []
+    # What t1 taught goes with it; what t2 taught stays.
+    assert await transcripts.facts_of(scope, limit=10) == [
+        {"key": "city", "value": "Torino"}
+    ]
+
+
+async def test_the_facts_of_a_scope_can_be_read_and_forgotten_one_by_one(
+    learning, transcripts, scope
+):
+    from memory_service.api import create_app
+
+    await learning.save_snapshot(scope, "t1", Snapshot(messages=long_thread(6)))
+    await learning.compact_if_needed(scope, "t1")
+    app = create_app(memory=learning)
+    headers = {"X-Memory-Scope": scope}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        listed = await client.get("/facts", headers=headers)
+        removed = await client.delete("/facts/contact", headers=headers)
+        again = await client.delete("/facts/contact", headers=headers)
+
+    [fact] = listed.json()["facts"]
+    assert fact["key"] == "contact" and fact["thread_id"] == "t1"
+    assert removed.json() == {"removed": True}
+    assert again.status_code == 404
+    assert await transcripts.facts_of(scope, limit=10) == []
 
 
 async def test_deleting_the_scope_takes_the_facts_too(learning, transcripts, scope):
@@ -640,9 +674,7 @@ async def test_what_leaves_the_window_becomes_searchable(searchable, scope):
     await searchable.save_snapshot(
         scope,
         "t1",
-        Snapshot(
-            messages=thread_about("go", "python", "carbonara", "go", "go", "go")
-        ),
+        Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go")),
     )
     await searchable.compact_if_needed(scope, "t1")
 
@@ -656,9 +688,7 @@ async def test_a_memory_says_which_thread_it_came_from(searchable, scope):
     await searchable.save_snapshot(
         scope,
         "t1",
-        Snapshot(
-            messages=thread_about("go", "python", "carbonara", "go", "go", "go")
-        ),
+        Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go")),
     )
     await searchable.compact_if_needed(scope, "t1")
 
@@ -685,9 +715,7 @@ async def test_forgetting_a_thread_makes_its_memories_unsearchable(searchable, s
     await searchable.save_snapshot(
         scope,
         "t1",
-        Snapshot(
-            messages=thread_about("go", "python", "carbonara", "go", "go", "go")
-        ),
+        Snapshot(messages=thread_about("go", "python", "carbonara", "go", "go", "go")),
     )
     await searchable.compact_if_needed(scope, "t1")
 
