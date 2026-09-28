@@ -1,0 +1,19 @@
+# LF everywhere, whatever the platform of whoever checks out.
+#
+# Scripts end up inside Linux containers -- `infra/postgres/init/*.sh` is
+# bind-mounted into Postgres -- and a CRLF there fails at the first `set -e`.
+# Git's own `core.autocrlf` is per machine; this file is per repository.
+* text=auto eol=lf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.wav  binary
+*.mp3  binary
+*.mp4  binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
