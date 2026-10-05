@@ -27,7 +27,7 @@ services:
   postgres:
     # Postgres with pgvector: semantic search sits next to the transcripts it is
     # rebuilt from, instead of in a second datastore.
-    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
@@ -49,7 +49,7 @@ services:
 
   postgres-init:
     # One role and one database per service, on every `up` (see provision.sh).
-    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     entrypoint: ["sh", "/provision/provision.sh"]
     restart: "no"
     environment:
